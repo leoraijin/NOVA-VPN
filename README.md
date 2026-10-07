@@ -1,63 +1,109 @@
-<div align="center">
-
 # NOVA VPN
 
-### VPN-клиент для Windows с понятной маршрутизацией и несколькими стилями оформления
+**Русский** | [English](README.en.md)
 
-[![Latest release](https://img.shields.io/github/v/release/leoraijin/NOVA-VPN?label=Windows&color=7863C5)](https://github.com/leoraijin/NOVA-VPN/releases/latest)
+[![Release](https://img.shields.io/github/v/release/leoraijin/NOVA-VPN?label=release&color=7863C5)](https://github.com/leoraijin/NOVA-VPN/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/leoraijin/NOVA-VPN/total?color=7863C5)](https://github.com/leoraijin/NOVA-VPN/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/leoraijin/NOVA-VPN/releases/latest)
+![C#](https://img.shields.io/badge/C%23-.NET%20Framework%204.8.1-512BD4?logo=dotnet)
+![UI](https://img.shields.io/badge/UI-WPF-7863C5)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
 
-**[Скачать установщик →](https://github.com/leoraijin/NOVA-VPN/releases/latest)** · [Все версии](https://github.com/leoraijin/NOVA-VPN/releases) · [Сообщить о проблеме](https://github.com/leoraijin/NOVA-VPN/issues)
+Графический VPN-клиент для Windows на **C# + WPF** с ядром [**sing-box**](https://github.com/SagerNet/sing-box).
+Добавьте свой профиль или подписку, выберите сервер и нажмите кнопку подключения.
+Настройте маршруты для сайтов и приложений, выберите оформление и проверяйте обновления прямо в клиенте.
 
-</div>
+**[Скачать последнюю версию](https://github.com/leoraijin/NOVA-VPN/releases/latest)** · [Что нового](CHANGELOG.md) · [Помощь](SUPPORT.md)
 
----
+<p align="center">
+  <img src="docs/images/windows-light.png" alt="Главный экран NOVA VPN — Windows Light" width="900">
+</p>
 
-## Установка
+<p align="center">
+  <img src="docs/images/liquid-glass.png" alt="NOVA VPN — Liquid Glass" width="900">
+</p>
 
-1. Откройте [последний выпуск](https://github.com/leoraijin/NOVA-VPN/releases/latest).
-2. В блоке **Assets** скачайте установщик `.exe`.
-3. Запустите его и следуйте инструкциям. Windows может запросить права администратора для работы сетевых компонентов.
-4. Добавьте свой VPN-профиль или ссылку подписки в разделе **Серверы**.
-5. Выберите режим и нажмите **Подключить**.
+Скриншоты версии 2.3.16 сделаны в демонстрационном режиме. Серверы и маршруты — примеры; подключение не запускалось.
 
-Установщик не содержит VPN-ключей, подписок или пользовательских профилей. Для подключения нужен ваш собственный сервер или конфигурация.
+## Что как называется
+
+| Компонент | Назначение |
+| --- | --- |
+| **NOVA VPN** | Интерфейс, профили, маршрутизация, диагностика и обновления |
+| **sing-box** | Сетевое ядро: туннель, DNS и применение маршрутов |
+| **Zapret** | Отдельный компонент обработки трафика для соответствующих режимов |
+| **NOVA-VPN-Android** | [Отдельный Android-клиент](https://github.com/leoraijin/NOVA-VPN-Android) |
+
+Этот репозиторий содержит **Windows-установщики и документацию**. Автоматические архивы GitHub «Source code» содержат файлы репозитория, а не исходники приложения или установщик.
+
+## Платформы и статус
+
+| Платформа | Где скачать | Статус |
+| --- | --- | --- |
+| **Windows** | [GitHub Releases](https://github.com/leoraijin/NOVA-VPN/releases/latest) | Выпущена 2.3.16; проверки — в [STATUS](docs/STATUS.md) |
+| **Android** | [Отдельный репозиторий](https://github.com/leoraijin/NOVA-VPN-Android) | Развивается отдельно; Windows-установщик для телефона не подходит |
 
 ## Возможности
 
-- **Маршрутизация сайтов и приложений.** Правило сайта применяется раньше правила браузера: например, сайт можно направить через VPN, даже если браузер назначен напрямую.
-- **Три режима трафика:** VPN, VPN + Zapret и Zapret.
-- **Профили и подписки.** Импорт конфигураций, выбор сервера и переключение профилей.
-- **Персонализация.** Оформления Liquid Glass, One UI, Windows Light, Windows Dark и Amber Glass.
-- **Диагностика.** Проверка соединения, состояния туннеля и DNS, журнал событий.
-- **Обновления.** Проверка новых выпусков на GitHub из приложения.
+- **Профили и подписки.** Добавление конфигураций, выбор сервера и переключение профилей.
+- **Маршрутизация.** Правила для сайтов и приложений; правило сайта применяется раньше правила браузера.
+- **Режимы.** VPN, VPN + Zapret и Zapret с явным отображением выбранного режима.
+- **Диагностика.** Состояние туннеля и DNS, проверки соединения, журнал событий.
+- **Хранение профилей.** Состояние защищается Windows DPAPI в учётной записи пользователя. Полный экспорт с профилями содержит секреты.
+- **Оформление.** Liquid Glass, One UI, Windows Light, Windows Dark и Amber Glass; карта региона использует палитру темы.
+- **Обновления.** Проверка выпусков GitHub и сводка изменений после обновления.
 
-Названия оформлений обозначают визуальные стили NOVA; это не продукты Apple, Samsung или Microsoft.
+## Быстрый старт
 
-## Обновление клиента
+1. Откройте [последний выпуск](https://github.com/leoraijin/NOVA-VPN/releases/latest) и скачайте **установщик `.exe` из Assets**.
+2. Запустите установщик и выберите папку. Windows может запросить права администратора для сетевых компонентов.
+3. В разделе **Серверы** добавьте ваш профиль или подписку.
+4. Выберите сервер и режим, затем нажмите **Подключить**.
+5. Правила сайтов и приложений задаются в разделе **Маршрутизация**.
 
-Откройте **Настройки → Обновление приложения** или скачайте установщик из [GitHub Releases](https://github.com/leoraijin/NOVA-VPN/releases/latest). Краткая сводка изменений публикуется в описании каждого выпуска.
+Установщик не содержит VPN-ключей или подписок. Для подключения нужна собственная конфигурация сервера.
 
-Обновляйте приложение в прежней папке установки. Перед переносом на другой компьютер используйте экспорт настроек и отдельно перенесите VPN-профили.
+Подробнее: [установка и обновления](docs/INSTALLATION.md) · [приоритет маршрутов](docs/ROUTING.md).
 
-## Другие платформы
+## Оформление
 
-| Клиент | Репозиторий |
+Темы сохраняют расположение основных действий. Изменяются палитра, материалы, форма кнопок и визуальные эффекты.
+
+| Windows Light | Windows Dark |
 | --- | --- |
-| Windows | Этот репозиторий |
-| Android | [NOVA-VPN-Android](https://github.com/leoraijin/NOVA-VPN-Android) |
+| ![Windows Light](docs/images/windows-light.png) | ![Windows Dark](docs/images/windows-dark.png) |
 
-Android развивается отдельно. Windows-установщик не подходит для телефонов и часов.
+| One UI | Amber Glass |
+| --- | --- |
+| ![One UI](docs/images/one-ui.png) | ![Amber Glass](docs/images/amber-glass.png) |
 
-## Если возникла проблема
+[Подробнее о темах](docs/DESIGN.md). Названия стилей обозначают оформления NOVA; приложение не связано с Apple, Samsung или Microsoft.
 
-Создайте [issue](https://github.com/leoraijin/NOVA-VPN/issues) и укажите версию NOVA, версию Windows, выбранный режим и шаги воспроизведения. При необходимости приложите скриншот или обезличенный фрагмент журнала.
+## Как это устроено
 
-**Не публикуйте VPN-ключи, ссылки подписок, пароли и экспорт с профилями.** Перед отправкой журнала удалите секреты и персональные данные.
+```mermaid
+flowchart LR
+  UI["NOVA · WPF"] --> Profiles["Профили и настройки"]
+  UI --> Routing["Правила маршрутизации"]
+  Profiles --> Config["Конфигурация sing-box"]
+  Routing --> Config
+  Config --> Core["sing-box · VPN"]
+  UI --> Zapret["Zapret · выбранный режим"]
+  UI --> Updates["GitHub Releases · обновления"]
+```
 
-## Состав поставки
+## Документация
 
-В установщик включены NOVA VPN, [sing-box](https://github.com/SagerNet/sing-box) и [Zapret](https://github.com/Flowseal/zapret-discord-youtube). Уведомления о сторонних компонентах находятся в папке установки.
+| Файл | О чём |
+| --- | --- |
+| [docs/README.md](docs/README.md) | Оглавление |
+| [docs/INSTALLATION.md](docs/INSTALLATION.md) | Установка, обновление и перенос |
+| [docs/ROUTING.md](docs/ROUTING.md) | Правила сайтов и приложений |
+| [docs/DESIGN.md](docs/DESIGN.md) | Пять тем оформления |
+| [docs/STATUS.md](docs/STATUS.md) | Проверки и ограничения |
+| [SUPPORT.md](SUPPORT.md) | Сообщения об ошибках |
+| [CHANGELOG.md](CHANGELOG.md) | Последние изменения |
+| [THIRD_PARTY.md](THIRD_PARTY.md) | Сторонние компоненты |
 
-Этот репозиторий служит для распространения Windows-выпусков. Архивы **Source code**, автоматически создаваемые GitHub, содержат файлы репозитория и не являются установщиками.
+## Лицензирование
+
+Лицензия на собственный код NOVA VPN в этом репозитории пока не объявлена. Поэтому здесь нет заявления об открытой лицензии на приложение. Сторонние компоненты распространяются на своих условиях; уведомления включены в установщик. Подробнее: [THIRD_PARTY.md](THIRD_PARTY.md).
