@@ -34,7 +34,11 @@ Screenshots use ephemeral demo profiles in version 2.3.16. No VPN connection was
 | Windows | [Installers in Releases](https://github.com/leoraijin/NOVA-VPN/releases/latest) |
 | Android | [Separate Android project](https://github.com/leoraijin/NOVA-VPN-Android) |
 
-This repository distributes Windows installers and documentation. Automatic source archives are not installers or the complete application source tree.
+This repository contains the **Windows client source code**, documentation, and releases with installers. GitHub's “Source code” archives contain the source; download the ready-to-run installer separately from the latest release's Assets.
+
+## Build from source
+
+The client is written in C# and WPF for .NET Framework 4.8.1. Open `NOVA VPN.csproj` in Visual Studio 2022 with the .NET desktop development workload, or build it with MSBuild. Building the complete installer additionally requires external sing-box and Zapret payloads; their licenses and notices are listed in [THIRD_PARTY.md](THIRD_PARTY.md). VPN profiles and user keys are not included in this repository.
 
 ## Getting started
 
@@ -58,4 +62,4 @@ Theme names describe NOVA's styles and do not imply affiliation with Apple, Sams
 
 ## Licensing
 
-A license for NOVA's own code has not been declared here. Third-party components retain their own licenses; the installer includes notices. See [THIRD_PARTY.md](THIRD_PARTY.md).
+NOVA VPN's own code is licensed under the **GNU General Public License version 3 (GPL-3.0-only)**; see [`LICENSE`](LICENSE). Third-party components and data retain their respective licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).

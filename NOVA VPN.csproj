@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{F28F8032-A24D-4BB8-9661-5189EA2D2026}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>NovaVpn</RootNamespace>
+    <AssemblyName>NOVA VPN</AssemblyName>
+    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
+    <LangVersion>latest</LangVersion>
+    <ApplicationIcon>Assets\nova-v2.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="NovaVpn\AppState.cs" />
+	<Compile Include="NovaVpn\ApplicationCatalog.cs" />
+	<Compile Include="NovaVpn\ApplicationRoutingService.cs" />
+    <Compile Include="NovaVpn\AppearanceWindow.cs" />
+    <Compile Include="NovaVpn\AppUpdateService.cs" />
+    <Compile Include="NovaVpn\ReleaseNotesService.cs" />
+    <Compile Include="NovaVpn\ConfigBuilder.cs" />
+    <Compile Include="NovaVpn\StrictDirectRouting.cs" />
+    <Compile Include="NovaVpn\ConnectionHistoryItem.cs" />
+    <Compile Include="NovaVpn\ConnectionVerification.cs" />
+    <Compile Include="NovaVpn\CoreManager.cs" />
+    <Compile Include="NovaVpn\CoreStatus.cs" />
+    <Compile Include="NovaVpn\DiagnosticItem.cs" />
+    <Compile Include="NovaVpn\DiagnosticReport.cs" />
+    <Compile Include="NovaVpn\DiagnosticService.cs" />
+    <Compile Include="NovaVpn\HealthCheckService.cs" />
+    <Compile Include="NovaVpn\ImportResult.cs" />
+    <Compile Include="NovaVpn\ImportWindow.cs" />
+	<Compile Include="NovaVpn\IconFactory.cs" />
+	<Compile Include="NovaVpn\ExternalIpService.cs" />
+    <Compile Include="NovaVpn\LinkParser.cs" />
+    <Compile Include="NovaVpn\LogSanitizer.cs" />
+    <Compile Include="NovaVpn\MainWindow.cs" />
+    <Compile Include="NovaVpn\ConnectionControl.cs" />
+    <Compile Include="NovaVpn\VisualDesign.cs" />
+    <Compile Include="NovaVpn\GlassBackdropLayer.cs" />
+    <Compile Include="NovaVpn\NetworkSpeedResult.cs" />
+    <Compile Include="NovaVpn\NetworkSpeedService.cs" />
+    <Compile Include="NovaVpn\Program.cs" />
+    <Compile Include="NovaVpn\PortableConfigService.cs" />
+	<Compile Include="NovaVpn\ProfileSwitchService.cs" />
+	<Compile Include="NovaVpn\RawConfigRoutingAdapter.cs" />
+    <Compile Include="NovaVpn\RoutingDecision.cs" />
+    <Compile Include="NovaVpn\RoutingInspector.cs" />
+    <Compile Include="NovaVpn\RoutingOverlayService.cs" />
+    <Compile Include="NovaVpn\RoutingListImporter.cs" />
+    <Compile Include="NovaVpn\RoutingPresetService.cs" />
+    <Compile Include="NovaVpn\RoutingSettings.cs" />
+    <Compile Include="NovaVpn\SecurityGuard.cs" />
+    <Compile Include="NovaVpn\ServerHealthResult.cs" />
+    <Compile Include="NovaVpn\ServerGroupingService.cs" />
+    <Compile Include="NovaVpn\ServerRegionMapService.cs" />
+    <Compile Include="NovaVpn\StateStore.cs" />
+    <Compile Include="NovaVpn\SubscriptionManager.cs" />
+    <Compile Include="NovaVpn\SubscriptionUpdateResult.cs" />
+    <Compile Include="NovaVpn\TextPromptWindow.cs" />
+	<Compile Include="NovaVpn\ThemePalette.cs" />
+	<Compile Include="NovaVpn\VisualPreferences.cs" />
+    <Compile Include="NovaVpn\VisualResourceManager.cs" />
+    <Compile Include="NovaVpn\ZapretSettings.cs" />
+    <Compile Include="NovaVpn\ZapretReleaseService.cs" />
+    <Compile Include="NovaVpn\ZapretDomainService.cs" />
+	<Compile Include="NovaVpn\ZapretRoutingTransitionService.cs" />
+    <Compile Include="NovaVpn\ZapretManager.cs" />
+    <Compile Include="NovaVpn\ZapretStrategySelection.cs" />
+    <Compile Include="NovaVpn\VpnProfile.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="app.ico" />
+	<Resource Include="Assets\nova-mark.png" />
+	<Resource Include="Assets\nova-backup.png" />
+	<Resource Include="Assets\nova-v2.ico" />
+	<EmbeddedResource Include="NovaVpn\Assets\ne_110m_admin_0_countries.geojson">
+	  <LogicalName>NovaVpn.Assets.ne_110m_admin_0_countries.geojson</LogicalName>
+	</EmbeddedResource>
+	<EmbeddedResource Include="NovaVpn\Assets\ne_50m_populated_places.geojson">
+	  <LogicalName>NovaVpn.Assets.ne_50m_populated_places.geojson</LogicalName>
+	</EmbeddedResource>
+    <None Include="app.manifest" />
+    <None Include="app-test.manifest" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

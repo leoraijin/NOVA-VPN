@@ -1,0 +1,30 @@
+NOVA VPN 2.1 — visual asset notes
+=================================
+
+Assets\nova-mark.png and derived Assets\nova-v2.ico
+  Prompt summary: centered icon-only NOVA VPN brand mark combining an abstract
+  N, shield and flowing connection path, violet-to-cyan frosted-glass geometry,
+  transparent background, no text or watermark.
+
+Assets\nova-backup.png
+  Prompt summary: companion encrypted-backup icon, crystalline violet-to-cyan
+  vault/archive capsule with a folded ribbon motif, transparent background,
+  no text, padlock, document outline or watermark.
+
+The .ico file is a deterministic format conversion of nova-mark.png for the
+Windows executable. Vector interface icons are code-native WPF geometries and
+were not raster-generated.
+
+Offline server-region map data
+==============================
+
+NovaVpn/Assets/ne_110m_admin_0_countries.geojson
+NovaVpn/Assets/ne_50m_populated_places.geojson
+  Source: Natural Earth, 1:110m Cultural Vectors (country boundaries) and
+  1:50m Cultural Vectors (populated places),
+  https://www.naturalearthdata.com/downloads/110m-cultural-vectors/ and
+  https://www.naturalearthdata.com/downloads/50m-cultural-vectors/
+  The Natural Earth raster and vector datasets are in the public domain under
+  the project's terms of use. The files are embedded in NOVA VPN so the map
+  works offline. Country/city markers are profile-derived display hints, not
+  live IP geolocation or exact VPN data-center coordinates.
