@@ -8,6 +8,19 @@ namespace NovaVpn;
 
 public static class ConfigBuilder
 {
+	public static string BuildProbe(VpnProfile profile, int port, string user, string password)
+	{
+		if (profile == null || profile.Protocol == "sing-box")
+			throw new NotSupportedException("Полная конфигурация проверяется при подключении.");
+		var config = Obj("log", Obj("level", "error"),
+			"dns", Obj("servers", new object[] { Obj("type", "local", "tag", "local-dns") }),
+			"inbounds", new object[] { Obj("type", "mixed", "tag", "map-probe", "listen", "127.0.0.1", "listen_port", port,
+				"users", new object[] { Obj("username", user, "password", password) }) },
+			"outbounds", new object[] { BuildProxy(profile) },
+			"route", Obj("final", "proxy", "auto_detect_interface", true, "default_domain_resolver", "local-dns"));
+		return new JavaScriptSerializer().Serialize(config);
+	}
+
 	public static string Build(VpnProfile profile, RoutingSettings routing)
 	{
 		if (profile == null)

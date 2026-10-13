@@ -65,10 +65,17 @@ public static class ServerRegionMapService
 	private const string CountryResource = "NovaVpn.Assets.ne_110m_admin_0_countries.geojson";
 	private const string CityResource = "NovaVpn.Assets.ne_50m_populated_places.geojson";
 	private static readonly Lazy<List<MapCountry>> Countries = new Lazy<List<MapCountry>>(LoadCountries, true);
-	private static readonly Lazy<List<MapCity>> Cities = new Lazy<List<MapCity>>(LoadCities, true);
+	private static readonly Lazy<List<MapCity>> Cities = new Lazy<List<MapCity>>(() => LoadCities().OrderByDescending(city => Math.Max((city.Name ?? "").Length, (city.EnglishName ?? "").Length)).ToList(), true);
+	private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ServerRegionSelection> RegionCache = new System.Collections.Concurrent.ConcurrentDictionary<string, ServerRegionSelection>(StringComparer.Ordinal);
 	private static readonly Regex IsoToken = new Regex(@"(?<![A-Za-z])([A-Za-z]{2})(?![A-Za-z])", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
 	public static ServerRegionSelection Resolve(VpnProfile profile)
+	{
+		if (RegionCache.Count > 4096) RegionCache.Clear();
+		return RegionCache.GetOrAdd(profile?.Name ?? "", name => ResolveUncached(new VpnProfile { Name = name }));
+	}
+
+	private static ServerRegionSelection ResolveUncached(VpnProfile profile)
 	{
 		List<MapCountry> countries = Countries.Value;
 		string profileName = profile?.Name ?? "";
@@ -176,10 +183,49 @@ public static class ServerRegionMapService
 	}
 
 	private static bool IsHighlighted(MapCountry country, ServerRegionSelection selection)
+	// Interactive maps reuse immutable geographic geometry; checks only update markers.
 	{
 		if (selection == null) return false;
 		if (selection.IsEuropeRegion) return string.Equals(country.Continent, "Europe", StringComparison.OrdinalIgnoreCase);
 		return selection.HasCountry && string.Equals(country.IsoCode, selection.IsoCode, StringComparison.OrdinalIgnoreCase);
+	}
+
+	public static InteractiveServerMap BuildInteractiveCanvas(VpnProfile[] profiles, VpnProfile selectedProfile, double width, double height,
+		ThemePalette palette, Dictionary<string, ServerMapHealth> health, Action<VpnProfile> select, bool world)
+	{
+		var selection = Resolve(selectedProfile);
+		var viewport = CreateViewport(world ? null : selection, width, height);
+		var map = new InteractiveServerMap(palette, health, selectedProfile?.Id, select) { Width = width, Height = height };
+		var regions = profiles.Select(p => new { Profile = p, Region = Resolve(p) }).Where(x => x.Region.HasCountry).ToArray();
+		var highlights = new Dictionary<string, Action<bool>>();
+		foreach (var country in Countries.Value)
+		{
+			var geometry = CreateGeometry(country, viewport, width, height);
+			if (geometry == null || geometry.Bounds.IsEmpty) continue;
+			var bounds = geometry.Bounds;
+			if (bounds.Right < 0 || bounds.Bottom < 0 || bounds.Left > width || bounds.Top > height) continue;
+			geometry.Freeze();
+			var normal = new SolidColorBrush(Color.FromArgb((byte)(IsHighlighted(country, selection) ? 150 : 50), palette.Accent.R, palette.Accent.G, palette.Accent.B));
+			var hover = new SolidColorBrush(Color.FromArgb(200, palette.Accent.R, palette.Accent.G, palette.Accent.B));
+			var shape = new WpfPath { Data = geometry, Fill = normal, Stroke = new SolidColorBrush(Color.FromArgb(105, palette.Text.R, palette.Text.G, palette.Text.B)), StrokeThickness = 0.65, Tag = country.IsoCode };
+			var local = regions.Where(x => x.Region.IsoCode == country.IsoCode).Select(x => x.Profile).ToArray();
+			Action<bool> highlight = on => { shape.Fill = on ? hover : normal; shape.StrokeThickness = on ? 1.5 : 0.65; };
+			highlights[country.IsoCode] = highlight;
+			shape.Cursor = local.Length > 0 ? System.Windows.Input.Cursors.Hand : System.Windows.Input.Cursors.Arrow;
+			shape.MouseEnter += (s, e) => { highlight(true); shape.ToolTip = country.Name + "\n" + map.Summary(local); };
+			shape.MouseLeave += (s, e) => highlight(false);
+			shape.MouseLeftButtonUp += (s, e) => { e.Handled = true; map.Choose(shape, local); };
+			map.Children.Add(shape);
+		}
+		foreach (var group in regions.GroupBy(x => x.Region.IsoCode + ":" + x.Region.CityName))
+		{
+			var region = group.First().Region;
+			Action<bool> highlight = highlights.TryGetValue(region.IsoCode, out var action) ? action : on => { };
+			map.AddServerNode(Project(region.Longitude, region.Latitude, viewport), region.CountryName,
+				group.Select(x => x.Profile).ToArray(), highlight);
+		}
+		map.RefreshStatus();
+		return map;
 	}
 
 	private static Viewport CreateViewport(ServerRegionSelection selection, double width, double height)
@@ -318,10 +364,9 @@ public static class ServerRegionMapService
 	private static MapCity FindCity(string profileName, MapCountry country, List<MapCity> cities)
 	{
 		if (string.IsNullOrWhiteSpace(profileName)) return null;
-		MapCity[] candidates = cities
+		IEnumerable<MapCity> candidates = cities
 			.Where(city => country == null || string.IsNullOrWhiteSpace(city.Iso3) || string.Equals(city.Iso3, country.Iso3, StringComparison.OrdinalIgnoreCase))
-			.OrderByDescending(city => Math.Max((city.Name ?? "").Length, (city.EnglishName ?? "").Length))
-			.ToArray();
+			;
 		foreach (MapCity city in candidates)
 		{
 			if (MatchesName(profileName, city.Name) || MatchesName(profileName, city.EnglishName)) return city;

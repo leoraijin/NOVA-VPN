@@ -10,7 +10,7 @@ if($null -eq $stream){throw 'Missing embedded payload'}
 $zip=[IO.Compression.ZipArchive]::new($stream,[IO.Compression.ZipArchiveMode]::Read)
 try {
     $names=@($zip.Entries | ForEach-Object {$_.FullName.Replace('\','/')})
-    foreach($required in @('NOVA VPN.exe','core/sing-box.exe','zapret/current/general.bat','zapret/current/nova-version.txt')) {
+    foreach($required in @('NOVA VPN.exe','core/sing-box.exe','zapret/current/general.bat','zapret/current/nova-version.txt','LICENSE','THIRD_PARTY.md')) {
         if($names -notcontains $required){throw ('Missing component: '+$required)}
     }
     foreach($name in $names) {

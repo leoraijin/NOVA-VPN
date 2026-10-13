@@ -26,6 +26,9 @@ Screenshots use ephemeral demo profiles in version 2.3.16. No VPN connection was
 - Settings protected with Windows DPAPI under the current user account.
 - Liquid Glass, One UI, Windows Light, Windows Dark and Amber Glass themes.
 - GitHub update checks and release summaries.
+- Interactive server map with country hover, profile selection, and background HTTPS checks. Open it from the home page's map button.
+
+Glowing markers indicate two successful HTTPS requests through the profile within the last three minutes. Locations are derived from profile names. Arbitrary full sing-box configurations are not automatically tested on the map; profiles with unknown locations remain available in a separate list.
 
 ## Platforms
 

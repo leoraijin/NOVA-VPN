@@ -50,6 +50,8 @@ $compilerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Не удалось собрать компонент удаления.' }
 
 Copy-Item -LiteralPath $AppOutput -Destination (Join-Path $payload 'NOVA VPN.exe')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $payload 'LICENSE')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY.md') -Destination (Join-Path $payload 'THIRD_PARTY.md')
 $payloadAssets = Join-Path $payload 'Assets'
 New-Item -ItemType Directory -Path $payloadAssets -Force | Out-Null
 foreach ($assetName in @('nova-mark.png','nova-backup.png','nova-v2.ico')) {
@@ -67,6 +69,14 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
     }
 }
 $releaseNotes = @'
+NOVA VPN 2.3.18 — 13 октября 2026
+==================================
+• Главная → карта региона → Все серверы на карте: выбор сервера по точке или стране.
+• Подсветка страны при наведении, список серверов одной страны, задержка и свежесть проверки в подсказке.
+• Яркий маркер означает два успешных HTTPS-запроса через профиль; результаты старше 3 минут становятся тусклыми.
+• Проверки идут в фоне без TUN и изменения действующего подключения; для полных конфигураций проверка выполняется при подключении.
+• Обновления: Настройки → Обновление приложения.
+
 NOVA VPN 2.3.17 — 7 октября 2026
 ==================================
 • Сайты «Напрямую», включая поддомены, имеют отдельный прямой выход и локальный DNS без возврата на VPN.
@@ -247,7 +257,7 @@ uses a packet-filter driver.
 }
 
 $instructions = @'
-NOVA VPN 2.3.17 — установка
+NOVA VPN 2.3.18 — установка
 =========================
 
 Запустите «NOVA VPN Setup.exe» и выберите папку установки. Windows запросит
@@ -275,7 +285,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.17.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.18.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

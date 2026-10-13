@@ -138,6 +138,13 @@ public sealed class MainWindow : Window
 	private readonly DispatcherTimer subscriptionTimer;
 
 	private readonly DispatcherTimer visualTimer;
+	private readonly DispatcherTimer mapHealthTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+	private readonly System.Threading.CancellationTokenSource mapHealthCancellation = new System.Threading.CancellationTokenSource();
+	private readonly Dictionary<string, ServerMapHealth> mapHealth = new Dictionary<string, ServerMapHealth>();
+	private InteractiveServerMap liveServerMap, expandedServerMap;
+	private Window serverMapWindow;
+	private bool mapHealthBusy;
+	private int mapHealthCursor;
 
 	private readonly List<double> downloadSamples = new List<double>();
 
@@ -253,6 +260,8 @@ public sealed class MainWindow : Window
 		}
 		visualTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
 		visualTimer.Tick += delegate { UpdateLiveVisuals(); };
+		mapHealthTimer.Tick += async delegate { await RefreshMapHealthAsync(); };
+		if (!snapshotMode) base.Loaded += async delegate { mapHealthTimer.Start(); await RefreshMapHealthAsync(); };
 		base.Title = "NOVA VPN";
 		// Explicit window icon is also used when Windows pins a running WPF window.
 		// Do not depend on the shell extracting it from a custom-chrome window.
@@ -336,6 +345,8 @@ public sealed class MainWindow : Window
 			reconnectTimer.Stop();
 			subscriptionTimer.Stop();
 			visualTimer.Stop();
+			mapHealthTimer.Stop();
+			mapHealthCancellation.Cancel();
 			if (!snapshotMode)
 			{
 				NetworkChange.NetworkAvailabilityChanged -= NetworkAvailabilityChanged;
@@ -1140,6 +1151,11 @@ public sealed class MainWindow : Window
 		Button check = SmallButton("Проверка обновлений"); check.Margin = new Thickness(0, 0, 8, 8); check.Click += async delegate { await CheckZapretUpdatesAsync(); }; actions.Children.Add(check);
 		Button update = SmallButton("Обновить Zapret"); update.Margin = new Thickness(0, 0, 0, 8); update.Click += async delegate { await UpdateZapretAsync(); }; actions.Children.Add(update);
 		left.Children.Add(actions);
+		if (!showRegionMap) {
+			var mapButton = SmallButton("Карта серверов ↗");
+			mapButton.Click += (s, e) => ShowServerMap();
+			left.Children.Add(mapButton);
+		}
 		grid.Children.Add(left);
 		if (showRegionMap)
 		{
@@ -1180,13 +1196,90 @@ public sealed class MainWindow : Window
 		else
 			panel.Children.Add(T("Расположение по данным профиля", 9, Muted));
 
-		Canvas map = ServerRegionMapService.BuildThemedCanvas(region, 250, 132, palette);
+		InteractiveServerMap map = ServerRegionMapService.BuildInteractiveCanvas(state.Profiles.ToArray(), profile, 250, 132, palette, mapHealth,
+			async target => await SelectProfileAsync(target), false);
+		liveServerMap = map;
 		map.Margin = new Thickness(0, 5, 0, 0);
 		System.Windows.Automation.AutomationProperties.SetName(map, region.HasCountry
 			? "Географическая карта региона VPN-сервера: " + region.CountryName + (region.CityName.Length > 0 ? ", " + region.CityName : "")
 			: "Офлайн-карта мира; страна сервера в профиле не определена");
 		panel.Children.Add(map);
+		var expand = new Button { Content = "Все серверы на карте ↗", FontSize = 10, Padding = new Thickness(5),
+			Margin = new Thickness(0, 4, 0, 0), Background = new SolidColorBrush(Surface), Foreground = new SolidColorBrush(TextColor) };
+		expand.Click += (s, e) => ShowServerMap();
+		panel.Children.Add(expand);
 		return panel;
+	}
+
+	private void ShowServerMap()
+	{
+		if (serverMapWindow != null) { serverMapWindow.Activate(); return; }
+		var dialog = new Window { Owner = this, Title = "Серверы на карте", Width = Math.Min(940, SystemParameters.WorkArea.Width),
+			Height = Math.Min(620, SystemParameters.WorkArea.Height), MinWidth = 480, MinHeight = 320,
+			WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = new SolidColorBrush(Bg), Foreground = new SolidColorBrush(TextColor) };
+		var grid = new Grid { Margin = new Thickness(20) };
+		grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+		grid.RowDefinitions.Add(new RowDefinition());
+		grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+		var header = new StackPanel();
+		header.Children.Add(T("Серверы на карте · нажмите точку или страну", 18, TextColor, FontWeights.SemiBold));
+		grid.Children.Add(header);
+		expandedServerMap = ServerRegionMapService.BuildInteractiveCanvas(state.Profiles.ToArray(), SelectedProfile(), 820, 400, palette, mapHealth,
+			async target => { dialog.Close(); await SelectProfileAsync(target); }, true);
+		var view = new Viewbox { Child = expandedServerMap, Stretch = Stretch.Uniform, Margin = new Thickness(0, 12, 0, 12) };
+		var unknown = state.Profiles.Where(p => !ServerRegionMapService.Resolve(p).HasCountry).ToArray();
+		if (unknown.Length > 0) {
+			var withoutRegion = SmallButton("Без указанной страны: " + unknown.Length + " · выбрать из списка");
+			withoutRegion.Click += (s, e) => expandedServerMap?.Choose(withoutRegion, unknown);
+			header.Children.Add(withoutRegion);
+		}
+		Grid.SetRow(view, 1); grid.Children.Add(view);
+		var caption = T("Яркие точки: два успешных HTTPS-запроса через профиль. Серые: не проверен или недоступен.\nРезультаты обновляются в фоне; через 3 минуты считаются устаревшими. Координаты определены по названию профиля.", 11, Muted);
+		caption.TextWrapping = TextWrapping.Wrap;
+		Grid.SetRow(caption, 2); grid.Children.Add(caption);
+		dialog.Content = grid;
+		serverMapWindow = dialog;
+		dialog.Closed += (s, e) => { expandedServerMap = null; serverMapWindow = null; };
+		dialog.Show();
+		_ = RefreshMapHealthAsync();
+	}
+
+	private async Task RefreshMapHealthAsync()
+	{
+		liveServerMap?.RefreshStatus(); expandedServerMap?.RefreshStatus();
+		if (snapshotMode || closing || mapHealthBusy || !IsVisible || WindowState == WindowState.Minimized ||
+			(currentPage != "home" && expandedServerMap == null) || state.Profiles.Count == 0) return;
+		mapHealthBusy = true;
+		try
+		{
+			var profiles = state.Profiles.ToArray();
+			var candidates = new List<VpnProfile>();
+			for (int i = 0; i < profiles.Length && candidates.Count < 8; i++)
+			{
+				var profile = profiles[mapHealthCursor++ % profiles.Length];
+				if (!mapHealth.TryGetValue(profile.Id, out var checkedResult) ||
+					(checkedResult.Supported && DateTime.UtcNow - checkedResult.CheckedUtc > TimeSpan.FromSeconds(90))) candidates.Add(profile);
+			}
+			using (var gate = new System.Threading.SemaphoreSlim(2))
+			{
+				var token = mapHealthCancellation.Token;
+				string corePath = core.CorePath, directory = System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "map-probes");
+				var tasks = candidates.Select(async profile => {
+					await gate.WaitAsync(token);
+					try {
+						var value = await Task.Run(() => ServerMapHealthService.TestAsync(profile, corePath, directory, token), token);
+						if (!closing && state.Profiles.Any(p => ReferenceEquals(p, profile))) {
+							mapHealth[profile.Id] = value;
+							liveServerMap?.RefreshStatus(); expandedServerMap?.RefreshStatus();
+						}
+					} finally { gate.Release(); }
+				}).ToArray();
+				await Task.WhenAll(tasks);
+			}
+		}
+		catch (OperationCanceledException) { }
+		catch (Exception ex) { Debug.WriteLine("Map checks: " + LogSanitizer.Sanitize(ex.Message)); }
+		finally { mapHealthBusy = false; }
 	}
 
 	private static string TrafficModeLabel(string mode)
@@ -1675,7 +1768,7 @@ public sealed class MainWindow : Window
 		applicationCatalog = new List<ApplicationEntry>
 		{
 			new ApplicationEntry { Name = "Браузер", ExecutablePath = @"C:\Program Files\Browser\browser.exe", Source = "Пример" },
-			new ApplicationEntry { Name = "Discord", ExecutablePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Discord", "discord.exe"), Source = "Пример" },
+			new ApplicationEntry { Name = "Discord", ExecutablePath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Discord", "discord.exe"), Source = "Пример" },
 			new ApplicationEntry { Name = "Игра", ExecutablePath = @"C:\Games\Game\game.exe", Source = "Пример" }
 		};
 		state.Routing.ProxyProcessPaths.Add(applicationCatalog[1].ExecutablePath);
