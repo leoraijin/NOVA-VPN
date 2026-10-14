@@ -1234,7 +1234,15 @@ public sealed class MainWindow : Window
 		grid.Children.Add(header);
 		expandedServerMap = ServerRegionMapService.BuildInteractiveCanvas(state.Profiles.ToArray(), SelectedProfile(), 820, 400, palette, mapHealth,
 			async target => { dialog.Close(); await SelectProfileAsync(target); }, true);
-		var view = new Viewbox { Child = expandedServerMap, Stretch = Stretch.Uniform, Margin = new Thickness(0, 12, 0, 12) };
+		var viewport = new ServerMapViewport(expandedServerMap);
+		var view = new Viewbox { Child = viewport, Stretch = Stretch.Uniform, Margin = new Thickness(0, 12, 0, 12) };
+		var controls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+		Button zoomIn = SmallButton("+"), zoomOut = SmallButton("−"), resetMap = SmallButton("Вся карта");
+		zoomIn.ToolTip = "Приблизить · Ctrl + колесо вверх"; zoomOut.ToolTip = "Отдалить · Ctrl + колесо вниз";
+		zoomIn.Click += (s, e) => viewport.ZoomAt(new Point(viewport.Width / 2, viewport.Height / 2), 1.2);
+		zoomOut.Click += (s, e) => viewport.ZoomAt(new Point(viewport.Width / 2, viewport.Height / 2), 1 / 1.2);
+		resetMap.Click += (s, e) => viewport.ResetView();
+		controls.Children.Add(zoomIn); controls.Children.Add(zoomOut); controls.Children.Add(resetMap); header.Children.Add(controls);
 		var unknown = state.Profiles.Where(p => !ServerRegionMapService.Resolve(p).HasCountry).ToArray();
 		if (unknown.Length > 0) {
 			var withoutRegion = SmallButton("Без указанной страны: " + unknown.Length + " · выбрать из списка");
@@ -1242,7 +1250,7 @@ public sealed class MainWindow : Window
 			header.Children.Add(withoutRegion);
 		}
 		Grid.SetRow(view, 1); grid.Children.Add(view);
-		var caption = T("Яркие точки: два успешных HTTPS-запроса через профиль. Серые: не проверен или недоступен.\nРезультаты обновляются в фоне; через 3 минуты считаются устаревшими. Координаты определены по названию профиля.", 11, Muted);
+		var caption = T("Ctrl + колёсико — масштаб · перетащите карту левой кнопкой мыши · клик — выбор сервера.\nЗелёный — свежий HTTPS-тест, красный — ошибка, серый — нет свежей проверки. Координаты определены по названию профиля.", 11, Muted);
 		caption.TextWrapping = TextWrapping.Wrap;
 		Grid.SetRow(caption, 2); grid.Children.Add(caption);
 		dialog.Content = grid;

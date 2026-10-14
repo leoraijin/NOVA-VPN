@@ -69,8 +69,10 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
     }
 }
 $releaseNotes = @'
-NOVA VPN 2.3.19 — 14 октября 2026
+NOVA VPN 2.3.20 — 14 октября 2026
 ==================================
+• Карта серверов: Ctrl + колёсико меняет масштаб под курсором, перетаскивание левой кнопкой перемещает карту.
+• Кнопки +/− меняют масштаб, «Вся карта» сбрасывает положение. Перетаскивание не переключает VPN-сервер.
 • Зелёная точка: свежая успешная HTTPS-проверка. Красная: проверка не прошла. Серая: нет свежего результата.
 • Выбранный сервер проверяется первым, подтверждённые рабочие профили идут выше остальных в меню карты.
 • При ошибке активного соединения карта и главная панель показывают проблему, а не «Вы защищены» или бесконечное «проверяется».
@@ -257,7 +259,7 @@ uses a packet-filter driver.
 }
 
 $instructions = @'
-NOVA VPN 2.3.19 — установка
+NOVA VPN 2.3.20 — установка
 =========================
 
 Запустите «NOVA VPN Setup.exe» и выберите папку установки. Windows запросит
@@ -285,7 +287,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.19.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.20.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

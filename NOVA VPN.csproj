@@ -58,6 +58,7 @@
     <Compile Include="NovaVpn\ConfigBuilder.cs" />
 	<Compile Include="NovaVpn\ServerMapHealthService.cs" />
 	<Compile Include="NovaVpn\InteractiveServerMap.cs" />
+	<Compile Include="NovaVpn\ServerMapViewport.cs" />
     <Compile Include="NovaVpn\StrictDirectRouting.cs" />
     <Compile Include="NovaVpn\ConnectionHistoryItem.cs" />
     <Compile Include="NovaVpn\ConnectionVerification.cs" />

@@ -17,6 +17,7 @@ public sealed class InteractiveServerMap : Canvas
 	private readonly ThemePalette palette;
 	private readonly Action<VpnProfile> select;
 	private readonly string selectedId;
+	private double markerZoom = 1;
 
 	public InteractiveServerMap(ThemePalette palette, Dictionary<string, ServerMapHealth> health, string selectedId, Action<VpnProfile> select)
 	{
@@ -77,6 +78,20 @@ public sealed class InteractiveServerMap : Canvas
 			node.Dot.Opacity = verified || failed ? 1 : 0.55;
 			node.Halo.Fill = new SolidColorBrush(Color.FromArgb((byte)(verified ? (latency == best ? 105 : 55) : failed ? 45 : 0), color.R, color.G, color.B));
 			node.Dot.ToolTip = node.Country + (verified && latency == best ? " · самый быстрый из проверенных" : "") + "\n" + Summary(node.Profiles) + "\nКоординаты по названию профиля";
+		}
+	}
+
+	public void SetMarkerScale(double zoom)
+	{
+		if (markerZoom == zoom) return;
+		markerZoom = zoom;
+		foreach (var node in nodes) {
+			var dot = node.Dot.RenderTransform as ScaleTransform;
+			if (dot == null) node.Dot.RenderTransform = dot = new ScaleTransform(1, 1, 8, 8);
+			dot.ScaleX = dot.ScaleY = 1 / zoom;
+			var halo = node.Halo.RenderTransform as ScaleTransform;
+			if (halo == null) node.Halo.RenderTransform = halo = new ScaleTransform(1, 1, 13, 13);
+			halo.ScaleX = halo.ScaleY = 1 / zoom;
 		}
 	}
 }
