@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+		new ReleaseNoteEntry(new Version(2, 3, 25),
+			"Настройки → Другие продукты: ссылки на отдельные GitHub-репозитории NOVA для Android и Wear OS.",
+			"Обновления: Настройки → Обновление приложения."),
 		new ReleaseNoteEntry(new Version(2, 3, 24),
 			"Маршрутизация приложений, доменов и дополнительных правил перестраивается в одну колонку на компактном окне, поэтому подписи и переключатели не обрезаются.",
 			"Округлые переключатели унифицированы для приложений и настроек маршрутизации.",

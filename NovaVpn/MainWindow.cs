@@ -3333,12 +3333,15 @@ public sealed partial class MainWindow : Window
 		border3.CornerRadius = Radius(15.0);
 		Border border4 = border3;
 		StackPanel stackPanel4 = new StackPanel();
-		stackPanel4.Children.Add(T("NOVA VPN  2.3.15", 12.0, TextColor, FontWeights.SemiBold));
+		stackPanel4.Children.Add(T("NOVA VPN  " + ReleaseNotesService.CurrentVersionText, 12.0, TextColor, FontWeights.SemiBold));
 		stackPanel4.Children.Add(T(core.IsCoreInstalled ? "VPN-ядро установлено · Windows TUN" : "VPN-ядро не найдено", 9.5, core.IsCoreInstalled ? Green : Danger));
 		stackPanel4.Children.Add(T("Профили хранятся зашифрованно в вашей учётной записи Windows.", 9.5, Muted));
 		stackPanel4.Children.Add(T("Горячая клавиша подключения: Ctrl + Alt + V", 9.5, Muted));
 		border4.Child = stackPanel4;
 		stackPanel2.Children.Add(border4);
+		stackPanel2.Children.Add(SectionTitle("ДРУГИЕ ПРОДУКТЫ", new Thickness(0.0, 20.0, 0.0, 10.0)));
+		stackPanel2.Children.Add(ProductLinkCard("NOVA VPN для Android", "Клиент для телефона · исходники и APK на GitHub", "https://github.com/leoraijin/NOVA-VPN-Android"));
+		stackPanel2.Children.Add(ProductLinkCard("NOVA VPN для Wear OS", "Клиент для часов · исходники и APK на GitHub", "https://github.com/leoraijin/NOVA-VPN-WearOS"));
 		stackPanel2.Children.Add(SectionTitle("ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ", new Thickness(0.0, 20.0, 0.0, 10.0)));
 		stackPanel2.Children.Add(SettingCard("Предлагать обновления при запуске", "Проверка GitHub выполняется всегда; предложение можно скрыть", !state.SuppressUpdatePrompts, delegate { state.SuppressUpdatePrompts = !state.SuppressUpdatePrompts; StateStore.Save(state); Navigate("settings"); }));
 		Border updateCard = new Border
@@ -3563,6 +3566,28 @@ public sealed partial class MainWindow : Window
 			panel.Children.Add(new Border { Child = rows, CornerRadius = new CornerRadius(16), Background = new SolidColorBrush(Surface), Margin = new Thickness(0, 0, 0, 9) });
 			i = end;
 		}
+	}
+
+	private Border ProductLinkCard(string title, string caption, string url)
+	{
+		Border card = new Border { Padding = new Thickness(16), Margin = new Thickness(0, 0, 0, 9),
+			Background = new SolidColorBrush(Surface), BorderBrush = new SolidColorBrush(BorderColor),
+			BorderThickness = new Thickness(1), CornerRadius = Radius(14) };
+		StackPanel content = new StackPanel();
+		TextBlock heading = T(title, 12, TextColor, FontWeights.SemiBold); heading.TextWrapping = TextWrapping.Wrap;
+		TextBlock description = T(caption, 9.5, Muted); description.TextWrapping = TextWrapping.Wrap;
+		content.Children.Add(heading); content.Children.Add(description);
+		Button open = SmallButton("Открыть на GitHub ↗");
+		open.HorizontalAlignment = HorizontalAlignment.Left; open.Margin = new Thickness(0, 10, 0, 0);
+		open.ToolTip = url; AutomationProperties.SetName(open, title + " · открыть на GitHub");
+		open.Click += delegate {
+			if (snapshotMode) return;
+			try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+			catch { Toast("Не удалось открыть GitHub. Проверьте браузер по умолчанию.", Warning); }
+		};
+		content.Children.Add(open); card.Child = content;
+		VisualDesign.ApplyGlassSurface(card, state.Visual);
+		return card;
 	}
 
 	private Border SettingCard(string title, string caption, bool value, Action action)
