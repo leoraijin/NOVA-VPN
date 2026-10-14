@@ -24,8 +24,16 @@ public sealed class ServerMapHealth
 
 public static class ServerMapHealthService
 {
+	private static readonly SemaphoreSlim ProbeSlots = new SemaphoreSlim(2);
 	// The probe has no TUN, no direct outbound, and no proxy bypass/fallback.
 	public static async Task<ServerMapHealth> TestAsync(VpnProfile profile, string corePath, string runtimeDirectory, CancellationToken token)
+	{
+		await ProbeSlots.WaitAsync(token).ConfigureAwait(false);
+		try { return await TestCoreAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false); }
+		finally { ProbeSlots.Release(); }
+	}
+
+	private static async Task<ServerMapHealth> TestCoreAsync(VpnProfile profile, string corePath, string runtimeDirectory, CancellationToken token)
 	{
 		var result = new ServerMapHealth();
 		if (profile == null || profile.Protocol == "sing-box")

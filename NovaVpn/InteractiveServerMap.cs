@@ -45,7 +45,7 @@ public sealed class InteractiveServerMap : Canvas
 			+ (profiles.Length > 6 ? "\nЕщё " + (profiles.Length - 6) + " · нажмите для выбора" : "\nНажмите для выбора");
 	}
 	private string Status(VpnProfile p) => health.TryGetValue(p.Id, out var value) ? value.Label : "Не проверен";
-	private int Score(VpnProfile p) => health.TryGetValue(p.Id, out var value) && value.Success && value.IsFresh ? value.LatencyMs : int.MaxValue;
+	private int Score(VpnProfile p) => health.TryGetValue(p.Id, out var value) && value.Supported && value.IsFresh ? value.Success ? value.LatencyMs : int.MaxValue : int.MaxValue - 1;
 
 	public void AddServerNode(Point point, string country, VpnProfile[] profiles, Action<bool> highlight)
 	{
@@ -64,18 +64,18 @@ public sealed class InteractiveServerMap : Canvas
 
 	public void RefreshStatus()
 	{
-		int best = nodes.SelectMany(n => n.Profiles).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
+		int best = nodes.SelectMany(n => n.Profiles).Where(p => health.TryGetValue(p.Id, out var h) && h.Supported && h.IsFresh && h.Success).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
 		foreach (var node in nodes)
 		{
-			int latency = node.Profiles.Select(Score).DefaultIfEmpty(int.MaxValue).Min();
+			int latency = node.Profiles.Where(p => health.TryGetValue(p.Id, out var h) && h.Supported && h.IsFresh && h.Success).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
 			bool verified = latency < int.MaxValue;
 			bool active = node.Profiles.Any(p => p.Id == selectedId);
 			bool failed = node.Profiles.All(p => health.TryGetValue(p.Id, out var value) && value.Supported && value.IsFresh && !value.Success);
-			Color color = verified ? palette.AccentLight : palette.Text;
+			Color color = verified ? Color.FromRgb(45, 174, 112) : failed ? Color.FromRgb(224, 76, 83) : palette.Muted;
 			node.Dot.Fill = new SolidColorBrush(color);
 			node.Dot.Stroke = new SolidColorBrush(active ? palette.Accent : palette.Surface);
-			node.Dot.Opacity = verified ? 1 : failed ? 0.28 : 0.48;
-			node.Halo.Fill = new SolidColorBrush(Color.FromArgb((byte)(verified ? (latency == best ? 105 : 55) : 0), palette.Accent.R, palette.Accent.G, palette.Accent.B));
+			node.Dot.Opacity = verified || failed ? 1 : 0.55;
+			node.Halo.Fill = new SolidColorBrush(Color.FromArgb((byte)(verified ? (latency == best ? 105 : 55) : failed ? 45 : 0), color.R, color.G, color.B));
 			node.Dot.ToolTip = node.Country + (verified && latency == best ? " · самый быстрый из проверенных" : "") + "\n" + Summary(node.Profiles) + "\nКоординаты по названию профиля";
 		}
 	}

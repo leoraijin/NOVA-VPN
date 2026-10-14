@@ -208,10 +208,17 @@ public sealed class MainWindow : Window
 			StateStore.Save(state);
 		}
 		core.StatusChanged += CoreStatusChanged;
-		core.VerificationChanged += delegate
+		core.VerificationChanged += delegate(ConnectionVerification verification)
 		{
 			base.Dispatcher.BeginInvoke((Action)delegate
 			{
+				if (closing || !ReferenceEquals(core.Verification, verification)) return;
+				if (verification.Completed && verification.ProfileProbe?.Supported == true && !string.IsNullOrEmpty(verification.ProfileId)) {
+					var health = verification.ProfileProbe;
+					if (!verification.InternetOk) { health.Success = false; health.Message = "Туннель включён, но контрольный HTTPS-запрос не прошёл"; }
+					mapHealth[verification.ProfileId] = health;
+					liveServerMap?.RefreshStatus(); expandedServerMap?.RefreshStatus();
+				}
 				if (!closing && currentPage == "home") UpdateVerificationDisplay();
 			});
 		};
@@ -260,7 +267,7 @@ public sealed class MainWindow : Window
 		}
 		visualTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
 		visualTimer.Tick += delegate { UpdateLiveVisuals(); };
-		mapHealthTimer.Tick += async delegate { await RefreshMapHealthAsync(); };
+		mapHealthTimer.Tick += async delegate { await RefreshMapHealthAsync(); if (!closing && IsVisible && WindowState != WindowState.Minimized && (currentPage == "home" || expandedServerMap != null) && core.Status == CoreStatus.Connected) await core.VerifyConnectionAsync(); };
 		if (!snapshotMode) base.Loaded += async delegate { mapHealthTimer.Start(); await RefreshMapHealthAsync(); };
 		base.Title = "NOVA VPN";
 		// Explicit window icon is also used when Windows pins a running WPF window.
@@ -1223,6 +1230,7 @@ public sealed class MainWindow : Window
 		grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 		var header = new StackPanel();
 		header.Children.Add(T("Серверы на карте · нажмите точку или страну", 18, TextColor, FontWeights.SemiBold));
+		header.Children.Add(T("Зелёный — HTTPS работает · красный — проверка не прошла · серый — нет свежей проверки", 11, Muted));
 		grid.Children.Add(header);
 		expandedServerMap = ServerRegionMapService.BuildInteractiveCanvas(state.Profiles.ToArray(), SelectedProfile(), 820, 400, palette, mapHealth,
 			async target => { dialog.Close(); await SelectProfileAsync(target); }, true);
@@ -1254,9 +1262,13 @@ public sealed class MainWindow : Window
 		{
 			var profiles = state.Profiles.ToArray();
 			var candidates = new List<VpnProfile>();
+			var selected = SelectedProfile();
+			if (selected != null && (!mapHealth.TryGetValue(selected.Id, out var selectedHealth) ||
+				(selectedHealth.Supported && DateTime.UtcNow - selectedHealth.CheckedUtc > TimeSpan.FromSeconds(90)))) candidates.Add(selected);
 			for (int i = 0; i < profiles.Length && candidates.Count < 8; i++)
 			{
 				var profile = profiles[mapHealthCursor++ % profiles.Length];
+				if (candidates.Contains(profile)) continue;
 				if (!mapHealth.TryGetValue(profile.Id, out var checkedResult) ||
 					(checkedResult.Supported && DateTime.UtcNow - checkedResult.CheckedUtc > TimeSpan.FromSeconds(90))) candidates.Add(profile);
 			}
@@ -1269,7 +1281,10 @@ public sealed class MainWindow : Window
 					try {
 						var value = await Task.Run(() => ServerMapHealthService.TestAsync(profile, corePath, directory, token), token);
 						if (!closing && state.Profiles.Any(p => ReferenceEquals(p, profile))) {
-							mapHealth[profile.Id] = value;
+							if (core.Status == CoreStatus.Connected && core.Verification.Completed && core.Verification.ProfileId == profile.Id && !core.Verification.InternetOk) {
+								value.Success = false; value.Message = "Контрольный HTTPS-запрос активного соединения не прошёл";
+							}
+							if (!mapHealth.TryGetValue(profile.Id, out var newer) || newer.CheckedUtc <= value.CheckedUtc) mapHealth[profile.Id] = value;
 							liveServerMap?.RefreshStatus(); expandedServerMap?.RefreshStatus();
 						}
 					} finally { gate.Release(); }
@@ -4047,7 +4062,7 @@ public sealed class MainWindow : Window
 		protectionIndicators.Children.Clear();
 		protectionIndicators.Children.Add(StatusPill("TUN", tunnelOk ? "активен" : core.Status == CoreStatus.Connecting ? "запускается" : "выключен", tunnelOk ? Green : core.Status == CoreStatus.Connecting ? Warning : Muted));
 		protectionIndicators.Children.Add(StatusPill("DNS", core.Verification.DnsOk ? "проверен" : tunnelOk ? "проверяется" : "не проверен", core.Verification.DnsOk ? Green : tunnelOk ? Warning : Muted));
-		protectionIndicators.Children.Add(StatusPill("ИНТЕРНЕТ", core.Verification.InternetOk ? core.Verification.InternetLatencyMs + " мс" : tunnelOk ? "проверяется" : "не проверен", core.Verification.InternetOk ? Green : tunnelOk ? Warning : Muted));
+		protectionIndicators.Children.Add(StatusPill("ИНТЕРНЕТ", core.Verification.InternetOk ? core.Verification.InternetLatencyMs + " мс" : tunnelOk ? core.Verification.Completed ? "проверка не прошла" : "проверяется" : "не проверен", core.Verification.InternetOk ? Green : tunnelOk ? core.Verification.Completed ? Danger : Warning : Muted));
 	}
 
 	private void UpdateHomeConnectionStatus()
@@ -4167,7 +4182,9 @@ public sealed class MainWindow : Window
 	{
 		if (core.Status == CoreStatus.Connected)
 		{
-			return "Вы защищены";
+			return !core.Verification.Completed ? "Проверяем соединение" : !core.Verification.InternetOk ? "Нет доступа в интернет" :
+				core.Verification.ProfileProbe?.Supported == true && !core.Verification.ProfileProbe.Success ? "Профиль не прошёл проверку" :
+				core.Verification.ProfileProbe?.Success == true ? "Вы защищены" : "Туннель включён";
 		}
 		if (core.Status == CoreStatus.Connecting)
 		{
@@ -4184,7 +4201,11 @@ public sealed class MainWindow : Window
 	{
 		if (core.Status == CoreStatus.Connected)
 		{
-			return "Трафик Windows проходит через выбранный защищённый маршрут.";
+			return !core.Verification.Completed ? "Туннель включён. Проверяем доступ в интернет через выбранный профиль." :
+				!core.Verification.InternetOk ? "Контрольный HTTPS-запрос не прошёл. Выберите зелёную точку на карте." :
+				core.Verification.ProfileProbe?.Supported == true && !core.Verification.ProfileProbe.Success ? "Интернет доступен, но HTTPS через выбранный VPN-профиль не прошёл. Выберите зелёную точку на карте." :
+				core.Verification.ProfileProbe?.Success == true ? "HTTPS через выбранный VPN-профиль подтверждён недавней проверкой." :
+				"Интернет доступен, но прохождение HTTPS через этот профиль не подтверждено.";
 		}
 		if (core.Status == CoreStatus.Connecting)
 		{

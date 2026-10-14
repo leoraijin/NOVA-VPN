@@ -33,7 +33,8 @@ foreach($theme in $themes){
     $map=$mapService.GetMethod('BuildInteractiveCanvas').Invoke($null,@($profiles,$profile,[double]820,[double]400,$palette,$health,$choose,$true))
     $nodes=@($map.Children|Where-Object {$_.Tag -eq 'server-node'})
     Assert ($nodes.Count -eq 2) 'same-city profiles must share a selectable marker'
-    Assert (@($nodes|Where-Object {$_.Opacity -eq 1}).Count -eq 1) 'only verified fresh HTTPS profiles glow'
+    Assert (@($nodes|Where-Object {$_.Fill.Color.ToString() -eq '#FF2DAE70'}).Count -eq 1) 'fresh HTTPS success is green'
+    Assert (@($nodes|Where-Object {$_.Fill.Color.ToString() -eq '#FFE04C53' -and $_.Opacity -eq 1}).Count -eq 1) 'fresh failure is clearly red'
     $country=@($map.Children|Where-Object {$_.Tag -eq 'PL'})[0]
     $old=$country.Fill
     $enter=[Windows.Input.MouseEventArgs]::new([Windows.Input.InputManager]::Current.PrimaryMouseDevice,0)
@@ -43,7 +44,10 @@ foreach($theme in $themes){
     $click.RoutedEvent=[Windows.UIElement]::MouseLeftButtonUpEvent;$country.RaiseEvent($click)
     Assert ($script:chosen.Id -eq $other.Id) 'country click must select its server'
     $before=$map.Children.Count;$good.CheckedUtc=[DateTime]::UtcNow.AddMinutes(-4);$map.RefreshStatus()
-    Assert (@($nodes|Where-Object {$_.Opacity -eq 1}).Count -eq 0) 'stale success must not remain bright'
+    Assert (@($nodes|Where-Object {$_.Fill.Color.ToString() -eq '#FF2DAE70'}).Count -eq 0) 'stale success must not remain green'
+    $bad.CheckedUtc=[DateTime]::UtcNow.AddMinutes(-4);$map.RefreshStatus()
+    Assert (@($nodes|Where-Object {$_.Fill.Color.ToString() -eq '#FFE04C53'}).Count -eq 0) 'stale failure must not remain red'
+    $bad.CheckedUtc=[DateTime]::UtcNow
     Assert ($map.Children.Count -eq $before) 'health updates must reuse country geometry and nodes'
     $good.CheckedUtc=[DateTime]::UtcNow;$map.RefreshStatus()
     $map.Background=[Windows.Media.SolidColorBrush]::new($palette.Bg)

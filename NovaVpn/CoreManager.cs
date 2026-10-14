@@ -20,6 +20,8 @@ public sealed class CoreManager : IDisposable
 	private bool stopping;
 
 	private int startGeneration;
+	private VpnProfile connectedProfile;
+	private bool verificationBusy;
 
 	public DateTime ConnectedAtUtc { get; private set; }
 
@@ -137,6 +139,7 @@ public sealed class CoreManager : IDisposable
 			}
 			ConnectedAtUtc = DateTime.UtcNow;
 			LastConnectedRouting = RoutingOverlayService.Clone(routing);
+			connectedProfile = profile;
 			ChangeStatus(CoreStatus.Connected, "Защищено");
 			_ = VerifyConnectionAsync();
 		}
@@ -171,6 +174,7 @@ public sealed class CoreManager : IDisposable
 		}
 		SafeDeleteConfig();
 		ConnectedAtUtc = default(DateTime);
+		connectedProfile = null;
 		Verification = new ConnectionVerification();
 		ChangeStatus(CoreStatus.Disconnected, "Не подключено");
 	}
@@ -233,7 +237,12 @@ public sealed class CoreManager : IDisposable
 
 	public async Task<ConnectionVerification> VerifyConnectionAsync()
 	{
-		ConnectionVerification result = new ConnectionVerification();
+		if (verificationBusy || Status != CoreStatus.Connected) return Verification;
+		verificationBusy = true;
+		int generation = startGeneration;
+		VpnProfile profile = connectedProfile;
+		ConnectionVerification result = new ConnectionVerification { ProfileId = profile?.Id };
+		try {
 		try
 		{
 			Task<IPAddress[]> dns = Dns.GetHostAddressesAsync("cloudflare.com");
@@ -258,12 +267,18 @@ public sealed class CoreManager : IDisposable
 		{
 			result.Message = "Контрольный запрос: " + LogSanitizer.Sanitize(ex.Message);
 		}
-		if (Status == CoreStatus.Connected)
+		if (profile != null && generation == startGeneration && Status == CoreStatus.Connected)
+			result.ProfileProbe = await ServerMapHealthService.TestAsync(profile, CorePath,
+				Path.Combine(StateStore.DirectoryPath, "runtime", "map-probes"), System.Threading.CancellationToken.None);
+		result.Completed = true;
+		result.CheckedUtc = DateTime.UtcNow;
+		if (Status == CoreStatus.Connected && generation == startGeneration)
 		{
 			Verification = result;
 			VerificationChanged?.Invoke(result);
 		}
 		return result;
+		} finally { verificationBusy = false; }
 	}
 
 	private async Task<string> RunCheckAsync(string path)

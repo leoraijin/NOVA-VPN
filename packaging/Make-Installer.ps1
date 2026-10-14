@@ -69,12 +69,12 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
     }
 }
 $releaseNotes = @'
-NOVA VPN 2.3.18 — 13 октября 2026
+NOVA VPN 2.3.19 — 14 октября 2026
 ==================================
-• Главная → карта региона → Все серверы на карте: выбор сервера по точке или стране.
-• Подсветка страны при наведении, список серверов одной страны, задержка и свежесть проверки в подсказке.
-• Яркий маркер означает два успешных HTTPS-запроса через профиль; результаты старше 3 минут становятся тусклыми.
-• Проверки идут в фоне без TUN и изменения действующего подключения; для полных конфигураций проверка выполняется при подключении.
+• Зелёная точка: свежая успешная HTTPS-проверка. Красная: проверка не прошла. Серая: нет свежего результата.
+• Выбранный сервер проверяется первым, подтверждённые рабочие профили идут выше остальных в меню карты.
+• При ошибке активного соединения карта и главная панель показывают проблему, а не «Вы защищены» или бесконечное «проверяется».
+• Проверки идут в фоне без отключения действующего VPN; результаты устаревают через 3 минуты. Работоспособность в будущем не гарантируется.
 • Обновления: Настройки → Обновление приложения.
 
 NOVA VPN 2.3.17 — 7 октября 2026
@@ -257,7 +257,7 @@ uses a packet-filter driver.
 }
 
 $instructions = @'
-NOVA VPN 2.3.18 — установка
+NOVA VPN 2.3.19 — установка
 =========================
 
 Запустите «NOVA VPN Setup.exe» и выберите папку установки. Windows запросит
@@ -285,7 +285,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.18.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.19.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),
