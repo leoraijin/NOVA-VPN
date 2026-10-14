@@ -2318,6 +2318,16 @@ public sealed partial class MainWindow : Window
 		stackPanel3.Children.Add(RouteEditorCard("Блокировать", "Домены без доступа к сети", state.Routing.BlockDomains, Danger, "block-domains"));
 		Grid.SetColumn(stackPanel3, 2);
 		grid4.Children.Add(stackPanel3);
+		if (responsiveMode != "Wide" || state.Visual.TextScale > 1.15)
+		{
+			grid4.ColumnDefinitions.Clear();
+			grid4.ColumnDefinitions.Add(new ColumnDefinition());
+			grid4.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+			grid4.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+			Grid.SetColumn(stackPanel3, 0);
+			Grid.SetRow(stackPanel3, 1);
+			stackPanel3.Margin = new Thickness(0, 14, 0, 0);
+		}
 		stackPanel.Children.Add(grid4);
 		TourAnchor("routing.domains", stackPanel3);
 		stackPanel.Children.Add(SectionTitle("ДОПОЛНИТЕЛЬНЫЕ ПРАВИЛА ДЛЯ ПРИЛОЖЕНИЙ", new Thickness(0.0, 20.0, 0.0, 10.0)));
@@ -2332,6 +2342,15 @@ public sealed partial class MainWindow : Window
 		Border element = RouteEditorCard("Приложения напрямую", "Например: steam.exe", state.Routing.DirectProcesses, Teal, "direct-apps");
 		Grid.SetColumn(element, 2);
 		grid5.Children.Add(element);
+		if (responsiveMode != "Wide" || state.Visual.TextScale > 1.15)
+		{
+			grid5.ColumnDefinitions.Clear();
+			grid5.ColumnDefinitions.Add(new ColumnDefinition());
+			grid5.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+			Grid.SetColumn(element, 0);
+			Grid.SetRow(element, 1);
+			element.Margin = new Thickness(0, 0, 0, 10);
+		}
 		stackPanel.Children.Add(grid5);
 		stackPanel.Children.Add(SectionTitle("ПОЛНЫЕ ПУТИ ПРИЛОЖЕНИЙ", new Thickness(0.0, 20.0, 0.0, 10.0)));
 		Grid pathGrid = new Grid();
@@ -2342,6 +2361,15 @@ public sealed partial class MainWindow : Window
 		Border directPaths = RouteEditorCard("Пути напрямую", "Поддерживаются переменные %LOCALAPPDATA%", state.Routing.DirectProcessPaths, Teal, "direct-paths");
 		Grid.SetColumn(directPaths, 2);
 		pathGrid.Children.Add(directPaths);
+		if (responsiveMode != "Wide" || state.Visual.TextScale > 1.15)
+		{
+			pathGrid.ColumnDefinitions.Clear();
+			pathGrid.ColumnDefinitions.Add(new ColumnDefinition());
+			pathGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+			Grid.SetColumn(directPaths, 0);
+			Grid.SetRow(directPaths, 1);
+			directPaths.Margin = new Thickness(0, 0, 0, 10);
+		}
 		stackPanel.Children.Add(pathGrid);
 		stackPanel.Children.Add(SectionTitle("TCP / UDP И ПОРТЫ", new Thickness(0.0, 20.0, 0.0, 10.0)));
 		stackPanel.Children.Add(RouteEditorCard("Расширенные правила", "Формат: proxy|tcp|443 или block|udp|443,1000:2000", state.Routing.AdvancedRules, Warning, "advanced"));
@@ -2410,6 +2438,7 @@ public sealed partial class MainWindow : Window
 			BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1),
 			HorizontalContentAlignment = HorizontalAlignment.Stretch
 		};
+		ScrollViewer.SetHorizontalScrollBarVisibility(results, ScrollBarVisibility.Disabled);
 		VirtualizingStackPanel.SetIsVirtualizing(results, true);
 		ScrollViewer.SetCanContentScroll(results, true);
 		ScrollViewer.SetPanningMode(results, PanningMode.VerticalOnly);
@@ -2520,12 +2549,12 @@ public sealed partial class MainWindow : Window
 	{
 		string route = ApplicationRoutingService.GetRoute(state.Routing, entry.ExecutablePath);
 		Grid row = new Grid { MinHeight = 60, Margin = new Thickness(8, 7, 8, 7), HorizontalAlignment = HorizontalAlignment.Stretch };
-		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(50) });
+		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
 		row.ColumnDefinitions.Add(new ColumnDefinition());
-		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
+		row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 72 });
 		ImageSource icon = GetApplicationIcon(entry.ExecutablePath);
-		if (icon != null) row.Children.Add(new Image { Source = icon, Width = 38, Height = 38, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center });
-		else row.Children.Add(IconFactory.Create("servers", 25, Muted));
+		if (icon != null) row.Children.Add(new Image { Source = icon, Width = 34, Height = 34, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center });
+		else row.Children.Add(IconFactory.Create("servers", 23, Muted));
 		StackPanel description = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
 		TextBlock title = T(entry.Name, 12.5, TextColor, FontWeights.SemiBold);
 		title.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -2536,20 +2565,13 @@ public sealed partial class MainWindow : Window
 		description.Children.Add(path);
 		Grid.SetColumn(description, 1);
 		row.Children.Add(description);
-		StackPanel control = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+		StackPanel control = new StackPanel { MinWidth = 72, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
 		TextBlock label = T(RouteLabel(route), 9.0, route == ApplicationRoutingService.Proxy ? AccentLight : route == ApplicationRoutingService.Direct ? Teal : Muted, FontWeights.SemiBold);
 		label.HorizontalAlignment = HorizontalAlignment.Center;
 		control.Children.Add(label);
-		Border track = new Border
-		{
-			Width = 52, Height = 26, CornerRadius = new CornerRadius(13), BorderThickness = new Thickness(0.7), BorderBrush = new SolidColorBrush(BorderColor),
-			Background = new SolidColorBrush(route == ApplicationRoutingService.Proxy ? Accent : route == ApplicationRoutingService.Direct ? Teal : BorderColor)
-		};
-		track.Child = new Ellipse
-		{
-			Width = 19, Height = 19, Fill = Brushes.White, Margin = new Thickness(3), Effect = new DropShadowEffect { BlurRadius = 4, ShadowDepth = 1, Opacity = 0.18 },
-			HorizontalAlignment = route == ApplicationRoutingService.Proxy ? HorizontalAlignment.Right : route == ApplicationRoutingService.Direct ? HorizontalAlignment.Left : HorizontalAlignment.Center
-		};
+		Color routeColor = route == ApplicationRoutingService.Proxy ? Accent : route == ApplicationRoutingService.Direct ? Teal : Surface2;
+		Border track = CreatePillSwitch(routeColor, route == ApplicationRoutingService.Automatic ? BorderColor : routeColor,
+			route == ApplicationRoutingService.Proxy ? HorizontalAlignment.Right : route == ApplicationRoutingService.Direct ? HorizontalAlignment.Left : HorizontalAlignment.Center, 50, 26);
 		Button toggle = new Button
 		{
 			Content = track, Width = 64, Height = 48, BorderThickness = new Thickness(0),
@@ -4498,13 +4520,36 @@ public sealed partial class MainWindow : Window
 		button.HorizontalAlignment = HorizontalAlignment.Right;
 		button.VerticalAlignment = VerticalAlignment.Center;
 		button.ToolTip = on ? "Включено" : "Выключено";
-		Grid toggle = new Grid();
-		Border track = new Border { Width = 50, Height = 27, CornerRadius = new CornerRadius(13.5), Background = new SolidColorBrush(on ? Accent : palette.Name == ThemePalette.OneUi ? palette.SoftSelection : Surface2), BorderBrush = new SolidColorBrush(on ? AccentLight : BorderColor), BorderThickness = new Thickness(1) };
-		toggle.Children.Add(track);
-		Ellipse thumb = new Ellipse { Width = 19, Height = 19, Fill = new SolidColorBrush(on ? palette.AccentForeground : Muted), HorizontalAlignment = on ? HorizontalAlignment.Right : HorizontalAlignment.Left, Margin = new Thickness(4, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center };
-		toggle.Children.Add(thumb); button.Content = toggle;
+		button.Content = CreatePillSwitch(on ? Accent : palette.Name == ThemePalette.OneUi ? palette.SoftSelection : Surface2,
+			on ? AccentLight : BorderColor, on ? HorizontalAlignment.Right : HorizontalAlignment.Left, 50, 27);
 		EnableButtonMotion(button);
 		return button;
+	}
+
+	private static Border CreatePillSwitch(Color fill, Color outline, HorizontalAlignment thumbAlignment, double width, double height)
+	{
+		Border track = new Border
+		{
+			Width = width,
+			Height = height,
+			CornerRadius = new CornerRadius(height / 2),
+			Background = new SolidColorBrush(fill),
+			BorderBrush = new SolidColorBrush(outline),
+			BorderThickness = new Thickness(1)
+		};
+		Grid inner = new Grid();
+		inner.Children.Add(new Ellipse
+		{
+			Width = height - 9,
+			Height = height - 9,
+			Fill = Brushes.White,
+			Margin = new Thickness(4),
+			Effect = new DropShadowEffect { BlurRadius = 4, ShadowDepth = 1, Opacity = 0.2 },
+			HorizontalAlignment = thumbAlignment,
+			VerticalAlignment = VerticalAlignment.Center
+		});
+		track.Child = inner;
+		return track;
 	}
 
 	private Button VectorIconButton(string icon, string tooltip, Color? color = null, bool filled = false)
