@@ -77,6 +77,7 @@
     <Compile Include="NovaVpn\LinkParser.cs" />
     <Compile Include="NovaVpn\LogSanitizer.cs" />
     <Compile Include="NovaVpn\MainWindow.cs" />
+    <Compile Include="NovaVpn\GuidedTour.cs" />
     <Compile Include="NovaVpn\ConnectionControl.cs" />
     <Compile Include="NovaVpn\VisualDesign.cs" />
     <Compile Include="NovaVpn\GlassBackdropLayer.cs" />

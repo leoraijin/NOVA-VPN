@@ -26,7 +26,7 @@ using Forms = System.Windows.Forms;
 
 namespace NovaVpn;
 
-public sealed class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
 	private sealed class NavItem
 	{
@@ -39,15 +39,6 @@ public sealed class MainWindow : Window
 		public TextBlock Label;
 	}
 
-	private sealed class LearningLesson
-	{
-		public string Title;
-		public string Summary;
-		public string[] Steps;
-		public string Important;
-		public string Target;
-		public string TargetLabel;
-	}
 
 	private Color Bg;
 
@@ -102,7 +93,6 @@ public sealed class MainWindow : Window
 
 	private bool responsiveBuildQueued;
 
-	private int learningLessonIndex;
 
 	private TextBlock statusText;
 
@@ -309,10 +299,6 @@ public sealed class MainWindow : Window
 		Navigate("home");
 		RoutedEventHandler value = async delegate
 		{
-			if (state.ShowTrainingOnStartup && state.Profiles.Count == 0 && currentPage == "home")
-			{
-				Navigate("learning");
-			}
 			await UpdateSubscriptionsIfDueAsync(false);
 			SyncSubscriptionTimer();
 			if (RoutingOverlayService.IsZapretMode(state.Zapret?.Mode) && !zapret.IsRunning)
@@ -472,7 +458,8 @@ public sealed class MainWindow : Window
 		stackPanel4.Children.Add(Nav("routing", "routing", "Маршрутизация"));
 		stackPanel4.Children.Add(Nav("diagnostics", "diagnostics", "Диагностика"));
 		stackPanel4.Children.Add(Nav("settings", "settings", "Настройки"));
-		stackPanel4.Children.Add(Nav("learning", "list", "Обучение"));
+		Button startTour = (Button)Nav("tour", "list", "Начать обучение");
+		stackPanel4.Children.Add(startTour);
 		Grid.SetRow(stackPanel4, 1);
 		grid2.Children.Add(stackPanel4);
 		Border border3 = new Border();
@@ -669,6 +656,10 @@ public sealed class MainWindow : Window
 		contentHost = new Grid { Margin = new Thickness(margin, responsiveMode == "Compact" ? 12.0 : 20.0, margin, responsiveMode == "Compact" ? 16.0 : 28.0) };
 		Grid.SetColumn(contentHost, 1); Grid.SetRow(contentHost, 1); app.Children.Add(contentHost);
 		outer.Children.Add(app);
+		tourPageRoot = app;
+		app.IsHitTestVisible = !tourActive;
+		KeyboardNavigation.SetTabNavigation(app, tourActive ? KeyboardNavigationMode.None : KeyboardNavigationMode.Continue);
+		outer.SizeChanged += delegate { QueueTourRender(); };
 		shellRoot = outer;
 		base.Content = outer;
 		Navigate(currentPage);
@@ -723,7 +714,7 @@ public sealed class MainWindow : Window
 		button2.Content = grid;
 		button2.Click += delegate
 		{
-			Navigate(key);
+			if (key == "tour") StartGuidedTour(); else Navigate(key);
 		};
 		navItems[key] = new NavItem
 		{
@@ -738,6 +729,8 @@ public sealed class MainWindow : Window
 
 	private void Navigate(string page, bool animate = true)
 	{
+		if (page == "learning") { StartGuidedTour(); return; }
+		tourAnchors.Clear();
 		bool pageChanged = page != currentPage;
 		ScrollViewer previousScroll = FindVisualChild<ScrollViewer>(contentHost);
 		if (previousScroll != null) scrollPositions[currentPage] = previousScroll.VerticalOffset;
@@ -762,7 +755,6 @@ public sealed class MainWindow : Window
 			"routing" => BuildRoutingPage(),
 			"diagnostics" => BuildDiagnosticsPage(),
 			"settings" => BuildSettingsPage(),
-			"learning" => BuildLearningPage(),
 			_ => BuildHomePage(),
 		};
 		// Build the replacement before detaching the visible page. Background
@@ -776,6 +768,7 @@ public sealed class MainWindow : Window
 		{
 			base.Dispatcher.BeginInvoke((Action)delegate { ScrollViewer next = FindVisualChild<ScrollViewer>(contentHost); next?.ScrollToVerticalOffset(savedOffset); }, DispatcherPriority.Loaded);
 		}
+		QueueTourRender();
 	}
 
 	public void ShowPageForSnapshot(string page)
@@ -783,105 +776,6 @@ public sealed class MainWindow : Window
 		Navigate(string.IsNullOrWhiteSpace(page) ? "home" : page);
 	}
 
-	private UIElement BuildLearningPage()
-	{
-		List<LearningLesson> lessons = LearningLessons();
-		learningLessonIndex = Math.Max(0, Math.Min(lessons.Count - 1, learningLessonIndex));
-		LearningLesson selected = lessons[learningLessonIndex];
-		Grid page = new Grid();
-		page.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-		page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
-		page.RowDefinitions.Add(new RowDefinition());
-		page.Children.Add(PageHeader("Обучение", "Пошаговое руководство по основным функциям NOVA VPN", null, null));
-		Grid body = new Grid();
-		body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
-		body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-		body.ColumnDefinitions.Add(new ColumnDefinition());
-		StackPanel menu = new StackPanel();
-		menu.Children.Add(SectionTitle("УРОКИ", new Thickness(2, 0, 0, 10)));
-		for (int i = 0; i < lessons.Count; i++)
-		{
-			int index = i;
-			Button item = SmallButton((i + 1) + ".  " + lessons[i].Title);
-			item.HorizontalContentAlignment = HorizontalAlignment.Left;
-			item.HorizontalAlignment = HorizontalAlignment.Stretch;
-			item.Height = 38;
-			item.Margin = new Thickness(0, 0, 0, 7);
-			item.Padding = new Thickness(13, 0, 8, 0);
-			item.Background = new SolidColorBrush(i == learningLessonIndex ? C("#2A2350") : Surface);
-			item.BorderBrush = new SolidColorBrush(i == learningLessonIndex ? Accent : BorderColor);
-			item.Click += delegate { learningLessonIndex = index; Navigate("learning"); };
-			menu.Children.Add(item);
-		}
-		Border menuCard = new Border { Padding = new Thickness(14), Background = new SolidColorBrush(Surface), BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1), CornerRadius = Radius(16), Child = menu };
-		body.Children.Add(menuCard);
-		Grid.SetColumn(menuCard, 0);
-		Border lessonCard = new Border { Padding = new Thickness(25), Background = new SolidColorBrush(Surface), BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1), CornerRadius = Radius(18) };
-		StackPanel content = new StackPanel();
-		content.Children.Add(Label("УРОК " + (learningLessonIndex + 1) + " ИЗ " + lessons.Count));
-		content.Children.Add(T(selected.Title, 25, TextColor, FontWeights.SemiBold));
-		TextBlock summary = T(selected.Summary, 12, Muted);
-		summary.TextWrapping = TextWrapping.Wrap;
-		summary.Margin = new Thickness(0, 8, 0, 20);
-		content.Children.Add(summary);
-		for (int i = 0; i < selected.Steps.Length; i++)
-		{
-			Grid step = new Grid { Margin = new Thickness(0, 0, 0, 13) };
-			step.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
-			step.ColumnDefinitions.Add(new ColumnDefinition());
-			Border number = new Border { Width = 24, Height = 24, CornerRadius = new CornerRadius(12), Background = new SolidColorBrush(C("#2A2350")), Child = T((i + 1).ToString(), 11, AccentLight, FontWeights.SemiBold) };
-			number.Child.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-			number.Child.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
-			step.Children.Add(number);
-			TextBlock stepText = T(selected.Steps[i], 12, TextColor);
-			stepText.TextWrapping = TextWrapping.Wrap;
-			Grid.SetColumn(stepText, 1);
-			step.Children.Add(stepText);
-			content.Children.Add(step);
-		}
-		Border important = new Border { Padding = new Thickness(14), Margin = new Thickness(0, 7, 0, 18), Background = new SolidColorBrush(C("#202233")), BorderBrush = new SolidColorBrush(Warning), BorderThickness = new Thickness(1), CornerRadius = Radius(12) };
-		TextBlock importantText = T("Важно: " + selected.Important, 11, TextColor);
-		importantText.TextWrapping = TextWrapping.Wrap;
-		important.Child = importantText;
-		content.Children.Add(important);
-		WrapPanel actions = new WrapPanel();
-		Button previous = SmallButton("← Назад");
-		previous.IsEnabled = learningLessonIndex > 0;
-		previous.Click += delegate { learningLessonIndex--; Navigate("learning"); };
-		Button next = SmallButton(learningLessonIndex == lessons.Count - 1 ? "Завершить" : "Далее →");
-		next.Margin = new Thickness(8, 0, 8, 0);
-		next.Click += delegate { learningLessonIndex = (learningLessonIndex + 1) % lessons.Count; Navigate("learning"); };
-		actions.Children.Add(previous);
-		actions.Children.Add(next);
-		if (!string.IsNullOrWhiteSpace(selected.Target))
-		{
-			Button open = SmallButton(selected.TargetLabel ?? "Открыть раздел");
-			open.Click += delegate { Navigate(selected.Target); };
-			actions.Children.Add(open);
-		}
-		content.Children.Add(actions);
-		lessonCard.Child = content;
-		body.Children.Add(lessonCard);
-		Grid.SetColumn(lessonCard, 2);
-		Grid.SetRow(body, 2);
-		page.Children.Add(body);
-		return page;
-	}
-
-	private List<LearningLesson> LearningLessons()
-	{
-		return new List<LearningLesson>
-		{
-			new LearningLesson { Title = "Первое подключение", Summary = "Как добавить профиль и запустить защищённое соединение.", Steps = new[] { "Откройте раздел «Серверы» и нажмите «Добавить ключ».", "Вставьте VPN-ссылку, JSON-конфигурацию или ссылку на подписку.", "Выберите профиль и нажмите кнопку питания на главной странице.", "Проверьте индикаторы TUN, DNS и Интернет: они должны перейти в активное состояние." }, Important = "Не передавайте VPN-ссылку посторонним: она может содержать пароль или UUID.", Target = "servers", TargetLabel = "Открыть серверы" },
-			new LearningLesson { Title = "Серверы и лучший конфиг", Summary = "Как проверять профили и выбирать самый быстрый стабильный сервер.", Steps = new[] { "На странице «Серверы» нажмите «Проверить все», чтобы обновить задержку и потери.", "Нажмите «Выбрать лучший», чтобы NOVA выбрала доступный профиль с минимальным стабильным пингом.", "Автоматический выбор перед подключением можно включить или отключить в настройках.", "Сервер с самым маленьким пингом не всегда лучший при высокой потере пакетов." }, Important = "Выбор другого профиля при подключённом VPN автоматически перезапускает туннель; если новый конфиг не поднимется, NOVA попробует вернуть прежний.", Target = "servers", TargetLabel = "Открыть серверы" },
-			new LearningLesson { Title = "Маршрутизация", Summary = "Как направлять разные сайты и приложения через VPN или напрямую.", Steps = new[] { "В разделе «Маршрутизация» выберите режим: по правилам, весь трафик или только выбранные через VPN.", "В списке программ найдите приложение по названию или выберите его .exe. Переключатель последовательно задаёт маршрут по умолчанию, VPN или напрямую.", "При активном VPN нажмите «Применить маршруты»: NOVA проверит конфигурацию и переподключит туннель; при ошибке попробует вернуть предыдущий маршрут.", "Добавляйте домены в списки «Через VPN», «Напрямую» или «Блокировать». Для сложных случаев доступны текстовые правила по имени процесса и пути.", "Используйте проверку маршрута, чтобы увидеть, какое правило сработало." }, Important = "При активном Zapret маршруты, временно перемещённые напрямую, нельзя редактировать. Выключите Zapret — исходные VPN-правила вернутся. Пути к программам на другом ПК нужно выбрать заново.", Target = "routing", TargetLabel = "Открыть маршрутизацию" },
-			new LearningLesson { Title = "VPN и Zapret", Summary = "Разница между тремя режимами обхода и правильное переключение.", Steps = new[] { "VPN запускает только sing-box: домены и приложения используют выбранные VPN-маршруты.", "VPN + Zapret запускает оба компонента. Домены из списка Zapret и выбранные VPN-маршруты приложений физически перемещаются из VPN-списков в «Напрямую».", "Zapret запускает только обход DPI без VPN-туннеля, сохраняя эти записи напрямую на время работы Zapret.", "При переходе в режим VPN приложение останавливает winws, возвращает записи в исходные VPN-списки и затем запускает туннель." }, Important = "Для запуска или остановки повышенного процесса Windows может запросить права администратора.", Target = "home", TargetLabel = "Открыть режимы" },
-			new LearningLesson { Title = "Домены Zapret", Summary = "Домены и приложения автоматически переносятся между списками маршрутизации при переключении Zapret.", Steps = new[] { "В режиме VPN YouTube, Discord и остальные домены Zapret идут по правилам VPN.", "При включении Zapret домены из его списков добавляются в реальный список «Напрямую», а совпадающие VPN-домены удаляются из списка «Через VPN».", "Явные VPN-правила приложений также перемещаются в «Напрямую», чтобы приложения не отправляли этот трафик обратно в VPN.", "Исходные VPN-правила сохраняются отдельно и автоматически возвращаются при выключении Zapret или выходе из приложения.", "В режиме «Только Zapret» VPN-туннель отключён; Zapret обрабатывает трафик самостоятельно." }, Important = "Списки маршрутов временно заблокированы для редактирования, пока активен Zapret, чтобы переход можно было точно отменить.", Target = "home", TargetLabel = "Открыть Zapret" },
-			new LearningLesson { Title = "Обновление Zapret", Summary = "Проверка версии и установка выполняются раздельно.", Steps = new[] { "Нажмите «Проверка обновлений»: NOVA только сравнит версии и ничего не будет скачивать или устанавливать.", "Если найдена новая версия, нажмите отдельную кнопку «Обновить Zapret», чтобы подтвердить установку.", "Архив проверяется, безопасно распаковывается и устанавливается с резервной копией.", "При ошибке приложение пытается вернуть предыдущую рабочую версию." }, Important = "Только кнопка «Обновить Zapret» останавливает текущий процесс на время установки; после обновления он может быть запущен снова.", Target = "home", TargetLabel = "Открыть обновление" },
-			new LearningLesson { Title = "Перенос и безопасность", Summary = "Выберите перенос с VPN-ключами или без них.", Steps = new[] { "Зашифрованный бэкап открывается только в текущей учётной записи Windows.", "Полный .nova-config переносит VPN-профили и секреты — храните его как пароль.", "Кнопка «Экспорт настроек без ключей» переносит оформление, маршруты и настройки Zapret без профилей VPN.", "Файл .nova-settings можно импортировать на другом компьютере; VPN-серверы добавляются там отдельно." }, Important = "Установщик NOVA не содержит ваших VPN-ключей. Для обмена конфигурациями используйте экспорт без ключей.", Target = "settings", TargetLabel = "Открыть настройки" },
-			new LearningLesson { Title = "Настройки и диагностика", Summary = "Где находятся автоматические функции и как искать причины ошибок.", Steps = new[] { "В настройках можно включить автоподключение, автопереподключение и выбор лучшего сервера.", "Защищённый DNS и строгий маршрут помогают уменьшить утечки DNS.", "В разделе «Диагностика» проверяйте ядро, профиль, DNS, сеть и конфигурацию.", "Если проблема сохраняется, сохраните текст ошибки и результаты проверки." }, Important = "Kill Switch в текущей версии использует строгую маршрутизацию и автопереподключение; постоянные правила Windows Firewall не создаются.", Target = "diagnostics", TargetLabel = "Открыть диагностику" }
-		};
-	}
 
 	private UIElement BuildHomePage()
 	{
@@ -1030,6 +924,7 @@ public sealed class MainWindow : Window
 		connectionControl = new ConnectionControl();
 		connectionControl.Apply(state.Visual, core.Status, MotionAllowed);
 		connectButton = connectionControl.ActionButton;
+		TourAnchor("home.connect", connectionControl);
 		connectButtonLabel = connectionControl.Label;
 		connectButton.Click += async delegate { await ToggleConnectionAsync(); };
 		Viewbox grid5 = new Viewbox { Width = connectionFrameSize, Height = connectionFrameSize, Child = connectionControl, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -1037,6 +932,7 @@ public sealed class MainWindow : Window
 		stackPanel9.VerticalAlignment = VerticalAlignment.Center;
 		stackPanel9.Margin = new Thickness(24.0, 0.0, 0.0, 0.0);
 		StackPanel stackPanel10 = stackPanel9;
+		TourAnchor("home.status", stackPanel10);
 		stackPanel10.Children.Add(Label("СОСТОЯНИЕ"));
 		connectHeadline = T(StatusHeadline(), responsiveMode == "Wide" ? 24.0 : 20.0, TextColor, FontWeights.SemiBold);
 		connectHeadline.Margin = new Thickness(0.0, 11.0, 0.0, 5.0);
@@ -1124,6 +1020,7 @@ public sealed class MainWindow : Window
 			modes.Children.Add(modeButton);
 		}
 		left.Children.Add(modes);
+		TourAnchor("home.mode", modes);
 		left.Children.Add(T("Конфиг Zapret", 10, Muted));
 		ComboBox strategyChoice = new ComboBox { MinWidth = 220, MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 8) };
 		strategyChoice.SetResourceReference(StyleProperty, "NovaSelectorStyle");
@@ -2071,6 +1968,7 @@ public sealed class MainWindow : Window
 		});
 		grid.RowDefinitions.Add(new RowDefinition());
 		Button addButton = PrimaryButton("+  Добавить ключ", 145.0);
+		TourAnchor("servers.import", addButton);
 		addButton.Click += async delegate
 		{
 			await ShowImportDialogAsync();
@@ -2091,6 +1989,7 @@ public sealed class MainWindow : Window
 			Navigate("servers");
 		};
 		Button chooseBest = SmallButton("Выбрать лучший");
+		TourAnchor("servers.best", chooseBest);
 		chooseBest.IsEnabled = !profileSwitchInProgress && core.Status != CoreStatus.Connecting;
 		chooseBest.Click += async delegate
 		{
@@ -2373,7 +2272,7 @@ public sealed class MainWindow : Window
 		grid3.Children.Add(ModeCard("Direct", "Напрямую", "VPN только для списка", "home", 2));
 		stackPanel.Children.Add(grid3);
 		stackPanel.Children.Add(SectionTitle("ПРИЛОЖЕНИЯ", new Thickness(0.0, 0.0, 0.0, 10.0)));
-		stackPanel.Children.Add(BuildApplicationRoutingSection());
+		stackPanel.Children.Add(TourAnchor("routing.apps", BuildApplicationRoutingSection()));
 		StackPanel presets = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0.0, 0.0, 0.0, 18.0) };
 		presets.Children.Add(PresetButton("Мессенджеры через VPN", "messengers"));
 		presets.Children.Add(PresetButton("Игры напрямую", "games-direct"));
@@ -2420,6 +2319,7 @@ public sealed class MainWindow : Window
 		Grid.SetColumn(stackPanel3, 2);
 		grid4.Children.Add(stackPanel3);
 		stackPanel.Children.Add(grid4);
+		TourAnchor("routing.domains", stackPanel3);
 		stackPanel.Children.Add(SectionTitle("ДОПОЛНИТЕЛЬНЫЕ ПРАВИЛА ДЛЯ ПРИЛОЖЕНИЙ", new Thickness(0.0, 20.0, 0.0, 10.0)));
 		Grid grid5 = new Grid();
 		grid5.ColumnDefinitions.Add(new ColumnDefinition());
@@ -2983,6 +2883,7 @@ public sealed class MainWindow : Window
 		page.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18.0) });
 		page.RowDefinitions.Add(new RowDefinition());
 		Button run = PrimaryButton("Запустить проверку", 160.0);
+		TourAnchor("diagnostics.run", run);
 		Button speed = SmallButton("Тест скорости");
 		speed.Margin = new Thickness(0.0, 0.0, 8.0, 0.0);
 		speed.Click += async delegate
@@ -3185,6 +3086,7 @@ public sealed class MainWindow : Window
 		});
 		grid.RowDefinitions.Add(new RowDefinition());
 		Button appearance = PrimaryButton("✦  Персонализация", 154.0);
+		TourAnchor("settings.appearance", appearance);
 		appearance.Click += delegate
 		{
 			AppearanceWindow dialog = new AppearanceWindow(state.Visual, state.ShowAnimations) { Owner = this };
@@ -3212,7 +3114,7 @@ public sealed class MainWindow : Window
 		stackPanel.Children.Add(SectionTitle("ОФОРМЛЕНИЕ"));
 		stackPanel.Children.Add(AppearanceSummaryCard());
 		stackPanel.Children.Add(SectionTitle("ЗАПУСК", new Thickness(0.0, 20.0, 0.0, 10.0)));
-		stackPanel.Children.Add(SettingCard("Запускать с Windows", "Открыть приложение после входа в Windows, без автоподключения", state.StartWithWindows, async delegate { await SetWindowsStartupAsync(false); }));
+		stackPanel.Children.Add(TourAnchor("settings.startup", SettingCard("Запускать с Windows", "Открыть приложение после входа в Windows, без автоподключения", state.StartWithWindows, async delegate { await SetWindowsStartupAsync(false); })));
 		stackPanel.Children.Add(SettingCard("Запускать и подключать с Windows", "Без окна: последний использованный профиль, при отказе — лучший по HTTPS-проверке", state.StartConnectedWithWindows, async delegate { await SetWindowsStartupAsync(true); }));
 		stackPanel.Children.Add(SettingCard("Автоподключение", "Подключаться при открытии NOVA вручную", state.AutoConnect, delegate
 		{
@@ -3258,12 +3160,6 @@ public sealed class MainWindow : Window
 		stackPanel.Children.Add(SettingCard("Уведомления Windows", "Сообщать о подключении и важных сбоях", state.ShowNotifications, delegate
 		{
 			state.ShowNotifications = !state.ShowNotifications;
-			StateStore.Save(state);
-			Navigate("settings");
-		}));
-		stackPanel.Children.Add(SettingCard("Показывать обучение при запуске", "Открывать вкладку обучения для новых пользователей", state.ShowTrainingOnStartup, delegate
-		{
-			state.ShowTrainingOnStartup = !state.ShowTrainingOnStartup;
 			StateStore.Save(state);
 			Navigate("settings");
 		}));
@@ -3435,13 +3331,14 @@ public sealed class MainWindow : Window
 		updateLayout.ColumnDefinitions.Add(new ColumnDefinition());
 		updateLayout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 		StackPanel updateCopy = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-		updateCopy.Children.Add(T("Версия 2.3.15", 11.0, TextColor, FontWeights.SemiBold));
+		updateCopy.Children.Add(T("Версия " + ReleaseNotesService.CurrentVersionText, 11.0, TextColor, FontWeights.SemiBold));
 		TextBlock updateHint = T("GitHub проверяется при запуске. Кнопка «Обновить» скачивает последний установщик. Конфиги и VPN-ключи не меняются.", 9.5, Muted);
 		updateHint.TextWrapping = TextWrapping.Wrap;
 		updateHint.Margin = new Thickness(0.0, 3.0, 12.0, 0.0);
 		updateCopy.Children.Add(updateHint);
 		updateLayout.Children.Add(updateCopy);
 		Button appUpdateButton = PrimaryButton("Обновить", 112.0);
+		TourAnchor("settings.update", appUpdateButton);
 		appUpdateButton.VerticalAlignment = VerticalAlignment.Center;
 		appUpdateButton.Click += async delegate { await UpdateApplicationAsync(appUpdateButton); };
 		Grid.SetColumn(appUpdateButton, 1);

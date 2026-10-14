@@ -43,7 +43,7 @@
 
 | Платформа | Где скачать | Статус |
 | --- | --- | --- |
-| **Windows** | [GitHub Releases](https://github.com/leoraijin/NOVA-VPN/releases/latest) | Выпущена 2.3.22; проверки — в [STATUS](docs/STATUS.md) |
+| **Windows** | [GitHub Releases](https://github.com/leoraijin/NOVA-VPN/releases/latest) | Выпущена 2.3.23; проверки — в [STATUS](docs/STATUS.md) |
 | **Android** | [Отдельный репозиторий](https://github.com/leoraijin/NOVA-VPN-Android) | Развивается отдельно; Windows-установщик для телефона не подходит |
 
 ## Возможности
