@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Windows;
@@ -17,6 +18,8 @@ public static class Program
 	public static void Main(string[] args)
 	{
 		string text = null;
+		bool windowsStartup = args.Contains("--windows-startup");
+		bool backgroundConnect = windowsStartup && args.Contains("--background-connect");
 		string text2 = "home";
 		string snapshotTheme = null;
 		string snapshotBackground = null;
@@ -46,6 +49,7 @@ public static class Program
 		mutex = new Mutex(initiallyOwned: true, (text == null) ? "NOVA-VPN-Desktop-Instance" : "NOVA-VPN-Snapshot-Instance", out var createdNew);
 		if (!createdNew)
 		{
+			if (windowsStartup) return;
 			MessageBox.Show("NOVA уже запущена.", "NOVA VPN", MessageBoxButton.OK, MessageBoxImage.Asterisk);
 			return;
 		}
@@ -54,10 +58,11 @@ public static class Program
 		application.ShutdownMode = ShutdownMode.OnMainWindowClose;
 		application.DispatcherUnhandledException += delegate(object sender, DispatcherUnhandledExceptionEventArgs e)
 		{
-			MessageBox.Show("Произошла ошибка:\n" + e.Exception.Message, "NOVA VPN", MessageBoxButton.OK, MessageBoxImage.Hand);
+			if (!backgroundConnect) MessageBox.Show("Произошла ошибка:\n" + e.Exception.Message, "NOVA VPN", MessageBoxButton.OK, MessageBoxImage.Hand);
 			e.Handled = true;
 		};
 		MainWindow window = new MainWindow(text != null);
+		window.WindowsStartupLaunch = windowsStartup;
 		application.MainWindow = window;
 		if (!string.IsNullOrWhiteSpace(text))
 		{
@@ -105,7 +110,11 @@ public static class Program
 				}, DispatcherPriority.ApplicationIdle);
 			};
 		}
-		application.Run(window);
+		if (backgroundConnect && text == null) {
+			window.ShowInTaskbar = false;
+			application.Dispatcher.BeginInvoke((Action)(async () => await window.RunWindowsBackgroundStartupAsync()));
+			application.Run();
+		} else application.Run(window);
 		GC.KeepAlive(mutex);
 	}
 }

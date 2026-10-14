@@ -186,6 +186,9 @@ public sealed class MainWindow : Window
 	private DateTime currentSessionStartedUtc;
 
 	private bool snapshotMode;
+	public bool WindowsStartupLaunch { get; set; }
+	private readonly System.Threading.CancellationTokenSource startupCancellation = new System.Threading.CancellationTokenSource();
+	private bool startupSettingsBusy, startupConnecting;
 
 	public MainWindow(bool snapshot = false)
 	{
@@ -213,6 +216,9 @@ public sealed class MainWindow : Window
 			base.Dispatcher.BeginInvoke((Action)delegate
 			{
 				if (closing || !ReferenceEquals(core.Verification, verification)) return;
+				if (!snapshotMode && verification.Completed && verification.InternetOk && verification.ProfileProbe?.Success == true && state.LastWorkingProfileId != verification.ProfileId) {
+					state.LastWorkingProfileId = verification.ProfileId; StateStore.Save(state);
+				}
 				if (verification.Completed && verification.ProfileProbe?.Supported == true && !string.IsNullOrEmpty(verification.ProfileId)) {
 					var health = verification.ProfileProbe;
 					if (!verification.InternetOk) { health.Success = false; health.Message = "Туннель включён, но контрольный HTTPS-запрос не прошёл"; }
@@ -336,7 +342,7 @@ public sealed class MainWindow : Window
 			}
 			if (await CheckApplicationUpdatesOnStartupAsync()) return;
 			if (core.Status != CoreStatus.Connected) { directExternalIp = await ExternalIpService.GetAsync(); if (currentPage == "home") RefreshCurrentPage(); }
-			if (state.AutoConnect && SelectedProfile() != null && state.PauseUntilUtc <= DateTime.UtcNow)
+			if (!WindowsStartupLaunch && state.AutoConnect && SelectedProfile() != null && state.PauseUntilUtc <= DateTime.UtcNow)
 			{
 				await ToggleConnectionAsync();
 			}
@@ -348,6 +354,7 @@ public sealed class MainWindow : Window
 		}
 		base.Closing += delegate
 		{
+			startupCancellation.Cancel();
 			closing = true;
 			reconnectTimer.Stop();
 			subscriptionTimer.Stop();
@@ -1765,6 +1772,60 @@ public sealed class MainWindow : Window
 		return RoutingOverlayService.Clone(state.Routing);
 	}
 
+	private async Task SetWindowsStartupAsync(bool connect)
+	{
+		if (startupSettingsBusy || snapshotMode) return;
+		startupSettingsBusy = true;
+		try {
+			bool enabled = !(connect ? state.StartConnectedWithWindows : state.StartWithWindows);
+			await WindowsStartupService.ApplyAsync(enabled, connect, Assembly.GetExecutingAssembly().Location);
+			state.StartWithWindows = enabled && !connect; state.StartConnectedWithWindows = enabled && connect;
+			StateStore.Save(state); Navigate("settings");
+		} catch (Exception ex) { Toast("Автозапуск не изменён: " + LogSanitizer.Sanitize(ex.Message), Danger); }
+		finally { startupSettingsBusy = false; }
+	}
+
+	public async Task RunWindowsBackgroundStartupAsync()
+	{
+		if (snapshotMode) return;
+		if (!state.StartConnectedWithWindows) { Application.Current.Shutdown(); return; }
+		ShowInTaskbar = false;
+		var token = startupCancellation.Token;
+		startupConnecting = true;
+		try {
+			for (int i = 0; i < 15 && !System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(); i++) await Task.Delay(2000, token);
+			var candidates = state.Profiles.ToList();
+			string preferred = state.LastConnectedProfileId ?? state.LastWorkingProfileId ?? state.SelectedProfileId;
+			while (candidates.Count > 0) {
+				token.ThrowIfCancellationRequested();
+				var target = await StartupProfileSelector.SelectAsync(candidates, preferred,
+					p => ServerMapHealthService.TestAsync(p, core.CorePath, System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "startup-probes"), token), token);
+				if (target == null) break;
+				candidates.Remove(target); preferred = null;
+				token.ThrowIfCancellationRequested();
+				if (core.Status == CoreStatus.Connected || core.Status == CoreStatus.Connecting || !state.Profiles.Contains(target)) return;
+				state.SelectedProfileId = target.Id; StateStore.Save(state);
+				try {
+					manualDisconnect = false; connectionRequested = true;
+					await core.StartAsync(target, EffectiveRouting());
+					var verified = await core.InitialVerification;
+					token.ThrowIfCancellationRequested();
+					if (state.SelectedProfileId != target.Id) return;
+					if (verified.Completed && verified.ProfileId == target.Id && verified.InternetOk && (verified.ProfileProbe?.Supported == false || verified.ProfileProbe?.Success == true)) {
+						RecordHistory("Автоподключение Windows", "Подключён проверенный профиль в фоне."); return;
+					}
+				} catch (OperationCanceledException) { throw; }
+				catch (Exception ex) { Debug.WriteLine("Startup: " + LogSanitizer.Sanitize(ex.Message)); }
+				if (token.IsCancellationRequested) return;
+				manualDisconnect = true; connectionRequested = false; core.Stop();
+			}
+			if (trayIcon != null) trayIcon.Text = "NOVA VPN — нет доступного профиля";
+			ShowNotification("Автоподключение: рабочий VPN-профиль не найден. Откройте NOVA из трея.");
+		} catch (OperationCanceledException) { }
+		catch (Exception ex) { Debug.WriteLine("Background startup: " + LogSanitizer.Sanitize(ex.Message)); ShowNotification("Не удалось подключить VPN автоматически. Откройте NOVA из трея."); }
+		finally { startupConnecting = false; }
+	}
+
 	public void ConfigureSnapshot(string theme, string background, string density, string serverView, double textScale, bool highContrast)
 	{
 		if (!snapshotMode) return;
@@ -1887,6 +1948,7 @@ public sealed class MainWindow : Window
 
 	private async Task SelectProfileAsync(VpnProfile profile)
 	{
+		startupCancellation.Cancel();
 		if (profile == null || closing) return;
 		if (profileSwitchInProgress)
 		{
@@ -2575,17 +2637,17 @@ public sealed class MainWindow : Window
 		Grid.SetColumn(description, 1);
 		row.Children.Add(description);
 		StackPanel control = new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-		TextBlock label = T(RouteLabel(route), 9.0, route == ApplicationRoutingService.Proxy ? AccentLight : Muted, FontWeights.SemiBold);
+		TextBlock label = T(RouteLabel(route), 9.0, route == ApplicationRoutingService.Proxy ? AccentLight : route == ApplicationRoutingService.Direct ? Teal : Muted, FontWeights.SemiBold);
 		label.HorizontalAlignment = HorizontalAlignment.Center;
 		control.Children.Add(label);
 		Border track = new Border
 		{
-			Width = 50, Height = 27, CornerRadius = Radius(14),
+			Width = 52, Height = 26, CornerRadius = new CornerRadius(13), BorderThickness = new Thickness(0.7), BorderBrush = new SolidColorBrush(BorderColor),
 			Background = new SolidColorBrush(route == ApplicationRoutingService.Proxy ? Accent : route == ApplicationRoutingService.Direct ? Teal : BorderColor)
 		};
 		track.Child = new Ellipse
 		{
-			Width = 17, Height = 17, Fill = Brushes.White, Margin = new Thickness(3),
+			Width = 19, Height = 19, Fill = Brushes.White, Margin = new Thickness(3), Effect = new DropShadowEffect { BlurRadius = 4, ShadowDepth = 1, Opacity = 0.18 },
 			HorizontalAlignment = route == ApplicationRoutingService.Proxy ? HorizontalAlignment.Right : route == ApplicationRoutingService.Direct ? HorizontalAlignment.Left : HorizontalAlignment.Center
 		};
 		Button toggle = new Button
@@ -2597,6 +2659,18 @@ public sealed class MainWindow : Window
 				: "Нажмите для смены маршрута. Повторное нажатие вернёт правило по умолчанию.",
 			IsEnabled = state.Zapret?.RoutingChangesApplied != true
 		};
+		// A bare presenter avoids the square native Button chrome around the switch.
+		var switchRoot = new FrameworkElementFactory(typeof(Border)); switchRoot.SetValue(Border.BackgroundProperty, Brushes.Transparent);
+		var switchPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
+		switchPresenter.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+		switchPresenter.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center); switchRoot.AppendChild(switchPresenter);
+		toggle.Template = new ControlTemplate(typeof(Button)) { VisualTree = switchRoot };
+		toggle.FocusVisualStyle = null;
+		toggle.GotKeyboardFocus += (s, e) => track.BorderBrush = new SolidColorBrush(Accent);
+		toggle.LostKeyboardFocus += (s, e) => track.BorderBrush = new SolidColorBrush(BorderColor);
+		System.Windows.Automation.AutomationProperties.SetName(toggle, entry.Name + " · " + RouteLabel(route));
+		toggle.MouseEnter += (s, e) => track.Opacity = 0.85;
+		toggle.MouseLeave += (s, e) => track.Opacity = 1;
 		toggle.Click += delegate
 		{
 			string next = route == ApplicationRoutingService.Automatic ? ApplicationRoutingService.Proxy
@@ -3138,7 +3212,9 @@ public sealed class MainWindow : Window
 		stackPanel.Children.Add(SectionTitle("ОФОРМЛЕНИЕ"));
 		stackPanel.Children.Add(AppearanceSummaryCard());
 		stackPanel.Children.Add(SectionTitle("ЗАПУСК", new Thickness(0.0, 20.0, 0.0, 10.0)));
-		stackPanel.Children.Add(SettingCard("Автоподключение", "Подключаться при открытии NOVA", state.AutoConnect, delegate
+		stackPanel.Children.Add(SettingCard("Запускать с Windows", "Открыть приложение после входа в Windows, без автоподключения", state.StartWithWindows, async delegate { await SetWindowsStartupAsync(false); }));
+		stackPanel.Children.Add(SettingCard("Запускать и подключать с Windows", "Без окна: последний использованный профиль, при отказе — лучший по HTTPS-проверке", state.StartConnectedWithWindows, async delegate { await SetWindowsStartupAsync(true); }));
+		stackPanel.Children.Add(SettingCard("Автоподключение", "Подключаться при открытии NOVA вручную", state.AutoConnect, delegate
 		{
 			state.AutoConnect = !state.AutoConnect;
 			StateStore.Save(state);
@@ -3676,6 +3752,7 @@ public sealed class MainWindow : Window
 
 	private async Task ToggleConnectionAsync()
 	{
+		startupCancellation.Cancel();
 		if (profileSwitchInProgress)
 		{
 			Toast("Дождитесь завершения переключения VPN-конфига.", Warning);
@@ -3834,7 +3911,7 @@ public sealed class MainWindow : Window
 	{
 		base.Dispatcher.BeginInvoke((Action)delegate
 		{
-			if (!closing && !manualDisconnect && connectionRequested && state.AutoReconnect && reconnectAttempt < 5)
+			if (!closing && !startupConnecting && !manualDisconnect && connectionRequested && state.AutoReconnect && reconnectAttempt < 5)
 			{
 				VpnProfile failed = SelectedProfile();
 				if (failed != null)
@@ -3911,6 +3988,7 @@ public sealed class MainWindow : Window
 			}
 			if (newStatus == CoreStatus.Connected)
 			{
+				if (!snapshotMode && core.Status == CoreStatus.Connected && core.ActiveProfileId != null) { state.LastConnectedProfileId = core.ActiveProfileId; StateStore.Save(state); }
 				ShowNotification("VPN подключён: " + (SelectedProfile()?.Name ?? "сервер"));
 			}
 			else if (newStatus == CoreStatus.Error)
@@ -4108,7 +4186,9 @@ public sealed class MainWindow : Window
 		state.SelectedProfileId = source.SelectedProfileId;
 		state.Routing = source.Routing ?? new RoutingSettings();
 		state.AutoConnect = source.AutoConnect;
-		state.StartWithWindows = source.StartWithWindows;
+		// Autostart is machine/user-specific. Import must not pretend a scheduler task exists.
+		state.LastWorkingProfileId = source.LastWorkingProfileId;
+		state.LastConnectedProfileId = source.LastConnectedProfileId;
 		state.MinimizeToTray = source.MinimizeToTray;
 		state.Theme = source.Theme;
 		state.AutoReconnect = source.AutoReconnect;

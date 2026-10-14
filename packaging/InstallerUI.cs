@@ -16,13 +16,13 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NOVA VPN Setup")]
 [assembly: AssemblyProduct("NOVA VPN")]
-[assembly: AssemblyVersion("2.3.20.0")]
-[assembly: AssemblyFileVersion("2.3.20.0")]
+[assembly: AssemblyVersion("2.3.21.0")]
+[assembly: AssemblyFileVersion("2.3.21.0")]
 
 internal sealed class NovaInstaller : Form
 {
     private new const string ProductName = "NOVA VPN";
-    private const string DisplayVersion = "2.3.20";
+    private const string DisplayVersion = "2.3.21";
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NOVA VPN";
     private readonly Color background = Color.FromArgb(233, 239, 246);
     private readonly Color panel = Color.FromArgb(248, 250, 253);
@@ -489,6 +489,10 @@ internal sealed class NovaInstaller : Form
         try
         {
             bool removeDesktopShortcut = false;
+            using (Process startup = Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "schtasks.exe"), "/Delete /TN \"NOVA VPN Startup\" /F") { UseShellExecute = false, CreateNoWindow = true }))
+            {
+                if (!startup.WaitForExit(5000)) startup.Kill();
+            }
             using (RegistryKey key = Registry.LocalMachine.OpenSubKey(UninstallKey, true))
             {
                 if (key != null)

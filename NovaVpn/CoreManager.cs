@@ -30,6 +30,8 @@ public sealed class CoreManager : IDisposable
 	public ConnectionVerification Verification { get; private set; } = new ConnectionVerification();
 
 	public RoutingSettings LastConnectedRouting { get; private set; }
+	public Task<ConnectionVerification> InitialVerification { get; private set; }
+	public string ActiveProfileId => connectedProfile?.Id;
 
 	public CoreStatus Status { get; private set; }
 
@@ -141,7 +143,7 @@ public sealed class CoreManager : IDisposable
 			LastConnectedRouting = RoutingOverlayService.Clone(routing);
 			connectedProfile = profile;
 			ChangeStatus(CoreStatus.Connected, "Защищено");
-			_ = VerifyConnectionAsync();
+			InitialVerification = VerifyConnectionAsync();
 		}
 	}
 

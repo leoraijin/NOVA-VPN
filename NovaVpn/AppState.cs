@@ -26,6 +26,15 @@ public sealed class AppState
 	public bool StartWithWindows;
 
 	[DataMember]
+	public bool StartConnectedWithWindows;
+
+	[DataMember]
+	public string LastWorkingProfileId;
+
+	[DataMember]
+	public string LastConnectedProfileId;
+
+	[DataMember]
 	public bool MinimizeToTray = true;
 
 	[DataMember]
