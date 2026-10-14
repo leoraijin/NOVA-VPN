@@ -3273,13 +3273,6 @@ public sealed class MainWindow : Window
 			StateStore.Save(state);
 			Navigate("settings");
 		}));
-		stackPanel.Children.Add(SettingCard("Запускать с Windows", "Открывать NOVA после входа в систему", state.StartWithWindows, delegate
-		{
-			state.StartWithWindows = !state.StartWithWindows;
-			SetStartup(state.StartWithWindows);
-			StateStore.Save(state);
-			Navigate("settings");
-		}));
 		stackPanel.Children.Add(SectionTitle("DNS", new Thickness(0.0, 20.0, 0.0, 10.0)));
 		stackPanel.Children.Add(ChoiceCard("Защищённый DNS", "DNS-over-HTTPS через Cloudflare", state.Routing.DnsMode == "Secure", delegate
 		{

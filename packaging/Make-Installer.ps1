@@ -69,7 +69,7 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
     }
 }
 $releaseNotes = @'
-NOVA VPN 2.3.21 — 14 октября 2026
+NOVA VPN 2.3.22 — 14 октября 2026
 ==================================
 • Настройки → Запуск: обычный старт с Windows либо фоновый старт и автоподключение, два взаимоисключающих тумблера.
 • В фоне сначала проверяется последний использованный профиль, при отказе выбирается лучший по успешному HTTPS-тесту.
@@ -262,7 +262,7 @@ uses a packet-filter driver.
 }
 
 $instructions = @'
-NOVA VPN 2.3.21 — установка
+NOVA VPN 2.3.22 — установка
 =========================
 
 Запустите «NOVA VPN Setup.exe» и выберите папку установки. Windows запросит
@@ -290,7 +290,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.21.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.22.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),
