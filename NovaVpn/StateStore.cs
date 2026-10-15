@@ -347,13 +347,16 @@ public static class StateStore
 	private static void NormalizeVisual(VisualPreferences visual)
 	{
 		if (visual == null) return;
-		visual.ThemeName = ThemePalette.NormalizeName(visual.ThemeName);
+		if (ThemePalette.NormalizeName(visual.ThemeName) == ThemePalette.WindowsDark) { visual.DarkMode = true; visual.ThemeName = ThemePalette.Windows; }
+        visual.ThemeName = ThemePalette.NormalizeName(visual.ThemeName);
+        if (double.IsNaN(visual.MaterialHue) || double.IsInfinity(visual.MaterialHue)) visual.MaterialHue = 275;
+        visual.MaterialHue = Math.Max(0, Math.Min(360, visual.MaterialHue));
 		visual.AccentHex = "";
 		visual.SuccessHex = "";
 		visual.CornerRadius = ClampVisual(visual.CornerRadius, 8.0, 32.0, 18.0);
 		visual.SurfaceOpacity = ClampVisual(visual.SurfaceOpacity, 0.78, 1.0, 1.0);
 		visual.GlassFrost = ClampVisual(visual.GlassFrost, 0.0, 1.0, 0.45);
-		visual.GlassBlur = ClampVisual(visual.GlassBlur, 0, 18, 10);
+		visual.GlassBlur = ClampVisual(visual.GlassBlur, 0, 32, 10);
 		visual.GlassShadow = ClampVisual(visual.GlassShadow, 0, 1, 1);
 		visual.GlassHighlight = ClampVisual(visual.GlassHighlight, 0, 1, 1);
 		visual.SoftContrast = ClampVisual(visual.SoftContrast, 0, 1, 0);
@@ -382,7 +385,7 @@ public static class StateStore
 				settings.CornerRadius = ClampVisual(settings.CornerRadius, 8.0, 32.0, defaults.CornerRadius);
 				settings.SurfaceOpacity = ClampVisual(settings.SurfaceOpacity, 0.78, 1.0, defaults.SurfaceOpacity);
 				settings.GlassFrost = ClampVisual(settings.GlassFrost, 0.0, 1.0, defaults.GlassFrost);
-				settings.GlassBlur = ClampVisual(settings.GlassBlur, 0, 18, defaults.GlassBlur);
+				settings.GlassBlur = ClampVisual(settings.GlassBlur, 0, 32, defaults.GlassBlur);
 				settings.GlassShadow = ClampVisual(settings.GlassShadow, 0, 1, defaults.GlassShadow);
 				settings.GlassHighlight = ClampVisual(settings.GlassHighlight, 0, 1, defaults.GlassHighlight);
 				settings.SoftContrast = ClampVisual(settings.SoftContrast, 0, 1, 0);

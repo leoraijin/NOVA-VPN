@@ -7,7 +7,9 @@ namespace NovaVpn;
 [DataContract]
 public sealed class VisualPreferences
 {
-	[DataMember] public string ThemeName = ThemePalette.WindowsLight;
+	[DataMember] public string ThemeName = ThemePalette.Windows;
+	[DataMember] public bool DarkMode;
+	[DataMember] public double MaterialHue = 275;
 	[DataMember] public string AccentHex = "";
 	[DataMember] public string SuccessHex = "";
 	[DataMember] public double CornerRadius = 18.0;
@@ -37,11 +39,14 @@ public sealed class VisualPreferences
 	[DataMember] public List<string> HiddenHomeCards = new List<string>();
 	[DataMember] public Dictionary<string, VisualThemeOverrides> ThemeOverrides = new Dictionary<string, VisualThemeOverrides>(StringComparer.OrdinalIgnoreCase);
 
+	[OnDeserializing]
+	private void BeforeDeserialize(StreamingContext context) { MaterialHue = 275; }
+
 	public VisualPreferences Clone()
 	{
 		VisualPreferences copy = new VisualPreferences
 		{
-			ThemeName = ThemeName,
+			ThemeName = ThemeName, DarkMode = DarkMode, MaterialHue = MaterialHue,
 			AccentHex = AccentHex,
 			SuccessHex = SuccessHex,
 			CornerRadius = CornerRadius,
@@ -82,7 +87,7 @@ public sealed class VisualPreferences
 	{
 		if (other == null) return;
 		VisualPreferences copy = other.Clone();
-		ThemeName = copy.ThemeName;
+		ThemeName = copy.ThemeName; DarkMode = copy.DarkMode; MaterialHue = copy.MaterialHue;
 		AccentHex = copy.AccentHex;
 		SuccessHex = copy.SuccessHex;
 		CornerRadius = copy.CornerRadius;
@@ -183,8 +188,8 @@ public sealed class VisualThemeOverrides
 		{
 			case ThemePalette.IosLiquidGlass:
 				result.GlassFrost = 0.0; result.CornerRadius = 18.0; result.SurfaceOpacity = 0.90; result.GlowIntensity = 0.22; result.TextScale = 1.02; result.AnimationSpeed = 1.12; result.BackgroundMode = "Glass"; result.BackgroundDim = 0.12; break;
-			case ThemePalette.AmberGlass:
-				result.GlassFrost = 0.56; result.GlassBlur = 10.0; result.GlassShadow = 0.78; result.GlassHighlight = 0.82; result.CornerRadius = 18.0; result.SurfaceOpacity = 0.96; result.GlowIntensity = 0.30; result.TextScale = 1.02; result.AnimationSpeed = 1.0; result.BackgroundMode = "Glass"; result.BackgroundDim = 0.08; break;
+			case ThemePalette.MaterialYou:
+                result.CornerRadius = 28; result.BackgroundMode = "Solid"; result.TextScale = 1.04; break;
 			case ThemePalette.OneUi:
 				result.CornerRadius = 22.0; result.SurfaceOpacity = 0.98; result.GlowIntensity = 0.12; result.TextScale = 1.04; result.AnimationSpeed = 1.0; result.BackgroundMode = "Solid"; result.BackgroundDim = 0.0; break;
 			case ThemePalette.WindowsDark:

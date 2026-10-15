@@ -36,12 +36,12 @@ public static class VisualResourceManager
 		application.Resources["NovaSelectorShadow"] = palette.IsGlass && !visual.HighContrast ? VisualDesign.KeyShadow(false, visual.GlassShadow) : new System.Windows.Media.Effects.DropShadowEffect { Opacity = 0 };
 		application.Resources["NovaSelectorPressedShadow"] = palette.IsGlass && !visual.HighContrast ? VisualDesign.KeyShadow(true, visual.GlassShadow) : new System.Windows.Media.Effects.DropShadowEffect { Opacity = 0 };
 		application.Resources["NovaSelectorPressedOffset"] = new TranslateTransform(palette.IsGlass ? 1 : 0, palette.IsGlass ? 1 : 0);
-		if (palette.IsGlass) {
+		{
 			var buttons = new Style(typeof(Button));
 			buttons.Setters.Add(new Setter(Control.TemplateProperty, VisualDesign.ButtonTemplate(visual, 12)));
 			application.Resources[typeof(Button)] = buttons;
-		} else application.Resources.Remove(typeof(Button));
-		application.Resources["NovaControlRadius"] = new CornerRadius(Math.Min(7, visual.CornerRadius * .35));
+		}
+		application.Resources["NovaControlRadius"] = new CornerRadius(VisualDesign.ButtonRadius(visual, 16));
 		application.Resources["NovaControlFontSize"] = 12.0 * visual.TextScale;
 		application.Resources["NovaControlHeight"] = Math.Max(34.0 * VisualDesign.Density(visual), 30.0 * visual.TextScale);
 		if (installed) return;
@@ -53,13 +53,14 @@ public static class VisualResourceManager
 
 	private const string SelectorStyle = @"
 <Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' xmlns:nova='clr-namespace:NovaVpn;assembly=NOVA VPN' TargetType='{x:Type ComboBox}'>
+  <Setter Property='FontFamily' Value='Segoe UI'/>
   <Setter Property='MinHeight' Value='{DynamicResource NovaControlHeight}'/>
   <Setter Property='FontSize' Value='{DynamicResource NovaControlFontSize}'/>
   <Setter Property='Foreground' Value='{DynamicResource NovaTextBrush}'/>
   <Setter Property='ItemContainerStyle'><Setter.Value><Style TargetType='{x:Type ComboBoxItem}'>
     <Setter Property='Padding' Value='10,7'/><Setter Property='Foreground' Value='{DynamicResource NovaTextBrush}'/>
     <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='{x:Type ComboBoxItem}'>
-      <Border x:Name='Item' CornerRadius='{DynamicResource NovaControlRadius}' Background='Transparent' Padding='{TemplateBinding Padding}'><ContentPresenter/></Border>
+      <Border x:Name='Item' CornerRadius='{DynamicResource NovaControlRadius}' Background='Transparent' Padding='{TemplateBinding Padding}'><ContentPresenter TextElement.FontFamily='{TemplateBinding FontFamily}'/></Border>
       <ControlTemplate.Triggers><Trigger Property='IsHighlighted' Value='True'><Setter TargetName='Item' Property='Background' Value='{DynamicResource NovaSelectionBrush}'/></Trigger><Trigger Property='IsSelected' Value='True'><Setter TargetName='Item' Property='Background' Value='{DynamicResource NovaSelectionBrush}'/><Setter Property='FontWeight' Value='SemiBold'/></Trigger></ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
   </Style></Setter.Value></Setter>

@@ -112,7 +112,11 @@ public sealed class AppearanceWindow : Window
 	{
 		body.Children.Clear();
 		body.Children.Add(Section("ПРОФИЛЬ ОФОРМЛЕНИЯ"));
-		body.Children.Add(ThemeSelectionRow());
+		body.Children.Add(ChoiceRow("Тема", new[] { "Light", "Dark" }, working.DarkMode ? "Dark" : "Light", value => { working.DarkMode = value == "Dark"; RefreshControls(); }));
+        body.Children.Add(ThemeSelectionRow());
+        if (palette.Name == ThemePalette.MaterialYou)
+            body.Children.Add(SliderRow("Цвет Material You", "Цветовой тон • 0–360° • яркость темы не меняется", 0, 360, working.MaterialHue, value => working.MaterialHue = value, "0"));
+		if (palette.IsGlass) body.Children.Add(SliderRow("Прозрачное → матовое", "Единый ползунок прозрачности и размытия; текст остаётся чётким", 0, 100, working.GlassFrost * 100, value => { working.GlassFrost = value / 100; working.GlassBlur = 1 + 31 * value / 100; }, "0%"));
 		body.Children.Add(Section("ПРЕДПРОСМОТР", 12));
 		body.Children.Add(PreviewCard());
 
@@ -124,8 +128,7 @@ public sealed class AppearanceWindow : Window
 		body.Children.Add(SliderRow("Непрозрачность поверхностей", "Меньше — сквозь карточки сильнее виден фон. Контрастный режим делает их непрозрачными.", 78, 100, working.SurfaceOpacity * 100, value => working.SurfaceOpacity = value / 100.0, "0%"));
 		if (palette.IsGlass)
 		{
-			body.Children.Add(SliderRow("Прозрачность стекла", "Прозрачность заливки: текст и значки остаются чёткими", 0, 100, (1.0 - working.GlassFrost) * 100, value => working.GlassFrost = 1.0 - value / 100.0, "0%"));
-			body.Children.Add(SliderRow("Матовость стекла", "Размытие подложки независимо от прозрачности", 0, 18, working.GlassBlur, value => working.GlassBlur = value, "0"));
+			
 			body.Children.Add(SliderRow("Сила теней", "Мягкая тень от верхнего левого источника света", 0, 100, working.GlassShadow * 100, value => working.GlassShadow = value / 100.0, "0%"));
 			body.Children.Add(SliderRow("Сила бликов", "Светлый край и отражение на стекле", 0, 100, working.GlassHighlight * 100, value => working.GlassHighlight = value / 100.0, "0%"));
 		}
@@ -162,11 +165,11 @@ public sealed class AppearanceWindow : Window
 		{
 			string selectedTheme = themeName;
 			bool selected = string.Equals(working.ThemeName, themeName, StringComparison.OrdinalIgnoreCase);
-			ThemePalette sample = ThemePalette.Create(new VisualPreferences { ThemeName = themeName });
+			ThemePalette sample = ThemePalette.Create(new VisualPreferences { ThemeName = themeName, DarkMode = working.DarkMode, MaterialHue = working.MaterialHue });
 			Border sampleSurface = new Border { Height = 28, Background = new LinearGradientBrush(sample.Surface2, sample.Surface, 35), BorderBrush = new SolidColorBrush(sample.Border), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Margin = new Thickness(0, 0, 0, 7) };
 			Grid sampleGrid = new Grid(); sampleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.7, GridUnitType.Star) }); sampleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.3, GridUnitType.Star) });
 			Border sampleNav = new Border { Background = new SolidColorBrush(sample.Sidebar), CornerRadius = new CornerRadius(6, 0, 0, 6) }; sampleGrid.Children.Add(sampleNav);
-			Border sampleAction = new Border { Width = 24, Height = 12, CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(sample.Accent), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(sampleAction, 1); sampleGrid.Children.Add(sampleAction); sampleSurface.Child = sampleGrid;
+			Border sampleAction = new Border { Width = 24, Height = 12, CornerRadius = new CornerRadius(themeName == ThemePalette.Windows ? 2 : themeName == ThemePalette.OneUi ? 5 : 12), Background = new SolidColorBrush(sample.Accent), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(sampleAction, 1); sampleGrid.Children.Add(sampleAction); sampleSurface.Child = sampleGrid;
 			StackPanel content = new StackPanel(); content.Children.Add(sampleSurface); content.Children.Add(Text(ThemeLabel(themeName), 10.5, palette.IsGlass ? palette.Text : selected ? (sample.IsLight ? sample.Accent : sample.Text) : sample.Text, FontWeights.SemiBold));
 			Button card = new Button { Content = content, Width = 166, Height = 69, Padding = new Thickness(9), Margin = new Thickness(0, 0, 8, 8), Background = new SolidColorBrush(selected ? sample.SoftSelection : sample.Surface), Foreground = new SolidColorBrush(sample.Text), BorderBrush = new SolidColorBrush(selected ? sample.Accent : sample.Border), BorderThickness = new Thickness(selected ? 2 : 1), Cursor = Cursors.Hand, ToolTip = ThemeLabel(themeName), Tag = themeName };
 			card.Click += delegate { if (working.ThemeName != selectedTheme) SwitchTheme(selectedTheme); };
@@ -320,7 +323,13 @@ public sealed class AppearanceWindow : Window
 		TextBlock number = Text(FormatValue(value, format), 11, palette.Accent, FontWeights.SemiBold); number.HorizontalAlignment = HorizontalAlignment.Right; number.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(number, 1); header.Children.Add(number); panel.Children.Add(header);
 		Slider slider = new Slider { Minimum = min, Maximum = max, Value = value, Height = 48, Margin = new Thickness(0, 8, 0, 0), IsSnapToTickEnabled = false };
 		slider.ValueChanged += delegate { number.Text = FormatValue(slider.Value, format); setter(slider.Value); NotifyVisualChanged(); };
-		panel.Children.Add(slider); card.Child = panel; return card;
+		if (title == "Цвет Material You") {
+            var spectrum = new LinearGradientBrush();
+            string[] hues = { "#E85B5B", "#E5C74D", "#63BD66", "#46BCC1", "#547CE3", "#BD64D7", "#E85B5B" };
+            for (int i=0; i<hues.Length; i++) spectrum.GradientStops.Add(new GradientStop(ThemePalette.Parse(hues[i]), i/6.0));
+            panel.Children.Add(new Border { Height=8, CornerRadius=new CornerRadius(4), Background=spectrum, Margin=new Thickness(0,8,0,0) });
+        }
+        panel.Children.Add(slider); card.Child = panel; return card;
 	}
 
 	private UIElement ChoiceRow(string title, IEnumerable<string> values, string selected, Action<string> setter)
@@ -419,7 +428,7 @@ public sealed class AppearanceWindow : Window
 		UpdatePreviewCard();
 	}
 
-	private static string BackdropKey(VisualPreferences value) => string.Join("|", ThemePalette.NormalizeName(value?.ThemeName), value?.BackgroundMode ?? "", value?.HighContrast ?? false, value?.GlowIntensity ?? 0.0);
+	private static string BackdropKey(VisualPreferences value) => string.Join("|", ThemePalette.NormalizeName(value?.ThemeName), value?.DarkMode ?? false, value?.MaterialHue ?? 275, value?.BackgroundMode ?? "", value?.HighContrast ?? false, value?.GlowIntensity ?? 0.0);
 
 	private void RefreshControls(double scrollOffset = 0.0)
 	{
@@ -443,7 +452,8 @@ public sealed class AppearanceWindow : Window
 	private void EnableAppearanceButtonMotion(Button button)
 	{
 		if (button == null) return;
-		button.Template = VisualDesign.ButtonTemplate(working, 12);
+		button.FontFamily = VisualDesign.InterfaceFont(working);
+        button.Template = VisualDesign.ButtonTemplate(working, 12);
 		ScaleTransform scale = new ScaleTransform(1.0, 1.0);
 		button.RenderTransformOrigin = new Point(0.5, 0.5);
 		button.RenderTransform = scale;
@@ -489,6 +499,7 @@ public sealed class AppearanceWindow : Window
 	{
 		switch (value)
 		{
+			case "Light": return "Светлая"; case "Dark": return "Тёмная";
 			case "Compact": return "Компактно"; case "Standard": return "Стандартно"; case "Comfortable": return "Просторно";
 			case "Detailed": return "Подробно"; case "Grid": return "Сетка";
 			case "Solid": return "Сплошной"; case "Gradient": return "Мягкий градиент"; case "Glass": return "Стекло";

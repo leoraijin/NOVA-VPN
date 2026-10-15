@@ -7,7 +7,9 @@ public sealed class ThemePalette
 {
 	public const string IosLiquidGlass = "iOS 27 · Liquid Glass";
 	public const string AmberGlass = "Amber Glass";
-	public const string OneUi = "One UI 8.0";
+	public const string OneUi = "One UI 9";
+	public const string MaterialYou = "Material You";
+	public const string Windows = "Windows 11";
 	public const string WindowsLight = "Windows 11 Light";
 	public const string WindowsDark = "Windows 11 Dark";
 
@@ -34,27 +36,53 @@ public sealed class ThemePalette
 	public Color BackdropMiddle;
 	public Color BackdropEnd;
 
-	public static readonly string[] ThemeNames = { IosLiquidGlass, AmberGlass, OneUi, WindowsLight, WindowsDark };
+	public static readonly string[] ThemeNames = { IosLiquidGlass, MaterialYou, OneUi, Windows };
 
 	public static string NormalizeName(string name)
 	{
 		string value = (name ?? "").Trim();
+		if (value.Equals(MaterialYou, StringComparison.OrdinalIgnoreCase)) return MaterialYou;
 		if (value.Equals(IosLiquidGlass, StringComparison.OrdinalIgnoreCase) || value.Equals("iOS 27", StringComparison.OrdinalIgnoreCase) || value.Equals("Liquid Glass", StringComparison.OrdinalIgnoreCase) || value.Equals("iOS Liquid Glass", StringComparison.OrdinalIgnoreCase)) return IosLiquidGlass;
-		if (value.Equals(AmberGlass, StringComparison.OrdinalIgnoreCase) || value.Equals("Warm Glass", StringComparison.OrdinalIgnoreCase) || value.Equals("Тёплое стекло", StringComparison.OrdinalIgnoreCase) || value.Equals("Янтарное стекло", StringComparison.OrdinalIgnoreCase)) return AmberGlass;
-		if (value.Equals(OneUi, StringComparison.OrdinalIgnoreCase) || value.Equals("One UI", StringComparison.OrdinalIgnoreCase) || value.Equals("One UI 8", StringComparison.OrdinalIgnoreCase)) return OneUi;
+		if (value.Equals(AmberGlass, StringComparison.OrdinalIgnoreCase) || value.Equals("Warm Glass", StringComparison.OrdinalIgnoreCase) || value.Equals("Тёплое стекло", StringComparison.OrdinalIgnoreCase) || value.Equals("Янтарное стекло", StringComparison.OrdinalIgnoreCase)) return IosLiquidGlass;
+		if (value.Equals(OneUi, StringComparison.OrdinalIgnoreCase) || value.Equals("One UI", StringComparison.OrdinalIgnoreCase) || value.Equals("One UI 8.0", StringComparison.OrdinalIgnoreCase) || value.Equals("One UI 8", StringComparison.OrdinalIgnoreCase)) return OneUi;
 		if (value.Equals(WindowsDark, StringComparison.OrdinalIgnoreCase) || value.Equals("Dark", StringComparison.OrdinalIgnoreCase) || value.Equals("NOVA Dark", StringComparison.OrdinalIgnoreCase) || value.Equals("OLED Black", StringComparison.OrdinalIgnoreCase)) return WindowsDark;
-		return WindowsLight;
+		return Windows;
 	}
 
 	public static ThemePalette Create(VisualPreferences preferences)
 	{
 		string name = NormalizeName(preferences?.ThemeName);
-		ThemePalette palette = name == IosLiquidGlass ? LiquidGlass() : name == AmberGlass ? WarmGlass() : name == OneUi ? SamsungOneUi() : name == WindowsDark ? Dark() : Light();
+		bool dark = preferences?.DarkMode == true || name == WindowsDark;
+        ThemePalette palette = name == IosLiquidGlass ? LiquidGlass() : name == OneUi ? SamsungOneUi() : dark ? Dark() : Light();
+        palette.Name = name == WindowsDark ? Windows : name;
+        if (dark && name != Windows && name != WindowsDark) {
+            ThemePalette d = Dark();
+            palette.IsLight = false; palette.Bg = d.Bg; palette.Sidebar = d.Sidebar;
+            palette.Surface = d.Surface; palette.Surface2 = d.Surface2; palette.Border = d.Border;
+            palette.Text = d.Text; palette.Muted = d.Muted; palette.Input = d.Input;
+            palette.Success = d.Success; palette.Danger = d.Danger; palette.Warning = d.Warning; palette.Teal = d.Teal;
+            palette.BackdropStart = Parse("#102538"); palette.BackdropMiddle = Parse("#171C2B"); palette.BackdropEnd = Parse("#202537");
+            palette.Accent = Parse("#80B8FF"); palette.AccentLight = palette.Accent;
+            palette.SoftSelection = Parse("#263B53");
+        }
+        if (name == OneUi) {
+            palette.Bg = Parse(dark ? "#080808" : "#F2F2F2");
+            palette.Sidebar = palette.Bg; palette.Surface = Parse(dark ? "#191919" : "#FFFFFF");
+            palette.Surface2 = Parse(dark ? "#252525" : "#F7F7F7");
+            palette.Text = Parse(dark ? "#F5F5F5" : "#171717");
+            palette.Muted = Parse(dark ? "#B5B5B5" : "#666666");
+            palette.Accent = Parse(dark ? "#90B8FF" : "#1769E0");
+            palette.SoftSelection = Parse(dark ? "#223452" : "#E3EDFF");
+            palette.AccentLight = palette.Accent;
+            palette.Border = Parse(dark ? "#333333" : "#E2E2E2");
+            palette.Input = palette.Surface; palette.BackdropStart = palette.BackdropMiddle = palette.BackdropEnd = palette.Bg;
+        }
+        if (name == MaterialYou) ApplyMaterial(palette, preferences?.MaterialHue ?? 275, dark);
 		if (preferences != null)
 		{
 			// Colors are owned by the selected stock theme; legacy/imported overrides are ignored.
 			double opacity = Clamp(preferences.SurfaceOpacity, 0.78, 1.0);
-			if (palette.IsGlass) opacity *= 0.22 + 0.78 * Clamp(preferences.GlassFrost, 0, 1);
+			if (palette.IsGlass) opacity *= 0.06 + 0.90 * Clamp(preferences.GlassFrost, 0, 1);
 			palette.Sidebar = WithOpacity(palette.Sidebar, opacity);
 			palette.Surface = WithOpacity(palette.Surface, opacity);
 			palette.Surface2 = WithOpacity(palette.Surface2, opacity);
@@ -75,7 +103,7 @@ public sealed class ThemePalette
 		return palette;
 	}
 
-	public static Color ReadableForeground(Color background) => ContrastRatio(background, Colors.White) >= 4.5 ? Colors.White : Parse("#172333");
+	public static Color ReadableForeground(Color background) => ContrastRatio(background, Colors.White) >= 4.5 ? Colors.White : Colors.Black;
 
 	public Color Map(string hex)
 	{
@@ -149,15 +177,6 @@ public sealed class ThemePalette
 		BackdropStart = Parse("#D7ECFC"), BackdropMiddle = Parse("#E7F1F7"), BackdropEnd = Parse("#D5E6F4")
 	};
 
-	private static ThemePalette WarmGlass() => new ThemePalette
-	{
-		Name = AmberGlass, IsLight = true, IsGlass = true,
-		Bg = Parse("#F5D5AE"), Sidebar = Parse("#FFF0D8"), Surface = Parse("#FFF9F1"), Surface2 = Parse("#FBE9D4"),
-		Border = Parse("#DCC09E"), Text = Parse("#38281D"), Muted = Parse("#503821"), Accent = Parse("#B94710"), AccentLight = Parse("#DF6B22"),
-		Teal = Parse("#347DA5"), Success = Parse("#317653"), Danger = Parse("#B33D32"), Warning = Parse("#8D570B"), Input = Parse("#FFF9F1"), SoftSelection = Parse("#F4D5B1"),
-		BackdropStart = Parse("#82B4D3"), BackdropMiddle = Parse("#FFD17D"), BackdropEnd = Parse("#E9692D")
-	};
-
 	private static ThemePalette Dark() => new ThemePalette
 	{
 		Name = WindowsDark, IsLight = false, IsGlass = false,
@@ -166,6 +185,29 @@ public sealed class ThemePalette
 		Teal = Parse("#52C9C0"), Success = Parse("#5BC59A"), Danger = Parse("#F0808C"), Warning = Parse("#F1C36E"), Input = Parse("#20262E"), SoftSelection = Parse("#33465C"),
 		BackdropStart = Parse("#242424"), BackdropMiddle = Parse("#202020"), BackdropEnd = Parse("#262626")
 	};
+
+    private static void ApplyMaterial(ThemePalette p, double hue, bool dark) {
+        p.IsLight = !dark; p.IsGlass = false;
+        p.Bg = Tone(hue, .16, dark ? 6 : 98); p.Sidebar = Tone(hue, .19, dark ? 10 : 95);
+        p.Surface = Tone(hue, .18, dark ? 12 : 96); p.Surface2 = Tone(hue, .22, dark ? 18 : 92);
+        p.Text = Tone(hue, .12, dark ? 94 : 10); p.Muted = Tone(hue, .12, dark ? 78 : 35);
+        p.Accent = Tone(hue, .62, dark ? 80 : 40); p.AccentLight = Tone(hue, .55, dark ? 85 : 45);
+        p.SoftSelection = Tone(hue, .44, dark ? 30 : 90); p.Border = Tone(hue, .15, dark ? 35 : 80);
+        p.Input = p.Surface2; p.BackdropStart = p.BackdropMiddle = p.BackdropEnd = p.Bg;
+    }
+    // Same hue / relative-luminance tone approach as the Android Expressive palette.
+    private static Color Tone(double hue, double saturation, double tone) {
+        hue = double.IsNaN(hue) || double.IsInfinity(hue) ? 275 : ((hue % 360) + 360) % 360;
+        double target = tone > 8 ? Math.Pow((tone + 16) / 116, 3) : tone / 903.3;
+        double low = 0, high = 1; Color c = Colors.Black;
+        for (int i = 0; i < 20; i++) {
+            double l = (low + high) / 2, a = saturation * Math.Min(l, 1-l);
+            Func<double, byte> channel = offset => { double k = (offset + hue / 30) % 12; return (byte)Math.Round(255 * (l - a * Math.Max(-1, Math.Min(Math.Min(k-3, 9-k), 1)))); };
+            c = Color.FromRgb(channel(0), channel(8), channel(4));
+            if (RelativeLuminance(c) < target) low = l; else high = l;
+        }
+        return c;
+    }
 
 	private static Color WithOpacity(Color color, double opacity) => Color.FromArgb((byte)Math.Round(255.0 * Clamp(opacity, 0.0, 1.0)), color.R, color.G, color.B);
 	private static Color Lighten(Color color, double amount) => Blend(color, Colors.White, amount);

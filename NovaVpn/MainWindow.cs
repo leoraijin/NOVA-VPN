@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -107,7 +107,7 @@ public sealed partial class MainWindow : Window
 	private TextBlock connectButtonLabel;
 
 	private TextBlock connectHeadline;
-	private StackPanel protectionIndicators;
+	private Panel protectionIndicators;
 
 	private TextBlock connectCaption;
 
@@ -639,6 +639,7 @@ public sealed partial class MainWindow : Window
 		Grid app = new Grid();
 		double sidebarWidth = responsiveMode == "Compact" ? 72.0 : responsiveMode == "Balanced" ? 202.0 : state.Visual.Density == "Compact" ? 205.0 : state.Visual.Density == "Comfortable" ? 244.0 : 228.0;
 		if (palette.IsGlass) sidebarWidth += 20;
+        if (palette.Name == ThemePalette.MaterialYou && responsiveMode != "Compact") sidebarWidth = 200;
 		app.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(sidebarWidth) });
 		app.ColumnDefinitions.Add(new ColumnDefinition());
 		app.RowDefinitions.Add(new RowDefinition { Height = new GridLength(50.0) });
@@ -683,7 +684,7 @@ public sealed partial class MainWindow : Window
 		button.BorderThickness = new Thickness(0.0);
 		button.Cursor = Cursors.Hand;
 		button.HorizontalContentAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
-		button.Template = ButtonTemplate(12.0);
+		button.Template = VisualDesign.ButtonTemplate(state.Visual, 24, false);
 		button.ToolTip = label;
 		AutomationProperties.SetName(button, label);
 		Button button2 = button;
@@ -695,7 +696,7 @@ public sealed partial class MainWindow : Window
 		grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(47.0) });
 		grid.ColumnDefinitions.Add(new ColumnDefinition { Width = compact ? new GridLength(0.0) : new GridLength(1.0, GridUnitType.Star) });
 		Border border = new Border();
-		border.Width = 3.0;
+		border.Width = palette.Name == ThemePalette.Windows ? 3.0 : 0.0;
 		border.Height = 22.0;
 		border.CornerRadius = new CornerRadius(2.0);
 		border.Background = Brushes.Transparent;
@@ -942,7 +943,7 @@ public sealed partial class MainWindow : Window
 		connectCaption.MaxWidth = 230.0;
 		connectCaption.HorizontalAlignment = HorizontalAlignment.Left;
 		stackPanel10.Children.Add(connectCaption);
-		StackPanel protection = new StackPanel { Margin = new Thickness(0.0, 12.0, 0.0, 0.0) };
+		WrapPanel protection = new WrapPanel { Margin = new Thickness(0.0, 12.0, 0.0, 0.0) };
 		protectionIndicators = protection;
 		UpdateVerificationDisplay();
 		stackPanel10.Children.Add(protection);
@@ -971,8 +972,49 @@ public sealed partial class MainWindow : Window
 			Grid.SetColumn(stackPanel10, 1); connectionSummary.Children.Add(stackPanel10);
 			Grid.SetRow(connectionSummary, 1); grid2.Children.Add(connectionSummary);
 		}
+        if (palette.Name == ThemePalette.MaterialYou || palette.Name == ThemePalette.OneUi || palette.Name == ThemePalette.Windows || responsiveMode != "Wide") {
+            // Move existing live controls into each design's desktop composition.
+            grid2.Children.Clear();
+            if (grid5.Parent is Panel oldPanel) oldPanel.Children.Remove(grid5);
+            if (stackPanel10.Parent is Panel statusPanel) statusPanel.Children.Remove(stackPanel10);
+            grid2.ColumnDefinitions.Clear(); grid2.RowDefinitions.Clear();
+            grid2.ColumnDefinitions.Add(new ColumnDefinition());
+            bool wide = responsiveMode == "Wide";
+            grid2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(wide ? 260 : 165) });
+            for (int row = 0; row < 3; row++) grid2.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetColumn(stackPanel2, 0); Grid.SetRow(stackPanel2, 2); Grid.SetColumnSpan(stackPanel2, 2);
+            stackPanel2.Margin = new Thickness(0, 18, 0, 0);
+            Grid.SetColumn(stackPanel10, 0); Grid.SetRow(stackPanel10, 0); Grid.SetColumnSpan(stackPanel10, 1);
+            stackPanel10.Margin = new Thickness(0); connectCaption.MaxWidth = 520;
+            Grid.SetColumn(grid5, 1); Grid.SetRow(grid5, 0);
+            grid5.Width = 240; grid5.Height = palette.Name == ThemePalette.Windows ? 80 : 112;
+            grid5.Stretch = Stretch.Uniform; connectionControl.Height = palette.Name == ThemePalette.Windows ? 72 : 102;
+            if (palette.Name == ThemePalette.MaterialYou) {
+                border2.CornerRadius = new CornerRadius(40,40,12,40);
+                connectHeadline.FontSize = 40 * state.Visual.TextScale; connectHeadline.FontWeight = FontWeights.Bold;
+                border2.Background = new SolidColorBrush(palette.SoftSelection);
+            } else if (palette.Name == ThemePalette.OneUi) {
+                border2.CornerRadius = new CornerRadius(28);
+                connectHeadline.FontSize = 32 * state.Visual.TextScale;
+                grid5.HorizontalAlignment = HorizontalAlignment.Right;
+            } else {
+                border2.CornerRadius = new CornerRadius(8);
+                border4.CornerRadius = new CornerRadius(4);
+                connectHeadline.FontSize = 26 * state.Visual.TextScale;
+            }
+            if (!wide) {
+                grid5.Width = 160; grid5.Height = palette.IsGlass ? 160 : 92;
+                grid5.VerticalAlignment = VerticalAlignment.Top;
+                if (palette.IsGlass) connectionControl.Height = 220;
+                connectHeadline.FontSize = 24 * state.Visual.TextScale;
+                connectHeadline.TextWrapping = TextWrapping.Wrap;
+                connectHeadline.TextTrimming = TextTrimming.None;
+            }
+            grid2.Children.Add(stackPanel10); grid2.Children.Add(grid5); grid2.Children.Add(stackPanel2);
+        }
 		border2.Child = grid2;
-		VisualDesign.ApplyGlassSurface(border2, state.Visual);
+		VisualDesign.ApplyGlassSurface(border2, state.Visual, palette.IsGlass);
+        if (palette.Name == ThemePalette.MaterialYou) border2.Background = new SolidColorBrush(palette.SoftSelection);
 		grid.Children.Add(border2);
 		Border zapretPanel = BuildZapretPanel(vpnProfile);
 		Grid.SetRow(zapretPanel, 4);
@@ -1009,7 +1051,7 @@ public sealed partial class MainWindow : Window
 			Button modeButton = SmallButton((isSelected ? "✓  " : "") + TrafficModeLabel(mode));
 			modeButton.Margin = new Thickness(0, 0, 7, 0);
 			modeButton.Background = new SolidColorBrush(isSelected ? Accent : Surface2);
-			modeButton.Foreground = isSelected ? Brushes.White : new SolidColorBrush(TextColor);
+			modeButton.Foreground = new SolidColorBrush(isSelected ? palette.AccentForeground : TextColor);
 			modeButton.FontWeight = isSelected ? FontWeights.SemiBold : FontWeights.Normal;
 			modeButton.BorderBrush = new SolidColorBrush(isSelected ? Accent : BorderColor);
 			modeButton.Template = TrafficModeButtonTemplate();
@@ -1816,7 +1858,7 @@ public sealed partial class MainWindow : Window
 
 	private UIElement PathNode(string icon, string label, Color color)
 	{
-		StackPanel node = new StackPanel { Width = 44 }; Viewbox glyph = IconFactory.Create(icon, 16, color); glyph.HorizontalAlignment = HorizontalAlignment.Center; node.Children.Add(glyph); TextBlock copy = T(label, 7.5, color, FontWeights.SemiBold); copy.HorizontalAlignment = HorizontalAlignment.Center; copy.Margin = new Thickness(0, 3, 0, 0); node.Children.Add(copy); return node;
+		StackPanel node = new StackPanel { Width = label == "Интернет" ? 68 : 38 }; Viewbox glyph = IconFactory.Create(icon, 16, color); glyph.HorizontalAlignment = HorizontalAlignment.Center; node.Children.Add(glyph); TextBlock copy = T(label, 7.5, color, FontWeights.SemiBold); copy.HorizontalAlignment = HorizontalAlignment.Center; copy.Margin = new Thickness(0, 3, 0, 0); node.Children.Add(copy); return node;
 	}
 
 	private TextBlock PathArrow() { TextBlock arrow = T("›", 16, Muted); arrow.VerticalAlignment = VerticalAlignment.Center; arrow.Margin = new Thickness(1, 0, 1, 8); return arrow; }
@@ -2732,8 +2774,11 @@ public sealed partial class MainWindow : Window
 		textBlock.VerticalAlignment = VerticalAlignment.Center;
 		grid.Children.Add(textBlock);
 		StackPanel stackPanel = new StackPanel();
-		stackPanel.Children.Add(T(title, 12.5, TextColor, FontWeights.SemiBold));
-		stackPanel.Children.Add(T(caption, 9.5, Muted));
+		TextBlock modeTitle = T(title, 12.5, TextColor, FontWeights.SemiBold);
+        TextBlock modeCaption = T(caption, 9.5, Muted);
+        modeTitle.TextWrapping = modeCaption.TextWrapping = TextWrapping.Wrap;
+        modeTitle.TextTrimming = modeCaption.TextTrimming = TextTrimming.None;
+        stackPanel.Children.Add(modeTitle); stackPanel.Children.Add(modeCaption);
 		Grid.SetColumn(stackPanel, 1);
 		grid.Children.Add(stackPanel);
 		border2.Child = grid;
@@ -4313,8 +4358,8 @@ public sealed partial class MainWindow : Window
 			});
 		}
 		StackPanel stackPanel = new StackPanel();
-		stackPanel.Children.Add(T(title, palette.Name == ThemePalette.OneUi ? 38 : palette.IsGlass ? 32 : 25, TextColor, palette.Name == ThemePalette.OneUi ? FontWeights.Bold : FontWeights.SemiBold));
-		stackPanel.Margin = new Thickness(0, palette.Name == ThemePalette.OneUi ? 18 : 0, 12, palette.Name == ThemePalette.OneUi ? 18 : 0);
+		stackPanel.Children.Add(T(title, responsiveMode == "Compact" ? 28 : palette.Name == ThemePalette.OneUi ? 40 : palette.Name == ThemePalette.MaterialYou ? 38 : palette.IsGlass ? 32 : 28, TextColor, palette.Name == ThemePalette.OneUi ? FontWeights.Bold : FontWeights.SemiBold));
+		stackPanel.Margin = new Thickness(0, palette.Name == ThemePalette.OneUi && responsiveMode == "Wide" ? 38 : 0, 12, palette.Name == ThemePalette.OneUi && responsiveMode == "Wide" ? 26 : 0);
 		TextBlock textBlock = T(subtitle, 10.5, Muted);
 		textBlock.Margin = new Thickness(1.0, 4.0, 0.0, 0.0);
 		stackPanel.Children.Add(textBlock);
@@ -4382,7 +4427,7 @@ public sealed partial class MainWindow : Window
 	{
 		Border pill = new Border
 		{
-			Margin = new Thickness(0.0, 0.0, 0.0, 5.0),
+			Margin = new Thickness(0.0, 0.0, 6.0, 5.0),
 			Padding = new Thickness(10.0, 5.0, 10.0, 5.0),
 			CornerRadius = Radius(14.0),
 			Background = new SolidColorBrush(Color.FromArgb(22, color.R, color.G, color.B)),
@@ -4541,7 +4586,7 @@ public sealed partial class MainWindow : Window
 		button.Background = Brushes.Transparent;
 		button.BorderThickness = new Thickness(0.0);
 		button.Cursor = Cursors.Hand;
-		button.Template = ButtonTemplate(14.0);
+		button.Template = VisualDesign.ButtonTemplate(state.Visual, 14, false);
 		button.HorizontalAlignment = HorizontalAlignment.Right;
 		button.VerticalAlignment = VerticalAlignment.Center;
 		button.ToolTip = on ? "Включено" : "Выключено";
@@ -4817,7 +4862,7 @@ public sealed partial class MainWindow : Window
 	private CornerRadius Radius(double designRadius)
 	{
 		if (designRadius <= 0.0) return new CornerRadius(0.0);
-		double profileScale = palette.Name == ThemePalette.WindowsLight || palette.Name == ThemePalette.WindowsDark ? .35 : palette.Name == ThemePalette.OneUi ? .8 : 1.0;
+		double profileScale = palette.Name == ThemePalette.Windows || palette.Name == ThemePalette.WindowsLight || palette.Name == ThemePalette.WindowsDark ? .35 : palette.Name == ThemePalette.OneUi ? 1.1 : palette.Name == ThemePalette.MaterialYou ? 1.25 : 1.0;
 		return new CornerRadius(Math.Max(0.0, state.Visual.CornerRadius * designRadius / 16.0 * profileScale));
 	}
 

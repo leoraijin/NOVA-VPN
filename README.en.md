@@ -1,5 +1,7 @@
 # NOVA VPN
 
+Local build **2.3.26** ports four Android designs to WPF with Material hue and Liquid Glass frost sliders. Compilation succeeded; UI and network checks have not been run. Screenshots below show older versions.
+
 [Русский](README.md) | **English**
 
 [![Release](https://img.shields.io/github/v/release/leoraijin/NOVA-VPN?label=release&color=7863C5)](https://github.com/leoraijin/NOVA-VPN/releases/latest)
@@ -24,7 +26,7 @@ Screenshots use ephemeral demo profiles in version 2.3.16. No VPN connection was
 - VPN, VPN + Zapret and Zapret modes.
 - Tunnel, DNS and connectivity diagnostics.
 - Settings protected with Windows DPAPI under the current user account.
-- Liquid Glass, One UI, Windows Light, Windows Dark and Amber Glass themes.
+- Liquid Glass, Material You, One UI 9 and Windows 11, each with light and dark mode.
 - GitHub update checks and release summaries.
 - Interactive server map with country hover, profile selection, and background HTTPS checks. Open it from the home page's map button.
 

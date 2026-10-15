@@ -72,23 +72,23 @@ public sealed class ConnectionControl : Grid
 		preferences = visual.Clone(); status = connectionStatus; motionEnabled = allowMotion;
 		ThemePalette p = ThemePalette.Create(preferences);
 		bool glass = p.IsGlass;
-		bool amberOrb = p.Name == ThemePalette.AmberGlass;
+		bool material = p.Name == ThemePalette.MaterialYou;
 		bool one = p.Name == ThemePalette.OneUi;
 		bool active = status == CoreStatus.Connected;
 		Color color = p.Accent;
 		double radius = glass ? 86.0
-			: one ? Math.Min(7, preferences.CornerRadius / 3.0)
+			: material ? (active ? 22 : 42) : one ? 36
 			: Math.Max(2, Math.Min(8, preferences.CornerRadius / 4.5));
-		ActionButton.Width = glass ? 172 : one ? 208 : 180;
-		ActionButton.Height = glass ? 172 : one ? 88 : Math.Max(52, 42 * preferences.TextScale);
+		ActionButton.Width = glass ? 172 : material ? 208 : one ? 208 : 180;
+		ActionButton.Height = glass ? 172 : material ? 84 : one ? 72 : Math.Max(52, 42 * preferences.TextScale);
 		face.CornerRadius = new CornerRadius(radius);
 		backdrop.Radius = face.CornerRadius; backdrop.Preferences = preferences;
 		face.Effect = glass && !preferences.HighContrast ? VisualDesign.KeyShadow(false, preferences.GlassShadow, VisualDesign.KeyShadowTint(p)) : null;
 		face.BorderThickness = new Thickness(preferences.HighContrast ? 2 : 1);
 		face.BorderBrush = preferences.HighContrast ? new SolidColorBrush(p.Text) : glass ? VisualDesign.GlassRim(preferences) : new SolidColorBrush(color);
-		bool filled = one || !glass || amberOrb;
+		bool filled = one || !glass;
 		Color foreground = ThemePalette.ReadableForeground(color);
-		face.Background = preferences.HighContrast ? new SolidColorBrush(p.Surface) : amberOrb ? VisualDesign.AmberConnectionFill() : filled ? (Brush)new SolidColorBrush(color) : VisualDesign.GlassFill(preferences);
+		face.Background = preferences.HighContrast ? new SolidColorBrush(p.Surface) : filled ? (Brush)new SolidColorBrush(color) : VisualDesign.GlassFill(preferences);
 		highlight.CornerRadius = new CornerRadius(radius);
 		highlight.Margin = new Thickness(2);
 		highlight.Background = glass ? VisualDesign.GlassSheen(preferences) : new LinearGradientBrush(Color.FromArgb(35,255,255,255), Colors.Transparent,75);

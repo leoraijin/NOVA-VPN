@@ -59,7 +59,8 @@ public sealed class GlassBackdropLayer : Grid
 	{
 		if (before == null || after == null) return true;
 		return !string.Equals(ThemePalette.NormalizeName(before.ThemeName), ThemePalette.NormalizeName(after.ThemeName), StringComparison.OrdinalIgnoreCase)
-			|| before.GlassFrost != after.GlassFrost
+			|| before.DarkMode != after.DarkMode
+            || before.GlassFrost != after.GlassFrost
 			|| before.SurfaceOpacity != after.SurfaceOpacity
 			|| before.HighContrast != after.HighContrast;
 	}
@@ -99,7 +100,7 @@ public sealed class GlassBackdropLayer : Grid
 			effect = new BlurEffect { RenderingBias = RenderingBias.Performance };
 			sample.Effect = effect;
 		}
-		effect.Radius = Math.Max(0, Math.Min(18, v.GlassBlur));
+		effect.Radius = Math.Max(0, Math.Min(32, v.GlassBlur));
 	}
 	private void UpdateTint()
 	{

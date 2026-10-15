@@ -10,10 +10,10 @@ namespace NovaVpn;
 
 public static class VisualDesign
 {
-	public static ControlTemplate ButtonTemplate(VisualPreferences v, double radius)
+	public static ControlTemplate ButtonTemplate(VisualPreferences v, double radius, bool glassMaterial = true)
 	{
 		ThemePalette p = ThemePalette.Create(v);
-		if (p.IsGlass && !v.HighContrast) return GlassButtonTemplate(v, radius);
+		if (p.IsGlass && !v.HighContrast && glassMaterial) return GlassButtonTemplate(v, radius);
 		ControlTemplate template = new ControlTemplate(typeof(Button));
 		FrameworkElementFactory border = new FrameworkElementFactory(typeof(Border), "ButtonFace");
 		border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
@@ -23,6 +23,8 @@ public static class VisualDesign
 		FrameworkElementFactory presenter = new FrameworkElementFactory(typeof(ContentPresenter));
 		presenter.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
 		presenter.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        presenter.SetValue(TextElement.FontFamilyProperty, new TemplateBindingExtension(Control.FontFamilyProperty));
+        presenter.SetValue(TextElement.ForegroundProperty, new TemplateBindingExtension(Control.ForegroundProperty));
 		presenter.SetValue(FrameworkElement.MarginProperty, new TemplateBindingExtension(Control.PaddingProperty));
 		border.AppendChild(presenter); template.VisualTree = border;
 		Trigger hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
@@ -36,7 +38,7 @@ public static class VisualDesign
 		focused.Setters.Add(new Setter(Border.BorderThicknessProperty, new Thickness(2), "ButtonFace")); template.Triggers.Add(focused);
 		return template;
 	}
-	public static double ButtonRadius(VisualPreferences v, double radius) => Math.Min(ThemePalette.NormalizeName(v.ThemeName) == ThemePalette.OneUi ? 7 : 4, v.CornerRadius * radius / 40);
+	public static double ButtonRadius(VisualPreferences v, double radius) => ThemePalette.NormalizeName(v.ThemeName) == ThemePalette.IosLiquidGlass ? Math.Min(24, radius) : ThemePalette.NormalizeName(v.ThemeName) == ThemePalette.MaterialYou ? 28 : ThemePalette.NormalizeName(v.ThemeName) == ThemePalette.OneUi ? 20 : 4;
 	public static double Density(VisualPreferences v) => v.Density == "Compact" ? .82 : v.Density == "Comfortable" ? 1.2 : 1;
 	public static FontFamily InterfaceFont(VisualPreferences v) => new FontFamily(ThemePalette.NormalizeName(v?.ThemeName) == ThemePalette.OneUi ? "Segoe UI" : "Segoe UI Variable, Segoe UI");
 	private sealed class GlassSurfaceParts
@@ -53,7 +55,7 @@ public static class VisualDesign
 		{
 			// Content and controls are distinct material layers; no glass/reflection on data cards.
 			Color material = palette.Surface;
-			material.A = palette.IsGlass && !v.HighContrast ? (byte)(205 + 40 * Math.Max(0, Math.Min(1, v.SoftContrast))) : (byte)255;
+			material.A = palette.IsGlass && !v.HighContrast ? (byte)(24 + 220 * Math.Max(0, Math.Min(1, v.GlassFrost))) : (byte)255;
 			surface.Background = new SolidColorBrush(material);
 			if (palette.Name == ThemePalette.OneUi && !v.HighContrast)
 			{
@@ -79,22 +81,13 @@ public static class VisualDesign
 	{
 		double frost = Math.Max(0, Math.Min(1, v.GlassFrost));
 		ThemePalette palette = ThemePalette.Create(v);
-		Color first = palette.Name == ThemePalette.AmberGlass ? ThemePalette.Parse("#FFF7EA") : Colors.White;
-		Color second = palette.Name == ThemePalette.AmberGlass ? ThemePalette.Parse("#F5D8B6") : ThemePalette.Parse("#DBE7F9");
+		Color first = palette.IsLight ? Colors.White : ThemePalette.Parse("#222A36");
+		Color second = palette.IsLight ? ThemePalette.Parse("#DBE7F9") : ThemePalette.Parse("#101826");
 		var fill = new LinearGradientBrush(Color.FromArgb((byte)(24 + 206 * frost), first.R, first.G, first.B), Color.FromArgb((byte)(16 + 209 * frost), second.R, second.G, second.B), new Point(0, 0), new Point(1, 1));
 		fill.Freeze(); return fill;
 	}
-	public static Color KeyShadowTint(ThemePalette palette) => palette?.Name == ThemePalette.AmberGlass ? Color.FromRgb(119, 72, 39) : Color.FromRgb(47, 64, 95);
+	public static Color KeyShadowTint(ThemePalette palette) => Color.FromRgb(47, 64, 95);
 	public static DropShadowEffect KeyShadow(bool pressed = false, double strength = 1.0, Color? tint = null) => new DropShadowEffect { Color = tint ?? Color.FromRgb(47, 64, 95), Direction = 315, BlurRadius = pressed ? 4 : 10, ShadowDepth = pressed ? 1 : 4, Opacity = (pressed ? .10 : .19) * Math.Max(0, Math.Min(1, strength)) };
-	public static Brush AmberConnectionFill()
-	{
-		var brush = new LinearGradientBrush();
-		brush.StartPoint = new Point(0.18, 0.05); brush.EndPoint = new Point(0.82, 0.96);
-		brush.GradientStops.Add(new GradientStop(ThemePalette.Parse("#E4772D"), 0));
-		brush.GradientStops.Add(new GradientStop(ThemePalette.Parse("#CF591A"), .56));
-		brush.GradientStops.Add(new GradientStop(ThemePalette.Parse("#AE410F"), 1));
-		brush.Freeze(); return brush;
-	}
 	public static Brush GlassSheen(VisualPreferences v)
 	{
 		var brush = new LinearGradientBrush(Color.FromArgb((byte)((24 - 12 * Math.Max(0, Math.Min(1, v.GlassFrost))) * v.GlassHighlight),255,255,255),Colors.Transparent,new Point(0,0),new Point(1,1));
@@ -103,8 +96,8 @@ public static class VisualDesign
 	public static Brush GlassRim(VisualPreferences v)
 	{
 		ThemePalette palette = ThemePalette.Create(v);
-		Color edge = palette.Name == ThemePalette.AmberGlass ? palette.AccentLight : Color.FromRgb(130, 151, 187);
-		var brush = new LinearGradientBrush(Color.FromArgb((byte)((150 - 60 * Math.Max(0, Math.Min(1, v.GlassFrost))) * v.GlassHighlight),255,255,255),Color.FromArgb((byte)(45 * v.GlassHighlight),edge.R,edge.G,edge.B),new Point(0,0),new Point(1,1));
+		Color edge = Color.FromRgb(130, 151, 187);
+		var brush = new LinearGradientBrush(Color.FromArgb((byte)(140 * v.GlassHighlight), palette.IsLight ? (byte)105 : (byte)220, palette.IsLight ? (byte)132 : (byte)232, palette.IsLight ? (byte)158 : (byte)245),Color.FromArgb((byte)(45 * v.GlassHighlight),edge.R,edge.G,edge.B),new Point(0,0),new Point(1,1));
 		brush.Freeze(); return brush;
 	}
 	private static ControlTemplate GlassButtonTemplate(VisualPreferences v, double radius)
@@ -126,7 +119,7 @@ public static class VisualDesign
 		var tint = new FrameworkElementFactory(typeof(Border), "GlassTint");
 		tint.SetValue(Border.CornerRadiusProperty, corners);
 		tint.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
-		tint.SetValue(UIElement.OpacityProperty, .04); root.AppendChild(tint);
+		tint.SetValue(UIElement.OpacityProperty, .55); root.AppendChild(tint);
 		var sheen = new FrameworkElementFactory(typeof(Border), "Sheen");
 		sheen.SetValue(Border.CornerRadiusProperty, corners);
 		sheen.SetValue(Border.MarginProperty, new Thickness(1));
@@ -136,7 +129,8 @@ public static class VisualDesign
 		content.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
 		content.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
 		content.SetValue(FrameworkElement.MarginProperty, new TemplateBindingExtension(Control.PaddingProperty));
-		content.SetValue(TextElement.ForegroundProperty, new SolidColorBrush(ThemePalette.Create(v).Text));
+		content.SetValue(TextElement.ForegroundProperty, new TemplateBindingExtension(Control.ForegroundProperty));
+        content.SetValue(TextElement.FontFamilyProperty, new TemplateBindingExtension(Control.FontFamilyProperty));
 		root.AppendChild(content); template.VisualTree = root;
 		var pressed = new Trigger { Property = Button.IsPressedProperty, Value = true };
 		pressed.Setters.Add(new Setter(UIElement.RenderTransformProperty, new TranslateTransform(1.5, 2), "KeyBody"));
@@ -181,7 +175,7 @@ public static class VisualDesign
 		if (v.BackgroundMode == "Glass")
 		{
 			layer.Children.Add(new Ellipse { Width = 800, Height = 700, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -180, -140, 0), Fill = new RadialGradientBrush(Color.FromArgb((byte)(30 + v.GlowIntensity * 180), p.AccentLight.R, p.AccentLight.G, p.AccentLight.B), Colors.Transparent) });
-			Color secondaryGlow = p.Name == ThemePalette.AmberGlass ? ThemePalette.Parse("#5F9FCB") : Color.FromRgb(96, 185, 189);
+			Color secondaryGlow = Color.FromRgb(96, 185, 189);
 			layer.Children.Add(new Ellipse { Width = 900, Height = 700, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-200, 0, 0, -300), Fill = new RadialGradientBrush(Color.FromArgb((byte)(20 + v.GlowIntensity * 120), secondaryGlow.R, secondaryGlow.G, secondaryGlow.B), Colors.Transparent) });
 		}
 	}
