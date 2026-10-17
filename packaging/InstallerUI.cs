@@ -16,13 +16,13 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NOVA VPN Setup")]
 [assembly: AssemblyProduct("NOVA VPN")]
-[assembly: AssemblyVersion("2.3.33.0")]
-[assembly: AssemblyFileVersion("2.3.33.0")]
+[assembly: AssemblyVersion("2.3.34.0")]
+[assembly: AssemblyFileVersion("2.3.34.0")]
 
 internal sealed class NovaInstaller : Form
 {
     private new const string ProductName = "NOVA VPN";
-    private const string DisplayVersion = "2.3.33";
+    private const string DisplayVersion = "2.3.34";
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NOVA VPN";
     private readonly Color background = Color.FromArgb(233, 239, 246);
     private readonly Color panel = Color.FromArgb(248, 250, 253);
@@ -457,7 +457,7 @@ internal sealed class NovaInstaller : Form
             Type type = shortcut.GetType();
             type.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { target });
             type.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { workingDirectory });
-            string brandIconPath = Path.Combine(workingDirectory, "Assets", "nova-v2.ico");
+            string brandIconPath = Path.Combine(workingDirectory, "Assets", "nova-desktop-v3.ico");
             string iconPath = File.Exists(brandIconPath) ? brandIconPath : target;
             // IconLocation is a shell property, not a command line: literal quotes
             // become part of the filename and make Explorer display a blank icon.

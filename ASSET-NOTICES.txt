@@ -1,5 +1,14 @@
-NOVA VPN 2.1 — visual asset notes
+NOVA VPN — visual asset notes
 =================================
+
+Assets/nova-desktop-v3.svg, .png and .ico (Windows 2.3.34)
+  Code-native desktop adaptation of NOVA Android launcher vector artwork:
+  a white N, cyan diagonal and sparkle on a navy rounded tile.
+  No AI raster generation was used for this asset. Editable SVG is included;
+  packaging/Build-DesktopIcon.ps1 deterministically renders PNG and nine ICO
+  sizes (16,20,24,32,40,48,64,128,256). Transparent outer corners are retained.
+  Android reference: app/src/main/res/drawable/ic_launcher_foreground.xml and
+  ic_launcher_background.xml in the separate NOVA-VPN-Android repository.
 
 Assets\nova-mark.png and derived Assets\nova-v2.ico
   Prompt summary: centered icon-only NOVA VPN brand mark combining an abstract

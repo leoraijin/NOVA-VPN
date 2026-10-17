@@ -40,7 +40,7 @@ New-Item -ItemType Directory -Path $payload,$zapretExtract,$setupFiles -Force | 
 $uninstaller = Join-Path $setupFiles 'NOVA-VPN-Uninstaller.exe'
 $installerSource = Join-Path $PSScriptRoot 'InstallerUI.cs'
 $manifest = Join-Path $PSScriptRoot 'Installer.manifest'
-$icon = Join-Path $PSScriptRoot '..\Assets\nova-v2.ico'
+$icon = Join-Path $PSScriptRoot '..\Assets\nova-desktop-v3.ico'
 $compilerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $uninstaller),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),
     '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll',
@@ -59,7 +59,7 @@ foreach ($dependency in @('zxing.dll','LICENSE-ZXing.txt')) {
 }
 $payloadAssets = Join-Path $payload 'Assets'
 New-Item -ItemType Directory -Path $payloadAssets -Force | Out-Null
-foreach ($assetName in @('nova-mark.png','nova-backup.png','nova-v2.ico')) {
+foreach ($assetName in @('nova-mark.png','nova-backup.png','nova-v2.ico','nova-desktop-v3.ico')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('..\Assets\' + $assetName)) -Destination $payloadAssets
 }
 if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
@@ -73,7 +73,13 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
         Copy-Item -LiteralPath (Join-Path $RecoveredPayloadDirectory $notice) -Destination $payload
     }
 }
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ASSET-NOTICES.txt') -Destination $payload
 $releaseNotes = @'
+NOVA VPN 2.3.34 — 17 октября 2026
+- Значок рабочего стола в стиле Android: белая N, бирюзовая диагональ и звезда.
+- Новый многоразмерный ICO для EXE, окна, установщика и ярлыков.
+- Ярлыки обновляются без удаления профилей; новое имя ICO уменьшает кеширование.
+
 NOVA VPN 2.3.33 — 17 октября 2026
 - Блок приложений компактнее, выровнен влево с боковым отступом.
 - Колесо прокручивает страницу, Shift + колесо — список приложений.
@@ -325,7 +331,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.33.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.34.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

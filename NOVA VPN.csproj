@@ -9,7 +9,7 @@
     <AssemblyName>NOVA VPN</AssemblyName>
     <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
     <LangVersion>latest</LangVersion>
-    <ApplicationIcon>Assets\nova-v2.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\nova-desktop-v3.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -128,6 +128,7 @@
 	<Resource Include="Assets\nova-mark.png" />
 	<Resource Include="Assets\nova-backup.png" />
 	<Resource Include="Assets\nova-v2.ico" />
+	<Resource Include="Assets\nova-desktop-v3.ico" />
 	<EmbeddedResource Include="NovaVpn\Assets\ne_110m_admin_0_countries.geojson">
 	  <LogicalName>NovaVpn.Assets.ne_110m_admin_0_countries.geojson</LogicalName>
 	</EmbeddedResource>

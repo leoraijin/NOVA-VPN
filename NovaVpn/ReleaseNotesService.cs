@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+		new ReleaseNoteEntry(new Version(2, 3, 34),
+			"Новый значок Windows в стиле Android: тёмно-синяя плитка, белая N, бирюзовая диагональ и звёздочка.",
+			"Многоразмерный ICO используется для EXE, окна и ярлыков. При обновлении существующий ярлык получает новый файл значка."),
 		new ReleaseNoteEntry(new Version(2, 3, 33),
 			"Блок приложений стал ниже и уже, выровнен к левому боку с отступом для прокрутки страницы.",
 			"Колесо над приложениями прокручивает всю страницу; Shift + колесо прокручивает сам список.",
