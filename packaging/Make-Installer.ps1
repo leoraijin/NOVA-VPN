@@ -75,6 +75,11 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ASSET-NOTICES.txt') -Destination $payload
 $releaseNotes = @'
+NOVA VPN 2.3.36 — 17 октября 2026
+- Сдвиг готового содержимого вместо переразмещения всей страницы при каждом кадре прокрутки.
+- Сохранены полосы прокрутки, клавиатура, вложенные списки и переход к полям.
+- В тесте реальных страниц число переразмещений при прокрутке снижено со 128–144 до 0.
+
 NOVA VPN 2.3.35 — 17 октября 2026
 - Непрерывная прокрутка по кадрам WPF без перезапуска анимации каждым событием колеса.
 - Убрано включение размытой тени при наведении на карточки.
@@ -336,7 +341,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.35.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.36.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

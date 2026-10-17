@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Windows.Media.Media3D;
 
 namespace NovaVpn;
@@ -11,7 +12,6 @@ namespace NovaVpn;
 /// <summary>Continuous render-paced wheel motion. Rendering is subscribed only while moving.</summary>
 public static class SmoothScrollBehavior
 {
-    public const int RequestedFrameRate = 120;
     private static readonly DependencyProperty StateProperty = DependencyProperty.RegisterAttached(
         "State", typeof(State), typeof(SmoothScrollBehavior));
 
@@ -54,12 +54,28 @@ public static class SmoothScrollBehavior
         internal State(ScrollViewer viewer, Func<bool> motionAllowed)
         {
             this.viewer = viewer; this.motionAllowed = motionAllowed;
+            var descriptor = DependencyPropertyDescriptor.FromProperty(ContentControl.ContentProperty, typeof(ScrollViewer));
+            viewer.Loaded += delegate { descriptor.RemoveValueChanged(viewer, ContentChanged); descriptor.AddValueChanged(viewer, ContentChanged); PrepareSurface(); };
             viewer.PreviewMouseWheel += Wheel;
             viewer.PreviewMouseDown += delegate { Stop(); };
             viewer.PreviewKeyDown += delegate { Stop(); };
             viewer.PreviewTouchDown += delegate { Stop(); };
-            viewer.Unloaded += delegate { Stop(); };
+            viewer.Unloaded += delegate { Stop(); descriptor.RemoveValueChanged(viewer, ContentChanged); };
             viewer.RequestBringIntoView += delegate { Stop(); };
+        }
+        private bool wrapping, ownsPhysicalSurface;
+        private void ContentChanged(object sender, EventArgs args) { if (!wrapping && viewer.IsLoaded) { Stop(); PrepareSurface(); } }
+        private void PrepareSurface()
+        {
+            if (viewer.Content is PixelScrollSurface || (!ownsPhysicalSurface && viewer.CanContentScroll && viewer.Content is System.Windows.Controls.Primitives.IScrollInfo)) return;
+            if (!(viewer.Content is UIElement content)) return;
+            wrapping = true;
+            try {
+                viewer.Content = null;
+                viewer.Content = new PixelScrollSurface(content);
+                viewer.CanContentScroll = true;
+                ownsPhysicalSurface = true;
+            } finally { wrapping = false; }
         }
         private void Stop()
         {
@@ -83,7 +99,8 @@ public static class SmoothScrollBehavior
             position += (target - position) * (1 - Math.Exp(-32 * elapsed));
             bool settled = Math.Abs(target - position) < .15;
             if (settled) position = target;
-            viewer.ScrollToVerticalOffset(position);
+            if (viewer.Content is PixelScrollSurface surface) surface.SetVerticalOffset(position);
+            else viewer.ScrollToVerticalOffset(position);
             if (settled) Stop();
         }
         private void Wheel(object sender, MouseWheelEventArgs args)
@@ -91,7 +108,7 @@ public static class SmoothScrollBehavior
             if (args.Handled || !viewer.IsLoaded || Keyboard.Modifiers != ModifierKeys.None) return;
             if (motionAllowed == null || !motionAllowed()) { Stop(); return; }
             // Logical/virtualized lists retain their native scrolling and virtualization.
-            if (viewer.CanContentScroll || viewer.ScrollableHeight <= 0 || args.Delta == 0) return;
+            if ((viewer.CanContentScroll && !(viewer.Content is PixelScrollSurface)) || viewer.ScrollableHeight <= 0 || args.Delta == 0) return;
             for (var node = args.OriginalSource as DependencyObject; node != null && node != viewer; node = Parent(node))
                 if (node is ScrollViewer nested && nested.ScrollableHeight > 0) return;
             int lines = SystemParameters.WheelScrollLines;

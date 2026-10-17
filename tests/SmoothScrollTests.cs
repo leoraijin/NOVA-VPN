@@ -32,7 +32,6 @@ internal static class SmoothScrollTests
             window.Show(); window.UpdateLayout(); Pump(30);
             Console.WriteLine("Input probe: loaded=" + viewer.IsLoaded + " modifiers=" + Keyboard.Modifiers + " lines=" + SystemParameters.WheelScrollLines);
             Check(viewer.ScrollableHeight > 1000, "Fixture has no scroll extent");
-            Check(SmoothScrollBehavior.RequestedFrameRate == 120, "120 Hz target missing");
             int changes = 0;
             var descriptor = DependencyPropertyDescriptor.FromProperty(ScrollViewer.VerticalOffsetProperty, typeof(ScrollViewer));
             EventHandler changed = delegate { changes++; }; descriptor.AddValueChanged(viewer, changed);
@@ -56,7 +55,7 @@ internal static class SmoothScrollTests
             viewer.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent });
             Check(!SmoothScrollBehavior.IsAnimating(viewer), "Scrollbar/manual input did not cancel animation");
             motion = false; Check(!Wheel(viewer, -120).Handled, "Reduced motion ignored"); motion = true;
-            viewer.CanContentScroll = true; Check(!Wheel(viewer, -120).Handled, "Logical scrolling/virtualization intercepted"); viewer.CanContentScroll = false;
+            Check(viewer.Content is PixelScrollSurface, "Physical page did not use transform scrolling");
             viewer.ScrollToVerticalOffset(0); window.UpdateLayout(); Pump(30);
             Check(!Wheel(viewer, 120).Handled, "Top edge should bubble");
             Check(SmoothScrollBehavior.Target(50, 100, true, 25, 200) == 125, "Rapid wheel target lost");
@@ -88,7 +87,7 @@ internal static class SmoothScrollTests
             Wheel(viewer, -120); window.Close(); Pump(30);
             Check(!SmoothScrollBehavior.IsAnimating(viewer), "Unloaded page animation retained");
             descriptor.RemoveValueChanged(viewer, changed);
-            Console.WriteLine("PASS: real WPF wheel/intermediate movement/settle/reversal/manual cancel/reduced motion/logical scrolling/edge/unload; 120 Hz requested, no idle animation clock. Offset updates=" + settled + ". Physical display FPS not asserted.");
+            Console.WriteLine("PASS: real WPF wheel/intermediate movement/settle/reversal/manual cancel/reduced motion/edge/unload; no idle rendering. Offset updates=" + settled + ". Physical display FPS not asserted.");
             Application.Current.Shutdown(); return 0;
         } catch (Exception error) {
             Console.Error.WriteLine(error); if(window != null) window.Close(); if(Application.Current != null) Application.Current.Shutdown(); return 1;

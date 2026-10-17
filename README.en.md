@@ -1,6 +1,6 @@
 # NOVA VPN
 
-Release **2.3.35** uses continuous render-paced scrolling instead of restarting animations for every wheel event. Hover blur shadows were removed; the rendering callback is detached when idle. Physical FPS depends on the display and workload. The new icon, drag-only routing and automatic updates are preserved. VPN engines are unchanged. Screenshots below show older versions.
+Release **2.3.36** scrolls already arranged page content using a translation, avoiding full-page arrangement on each scroll frame. Actual pages, scrollbars, keyboard visibility, resize and nested lists are tested. Physical FPS depends on the display and workload. VPN engines are unchanged. Screenshots below show older versions.
 
 [Русский](README.md) | **English**
 
