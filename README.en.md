@@ -1,6 +1,6 @@
 # NOVA VPN
 
-Release **2.3.34** introduces an Android-inspired desktop icon: white N, cyan diagonal and sparkle on a navy tile. A new multi-size ICO is used for the executable, window and shortcuts. Compact routing, drag-only route switches, smooth scrolling and verified automatic updates are preserved. Windows engines were not rebuilt; Reality Core remains experimental. Screenshots below show older versions.
+Release **2.3.35** uses continuous render-paced scrolling instead of restarting animations for every wheel event. Hover blur shadows were removed; the rendering callback is detached when idle. Physical FPS depends on the display and workload. The new icon, drag-only routing and automatic updates are preserved. VPN engines are unchanged. Screenshots below show older versions.
 
 [Русский](README.md) | **English**
 

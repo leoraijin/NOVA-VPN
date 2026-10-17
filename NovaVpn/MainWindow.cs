@@ -4773,7 +4773,7 @@ public sealed partial class MainWindow : Window
 		card.MouseEnter += delegate
 		{
 			BeginMotionAnimation(movement, TranslateTransform.YProperty, new DoubleAnimation(movement.Y, -1, TimeSpan.FromMilliseconds(AnimMs(200))) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseOut } });
-			if (state.Visual.GlowIntensity > 0.1) card.Effect = new DropShadowEffect { Color = Accent, BlurRadius = 12 + 12 * state.Visual.GlowIntensity, ShadowDepth = 2, Opacity = 0.08 + 0.12 * state.Visual.GlowIntensity, RenderingBias = RenderingBias.Performance };
+			// Avoid allocating a blur effect as cards move under the pointer while scrolling.
 		};
 		card.MouseLeave += delegate
 		{

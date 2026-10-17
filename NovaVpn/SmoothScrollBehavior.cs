@@ -3,19 +3,17 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
+using System.Diagnostics;
 using System.Windows.Media.Media3D;
 
 namespace NovaVpn;
 
-/// <summary>Short, render-clock driven wheel motion; no idle timer or global rendering subscription.</summary>
+/// <summary>Continuous render-paced wheel motion. Rendering is subscribed only while moving.</summary>
 public static class SmoothScrollBehavior
 {
     public const int RequestedFrameRate = 120;
     private static readonly DependencyProperty StateProperty = DependencyProperty.RegisterAttached(
         "State", typeof(State), typeof(SmoothScrollBehavior));
-    private static readonly DependencyProperty OffsetProperty = DependencyProperty.RegisterAttached(
-        "Offset", typeof(double), typeof(SmoothScrollBehavior), new PropertyMetadata(0d, OffsetChanged));
 
     public static void Attach(ScrollViewer viewer, Func<bool> motionAllowed)
     {
@@ -41,11 +39,6 @@ public static class SmoothScrollBehavior
         double start = active && Math.Sign(previous - current) == Math.Sign(delta) ? previous : current;
         return Math.Max(0, Math.Min(maximum, start + delta));
     }
-    private static void OffsetChanged(DependencyObject sender, DependencyPropertyChangedEventArgs args)
-    {
-        var viewer = (ScrollViewer)sender;
-        if (viewer.IsLoaded) viewer.ScrollToVerticalOffset((double)args.NewValue);
-    }
     private static DependencyObject Parent(DependencyObject value) =>
         value is Visual || value is Visual3D ? VisualTreeHelper.GetParent(value) : LogicalTreeHelper.GetParent(value);
 
@@ -54,7 +47,9 @@ public static class SmoothScrollBehavior
         private readonly ScrollViewer viewer;
         private readonly Func<bool> motionAllowed;
         private double target;
-        private int generation;
+        private readonly Stopwatch clock = new Stopwatch();
+        private double position, lastSeconds;
+        private TimeSpan lastRenderTime = TimeSpan.MinValue;
         internal bool Active;
         internal State(ScrollViewer viewer, Func<bool> motionAllowed)
         {
@@ -68,11 +63,28 @@ public static class SmoothScrollBehavior
         }
         private void Stop()
         {
-            generation++;
             if (!Active) return;
-            viewer.SetValue(OffsetProperty, viewer.VerticalOffset);
-            viewer.BeginAnimation(OffsetProperty, null);
+            CompositionTarget.Rendering -= Render;
+            clock.Reset();
             Active = false;
+        }
+        private void Render(object sender, EventArgs args)
+        {
+            if (!viewer.IsLoaded || !motionAllowed()) { Stop(); return; }
+            // WPF may raise Rendering twice for the same composition frame.
+            var rendering = args as RenderingEventArgs;
+            if (rendering != null && rendering.RenderingTime == lastRenderTime) return;
+            if (rendering != null) lastRenderTime = rendering.RenderingTime;
+            double now = clock.Elapsed.TotalSeconds;
+            double elapsed = Math.Max(0, now - lastSeconds);
+            lastSeconds = now;
+            target = Math.Max(0, Math.Min(target, viewer.ScrollableHeight));
+            // Time based damping: wheel events update the target, never restart the motion.
+            position += (target - position) * (1 - Math.Exp(-32 * elapsed));
+            bool settled = Math.Abs(target - position) < .15;
+            if (settled) position = target;
+            viewer.ScrollToVerticalOffset(position);
+            if (settled) Stop();
         }
         private void Wheel(object sender, MouseWheelEventArgs args)
         {
@@ -85,25 +97,18 @@ public static class SmoothScrollBehavior
             int lines = SystemParameters.WheelScrollLines;
             if (lines == 0) return;
             double step = lines < 0 ? viewer.ViewportHeight * .9 : Math.Max(16, viewer.FontSize * 1.35) * lines;
-            double current = viewer.VerticalOffset;
+            double current = Active ? position : viewer.VerticalOffset;
             double next = Target(current, target, Active, -args.Delta / 120d * step, viewer.ScrollableHeight);
             if (Math.Abs(next - current) < .1) { Stop(); return; }
-            Stop();
             target = next;
-            viewer.SetValue(OffsetProperty, current);
-            var animation = new DoubleAnimation(current, target, TimeSpan.FromMilliseconds(180)) {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-            Timeline.SetDesiredFrameRate(animation, RequestedFrameRate);
-            int token = ++generation;
-            animation.Completed += delegate {
-                if (token != generation) return;
-                viewer.SetValue(OffsetProperty, Math.Min(target, viewer.ScrollableHeight));
-                viewer.BeginAnimation(OffsetProperty, null);
-                Active = false;
-            };
-            Active = true;
-            viewer.BeginAnimation(OffsetProperty, animation, HandoffBehavior.SnapshotAndReplace);
+            if (!Active) {
+                position = current;
+                lastSeconds = 0;
+                lastRenderTime = TimeSpan.MinValue;
+                clock.Restart();
+                Active = true;
+                CompositionTarget.Rendering += Render;
+            }
             args.Handled = true;
         }
     }

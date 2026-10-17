@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+		new ReleaseNoteEntry(new Version(2, 3, 35),
+			"Непрерывная прокрутка без перезапуска анимации каждым событием колеса. Убрана размытая тень карточек при наведении.",
+			"После остановки обработчик кадров отключается. Частота отображения зависит от монитора и нагрузки; 120 FPS не гарантируются."),
 		new ReleaseNoteEntry(new Version(2, 3, 34),
 			"Новый значок Windows в стиле Android: тёмно-синяя плитка, белая N, бирюзовая диагональ и звёздочка.",
 			"Многоразмерный ICO используется для EXE, окна и ярлыков. При обновлении существующий ярлык получает новый файл значка."),

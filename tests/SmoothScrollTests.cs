@@ -64,6 +64,22 @@ internal static class SmoothScrollTests
             Check(SmoothScrollBehavior.Target(190, 190, false, 99, 200) == 200, "Bottom clamp failed");
             for (int i = 0; i < 8; i++) Wheel(viewer, -15);
             Pump(250); Check(Math.Abs(viewer.VerticalOffset - end) < 1, "High-resolution wheel deltas lost");
+            // Sustained wheel stream must advance continuously, not restart a fresh clock.
+            double streamStart = viewer.VerticalOffset;
+            for (int i = 0; i < 20; i++) {
+                double prior = viewer.VerticalOffset;
+                Check(Wheel(viewer, -30).Handled, "Stream event not handled");
+                Pump(12);
+                Check(viewer.VerticalOffset >= prior, "Stream moved backwards");
+            }
+            Pump(300);
+            Check(Math.Abs(viewer.VerticalOffset - streamStart - end * 5) < 1, "Stream target lost");
+            Check(!SmoothScrollBehavior.IsAnimating(viewer), "Rendering subscription retained after stream");
+            motion = false;
+            Wheel(viewer, -120); motion = true;
+            Wheel(viewer, -120); motion = false; Pump(50);
+            Check(!SmoothScrollBehavior.IsAnimating(viewer), "Motion disabled during scroll did not stop rendering");
+            motion = true;
             var inner = new ScrollViewer { Height = 100, Content = new Border { Height = 1000 } };
             var stack = new StackPanel(); stack.Children.Add(inner); stack.Children.Add(new Border { Height = 1800 });
             viewer.Content = stack; window.UpdateLayout(); Pump(30);
