@@ -21,6 +21,10 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+		new ReleaseNoteEntry(new Version(2, 3, 31),
+			"Кнопка «Обновить» скачивает установщик, проверяет SHA-256 и сразу запускает его с запросом Windows. Браузер открывать не нужно.",
+			"При отмене UAC или ошибке загрузки приложение не закрывается. Профили и настройки сохраняются.",
+			"В основной выпуск включены Windows 11 Light/Dark, локальные идентичности и перенос из 2.3.30. Reality Core остаётся экспериментальным."),
 		new ReleaseNoteEntry(new Version(2, 3, 25),
 			"Настройки → Другие продукты: ссылки на отдельные GitHub-репозитории NOVA для Android и Wear OS.",
 			"Обновления: Настройки → Обновление приложения."),

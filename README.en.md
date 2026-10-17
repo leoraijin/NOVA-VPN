@@ -1,6 +1,6 @@
 # NOVA VPN
 
-Local build **2.3.26** ports four Android designs to WPF with Material hue and Liquid Glass frost sliders. Compilation succeeded; UI and network checks have not been run. Screenshots below show older versions.
+Release **2.3.31** downloads, verifies SHA-256 and launches the installer when Update is clicked, instead of opening a browser. Windows 11 themes and encrypted local identity/transfer features from 2.3.30 are included. Windows engine binaries were not rebuilt; Reality Core remains experimental and Android JNI/UID integration is not claimed on Windows. Screenshots below show older versions.
 
 [Русский](README.md) | **English**
 

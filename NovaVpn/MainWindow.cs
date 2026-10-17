@@ -1390,39 +1390,29 @@ public sealed partial class MainWindow : Window
 		{
 			using (AppUpdateService updater = new AppUpdateService())
 			{
-				AppReleaseInfo latest;
-				try
-				{
-					Toast("Ищу последнюю версию на GitHub…", Muted);
-					latest = await updater.GetLatestAsync();
-				}
-				catch
-				{
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppUpdateService.LatestReleasePageUrl) { UseShellExecute = true });
-					Toast("Не удалось получить прямую ссылку. Открыта страница релизов GitHub.", Warning);
-					return;
-				}
+				Toast("Ищу последнюю версию на GitHub…", Muted);
+				AppReleaseInfo latest = await updater.GetLatestAsync();
 				Version installedVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
 				if (AppUpdateService.IsOlderThanInstalled(installedVersion, latest.Version))
 				{
 					Toast("GitHub пока предлагает более старую версию " + latest.Version + ". Откат не выполнялся.", Warning);
 					return;
 				}
-				try
+				if (!AppUpdateService.IsUpdateAvailable(installedVersion, latest.Version))
 				{
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(latest.DownloadUrl) { UseShellExecute = true });
-					Toast("Открыто скачивание NOVA VPN " + latest.Version + " с GitHub.", Green);
+					Toast("Установлена последняя версия NOVA VPN.", Green);
+					return;
 				}
-				catch
-				{
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(latest.ReleaseUrl) { UseShellExecute = true });
-					Toast("Не удалось открыть прямое скачивание. Открыта страница релиза GitHub.", Warning);
-				}
+				await DownloadAndLaunchApplicationUpdateAsync(updater, latest);
 			}
+		}
+		catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+		{
+			Toast("Запуск обновления отменён. NOVA VPN продолжает работать.", Warning);
 		}
 		catch (Exception ex)
 		{
-			Toast("Не удалось открыть обновление NOVA VPN: " + LogSanitizer.Sanitize(ex.Message), Danger);
+			Toast("Не удалось установить обновление NOVA VPN: " + LogSanitizer.Sanitize(ex.Message), Danger);
 		}
 		finally
 		{
@@ -1431,12 +1421,36 @@ public sealed partial class MainWindow : Window
 		}
 	}
 
+	private async Task DownloadAndLaunchApplicationUpdateAsync(AppUpdateService updater, AppReleaseInfo latest)
+	{
+		string updateDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "NOVA VPN Updates");
+		string installerPath = System.IO.Path.Combine(updateDirectory, "NOVA VPN Setup " + latest.Version.ToString(3) + " " + Guid.NewGuid().ToString("N") + ".exe");
+		bool installerStarted = false;
+		try
+		{
+			Toast("Скачиваю и проверяю установщик NOVA VPN " + latest.Version.ToString(3) + "…", Muted);
+			await updater.DownloadInstallerAsync(latest, installerPath);
+			if (closing) return;
+			int processId;
+			using (Process current = Process.GetCurrentProcess()) processId = current.Id;
+			ProcessStartInfo startInfo = AppUpdateService.CreateInstallerStartInfo(installerPath, AppDomain.CurrentDomain.BaseDirectory, processId);
+			using (Process process = Process.Start(startInfo))
+			{
+				if (process == null) throw new InvalidOperationException("Не удалось запустить установщик обновления.");
+			}
+			installerStarted = true;
+			Application.Current.Shutdown();
+		}
+		finally
+		{
+			if (!installerStarted) { try { if (File.Exists(installerPath)) File.Delete(installerPath); } catch { } }
+		}
+	}
+
 	private async Task<bool> CheckApplicationUpdatesOnStartupAsync()
 	{
 		if (!ShouldCheckForApplicationUpdates(snapshotMode, closing, appUpdateInProgress)) return false;
 		appUpdateInProgress = true;
-		string installerPath = null;
-		bool installerStarted = false;
 		bool installChosen = false;
 		Border checkingBanner = new Border { Background = new SolidColorBrush(Surface2), BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1), CornerRadius = Radius(10), Padding = new Thickness(18, 12, 18, 12), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 12, 0, 0), Child = T("Проверка наличия обновлений…", 13, TextColor) };
 		contentHost.Children.Add(checkingBanner); Panel.SetZIndex(checkingBanner, 200);
@@ -1455,37 +1469,12 @@ public sealed partial class MainWindow : Window
 				if (choice != 0) return false;
 				installChosen = true;
 
-				string updateDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "NOVA VPN Updates");
-				installerPath = System.IO.Path.Combine(updateDirectory, "NOVA VPN Setup " + latest.Version.ToString(3) + " " + Guid.NewGuid().ToString("N") + ".exe");
-				Toast("Скачиваю установщик NOVA VPN " + latest.Version.ToString(3) + "…", Muted);
-				await updater.DownloadInstallerAsync(latest, installerPath);
-
-				string installDirectory = System.IO.Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
-				int currentProcessId;
-				using (System.Diagnostics.Process currentProcess = System.Diagnostics.Process.GetCurrentProcess())
-					currentProcessId = currentProcess.Id;
-				ProcessStartInfo startInfo = new ProcessStartInfo(installerPath)
-				{
-					Arguments = "--update-path " + AppUpdateService.QuoteWindowsArgument(installDirectory) + " --wait-pid " + currentProcessId + " --delete-self-on-reboot",
-					UseShellExecute = true,
-					Verb = "runas",
-					WorkingDirectory = updateDirectory
-				};
-				using (System.Diagnostics.Process updateProcess = System.Diagnostics.Process.Start(startInfo))
-				{
-					if (updateProcess == null) throw new InvalidOperationException("Не удалось запустить установщик обновления.");
-				}
-				installerStarted = true;
-				Application.Current.Shutdown();
+				await DownloadAndLaunchApplicationUpdateAsync(updater, latest);
 				return true;
 			}
 		}
 		catch (Exception ex)
 		{
-			if (!installerStarted && !String.IsNullOrWhiteSpace(installerPath))
-			{
-				try { if (File.Exists(installerPath)) File.Delete(installerPath); } catch { }
-			}
 			if (installChosen && !closing)
 				Toast("Не удалось подготовить обновление NOVA VPN: " + LogSanitizer.Sanitize(ex.Message), Warning);
 			return false;

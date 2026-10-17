@@ -74,6 +74,12 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
     }
 }
 $releaseNotes = @'
+NOVA VPN 2.3.31 — 17 октября 2026
+- Кнопка обновления скачивает установщик, проверяет SHA-256 и запускает его.
+- При отказе UAC или ошибке проверки приложение продолжает работать.
+- Windows 11 Light/Dark, идентичности и перенос включены; ключи сохраняются.
+- Reality Core остаётся экспериментальным; ядра в этом выпуске не пересобирались.
+
 NOVA VPN 2.3.25 — 14 октября 2026
 ==================================
 • Настройки → Другие продукты: ссылки на NOVA для Android и Wear OS на GitHub.
@@ -308,7 +314,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.30.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.31.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

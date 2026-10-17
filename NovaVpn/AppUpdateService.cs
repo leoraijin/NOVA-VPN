@@ -23,6 +23,18 @@ public sealed class AppReleaseInfo
 
 public sealed class AppUpdateService : IDisposable
 {
+	public static System.Diagnostics.ProcessStartInfo CreateInstallerStartInfo(string installerPath, string installDirectory, int processId)
+	{
+		if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
+		string path = Path.GetFullPath(installerPath);
+		if (!String.Equals(Path.GetExtension(path), ".exe", StringComparison.OrdinalIgnoreCase))
+			throw new InvalidDataException("Обновление должно быть Windows-установщиком.");
+		return new System.Diagnostics.ProcessStartInfo(path) {
+			Arguments = "--update-path " + QuoteWindowsArgument(Path.GetFullPath(installDirectory)) +
+				" --wait-pid " + processId.ToString(CultureInfo.InvariantCulture) + " --delete-self-on-reboot",
+			UseShellExecute = true, Verb = "runas", WorkingDirectory = Path.GetDirectoryName(path)
+		};
+	}
 	public static string QuoteWindowsArgument(string value)
 	{
 		if (value == null) throw new ArgumentNullException(nameof(value));
@@ -82,6 +94,9 @@ public sealed class AppUpdateService : IDisposable
 			throw new InvalidDataException("Ссылка установщика NOVA VPN не прошла проверку.");
 		if (release.Size <= 0 || release.Size > MaximumInstallerSize)
 			throw new InvalidDataException("Размер установщика NOVA VPN не прошёл проверку.");
+		if (String.IsNullOrWhiteSpace(release.Sha256) || release.Sha256.Length != 64 ||
+			!System.Linq.Enumerable.All(release.Sha256, Uri.IsHexDigit))
+			throw new InvalidDataException("GitHub не предоставил SHA-256 установщика. Автоматический запуск отменён.");
 		if (String.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentException("Не указан путь сохранения установщика.", nameof(destinationPath));
 
 		string fullPath = Path.GetFullPath(destinationPath);
