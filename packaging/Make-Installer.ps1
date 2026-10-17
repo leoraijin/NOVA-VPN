@@ -74,6 +74,12 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
     }
 }
 $releaseNotes = @'
+NOVA VPN 2.3.33 — 17 октября 2026
+- Блок приложений компактнее, выровнен влево с боковым отступом.
+- Колесо прокручивает страницу, Shift + колесо — список приложений.
+- Маршрут выбирается перетаскиванием: напрямую / по умолчанию / VPN.
+- Щелчок не меняет маршрут; клавиатура и защита маршрутов Zapret сохранены.
+
 NOVA VPN 2.3.32 — 17 октября 2026
 - Плавная прокрутка колесом с целевой частотой 120 Гц и быстрым разворотом.
 - Нет постоянного таймера; отключение анимаций и вложенные списки сохранены.
@@ -319,7 +325,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.32.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.33.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

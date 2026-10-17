@@ -1,6 +1,6 @@
 # NOVA VPN
 
-Release **2.3.32** adds smooth page-wheel scrolling targeting 120 Hz, without an idle timer and respecting reduced motion. Actual FPS depends on the display and load. Verified automatic installer launch from 2.3.31, Windows themes and encrypted identity/transfer features are preserved. Windows engines were not rebuilt; Reality Core remains experimental. Screenshots below show older versions.
+Release **2.3.33** adds a compact left-aligned app-routing panel. Wheel scrolls the page; Shift+wheel scrolls the app list. Three-state routes change by dragging, not mouse clicks. Smooth scrolling targeting 120 Hz and verified automatic installer launch are preserved. Windows engines were not rebuilt; Reality Core remains experimental. Screenshots below show older versions.
 
 [Русский](README.md) | **English**
 

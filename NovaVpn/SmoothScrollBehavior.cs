@@ -23,6 +23,18 @@ public static class SmoothScrollBehavior
         viewer.SetValue(StateProperty, new State(viewer, motionAllowed));
     }
     public static bool IsAnimating(ScrollViewer viewer) => (viewer.GetValue(StateProperty) as State)?.Active == true;
+    public static void ForwardToPage(FrameworkElement source, MouseWheelEventArgs args)
+    {
+        if (args.Handled || Keyboard.Modifiers != ModifierKeys.None) return;
+        for (var node = Parent(source); node != null; node = Parent(node)) {
+            if (!(node is ScrollViewer page)) continue;
+            args.Handled = true;
+            var preview = new MouseWheelEventArgs(args.MouseDevice, args.Timestamp, args.Delta) { RoutedEvent = Mouse.PreviewMouseWheelEvent, Source = page };
+            page.RaiseEvent(preview);
+            if (!preview.Handled) page.RaiseEvent(new MouseWheelEventArgs(args.MouseDevice, args.Timestamp, args.Delta) { RoutedEvent = Mouse.MouseWheelEvent, Source = page });
+            return;
+        }
+    }
     public static double Target(double current, double previous, bool active, double delta, double maximum)
     {
         // Reverse immediately rather than waiting for the preceding direction's tail.

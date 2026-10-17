@@ -21,6 +21,12 @@ try {
  $window.Show();$count=0
  foreach($page in @('home','servers','routing','settings','diagnostics','engine')) {
   $window.ShowPageForSnapshot($page);$window.UpdateLayout()
+  if($page -eq 'routing') {
+   $card=$type.GetMethod('BuildApplicationRoutingSection',$flags).Invoke($window,@())
+   if($card.MaxWidth -gt 760 -or $card.HorizontalAlignment -ne 'Left' -or $card.Margin.Right -lt 28){throw 'App card not compact/side aligned'}
+   $list=@($card.Child.Children | Where-Object {$_ -is [Windows.Controls.ListBox]})[0]
+   if($list.Height -gt 250 -or -not [Windows.Controls.VirtualizingStackPanel]::GetIsVirtualizing($list)){throw 'App list size/virtualization regression'}
+  }
   $scroll=Find-Scroll ($type.GetField('contentHost',$flags).GetValue($window))
   if($scroll) {
    if($null -eq $scroll.GetValue($stateProperty)){throw "Page scroll not attached: $page"}

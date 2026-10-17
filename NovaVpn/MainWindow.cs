@@ -2466,12 +2466,13 @@ public sealed partial class MainWindow : Window
 	{
 		Border card = new Border
 		{
-			Padding = new Thickness(16), Background = new SolidColorBrush(Surface),
+			Padding = new Thickness(12), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left,
+			Margin = new Thickness(0, 0, 28, 0), Background = new SolidColorBrush(Surface),
 			BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1),
 			CornerRadius = Radius(14)
 		};
 		StackPanel content = new StackPanel();
-		var routingHint = T("Выберите программу и нажимайте переключатель: по умолчанию → VPN → напрямую.", 14, TextColor);
+		var routingHint = T("Перетащите переключатель: слева — напрямую, по центру — по умолчанию, справа — VPN.", 12, TextColor);
         routingHint.TextWrapping = TextWrapping.Wrap; routingHint.TextTrimming = TextTrimming.None; content.Children.Add(routingHint);
 		TextBlock explanation = T("Правило задаётся по полному пути к .exe. Пока Zapret включён, домены Zapret и приложения из VPN-маршрутов перемещаются в «Напрямую»; при выключении Zapret VPN-маршруты восстанавливаются.", 9.5, Muted);
 		explanation.TextWrapping = TextWrapping.Wrap;
@@ -2505,7 +2506,7 @@ public sealed partial class MainWindow : Window
 		content.Children.Add(status);
 		ListBox results = new ListBox
 		{
-			Height = 380, Background = new SolidColorBrush(Surface2),
+			Height = 250, Background = new SolidColorBrush(Surface2),
 			BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1),
 			HorizontalContentAlignment = HorizontalAlignment.Stretch
 		};
@@ -2513,7 +2514,11 @@ public sealed partial class MainWindow : Window
 		VirtualizingStackPanel.SetIsVirtualizing(results, true);
 		ScrollViewer.SetCanContentScroll(results, true);
 		ScrollViewer.SetPanningMode(results, PanningMode.VerticalOnly);
+		results.PreviewMouseWheel += (s, e) => SmoothScrollBehavior.ForwardToPage(results, e);
 		content.Children.Add(results);
+		var listHint = T("Колесо — вся страница; Shift + колесо — список программ. Маршрут меняется перетаскиванием.", 9.5, Muted);
+		listHint.TextWrapping = TextWrapping.Wrap;
+		content.Children.Add(listHint);
 		Button apply = SmallButton("Применить маршруты");
 		apply.Margin = new Thickness(0, 10, 0, 0);
 		apply.Visibility = applicationRoutingPending && core.Status == CoreStatus.Connected ? Visibility.Visible : Visibility.Collapsed;
@@ -2643,13 +2648,19 @@ public sealed partial class MainWindow : Window
 		Color routeColor = route == ApplicationRoutingService.Proxy ? Accent : route == ApplicationRoutingService.Direct ? Teal : Surface2;
 		Border track = CreatePillSwitch(routeColor, route == ApplicationRoutingService.Automatic ? BorderColor : routeColor,
 			route == ApplicationRoutingService.Proxy ? HorizontalAlignment.Right : route == ApplicationRoutingService.Direct ? HorizontalAlignment.Left : HorizontalAlignment.Center, 50, 26);
-		Button toggle = new Button
+		Button toggle = new DragRouteSwitch(track, route, next =>
+		{
+			ApplicationRoutingService.SetRoute(state.Routing, entry.ExecutablePath, next);
+			StateStore.Save(state);
+			applicationRoutingPending = ApplicationRoutingNeedsApply();
+			Dispatcher.BeginInvoke(refresh);
+		})
 		{
 			Content = track, Width = 64, Height = 48, BorderThickness = new Thickness(0),
-			Background = Brushes.Transparent, Cursor = Cursors.Hand, Padding = new Thickness(0),
+			Background = Brushes.Transparent, Cursor = Cursors.SizeWE, Padding = new Thickness(0),
 			ToolTip = state.Zapret?.RoutingChangesApplied == true
 				? "Отключите Zapret, чтобы менять маршруты приложений. Текущие VPN-маршруты временно направлены напрямую."
-				: "Нажмите для смены маршрута. Повторное нажатие вернёт правило по умолчанию.",
+				: "Перетащите: слева — напрямую, центр — по умолчанию, справа — VPN. Клавиатура: ← →, Home, End.",
 			IsEnabled = state.Zapret?.RoutingChangesApplied != true
 		};
 		// A bare presenter avoids the square native Button chrome around the switch.
@@ -2664,15 +2675,6 @@ public sealed partial class MainWindow : Window
 		System.Windows.Automation.AutomationProperties.SetName(toggle, entry.Name + " · " + RouteLabel(route));
 		toggle.MouseEnter += (s, e) => track.Opacity = 0.85;
 		toggle.MouseLeave += (s, e) => track.Opacity = 1;
-		toggle.Click += delegate
-		{
-			string next = route == ApplicationRoutingService.Automatic ? ApplicationRoutingService.Proxy
-				: route == ApplicationRoutingService.Proxy ? ApplicationRoutingService.Direct : ApplicationRoutingService.Automatic;
-			ApplicationRoutingService.SetRoute(state.Routing, entry.ExecutablePath, next);
-			StateStore.Save(state);
-			applicationRoutingPending = ApplicationRoutingNeedsApply();
-			Dispatcher.BeginInvoke(refresh);
-		};
 		control.Children.Add(toggle);
 		Grid.SetColumn(control, 2);
 		row.Children.Add(control);
