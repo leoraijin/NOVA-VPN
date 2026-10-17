@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -35,7 +35,18 @@ public sealed class CoreManager : IDisposable
 
 	public CoreStatus Status { get; private set; }
 
-	public string CorePath => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "core", "sing-box.exe");
+	public VpnEngine Engine { get; private set; }
+    public string ProbeCorePath => VpnEngines.ExecutablePath(VpnEngine.SingBox);
+    public string CorePath => VpnEngines.ExecutablePath(Engine);
+    public void SelectEngine(VpnEngine engine)
+    {
+        if (process != null || Status == CoreStatus.Connected || Status == CoreStatus.Connecting)
+            throw new InvalidOperationException("Сначала отключите VPN, затем выберите ядро.");
+        if (!Enum.IsDefined(typeof(VpnEngine),engine)) throw new ArgumentOutOfRangeException(nameof(engine));
+        Engine = engine;
+    }
+    private string BuildConfig(VpnProfile profile, RoutingSettings routing) => Engine == VpnEngine.Reality
+        ? RealityConfigBuilder.Build(profile,routing) : ConfigBuilder.Build(profile,routing);
 
 	public bool IsCoreInstalled => File.Exists(CorePath);
 
@@ -64,8 +75,9 @@ public sealed class CoreManager : IDisposable
 		{
 			if (!IsCoreInstalled)
 			{
-				throw new FileNotFoundException("Не найдено VPN-ядро sing-box.", CorePath);
+				throw new FileNotFoundException("Не найдено выбранное VPN-ядро: " + VpnEngines.DisplayName(Engine), CorePath);
 			}
+			string preparedConfig = BuildConfig(profile, routing);
 			Stop();
 			int generation = System.Threading.Volatile.Read(ref startGeneration);
 			stopping = false;
@@ -78,7 +90,7 @@ public sealed class CoreManager : IDisposable
 			string runtimeDir = Path.Combine(StateStore.DirectoryPath, "runtime");
 			Directory.CreateDirectory(runtimeDir);
 			configPath = Path.Combine(runtimeDir, "active.json");
-			File.WriteAllText(contents: ConfigBuilder.Build(profile, routing), path: configPath, encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+			File.WriteAllText(contents: preparedConfig, path: configPath, encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 			string validation = await RunCheckAsync(configPath);
 			if (generation != System.Threading.Volatile.Read(ref startGeneration) || stopping)
 			{
@@ -95,7 +107,8 @@ public sealed class CoreManager : IDisposable
 			ProcessStartInfo start = new ProcessStartInfo
 			{
 				FileName = CorePath,
-				Arguments = "run -c \"" + configPath + "\"",
+                Arguments = VpnEngines.RunArguments(Engine, configPath),
+                RedirectStandardInput = Engine == VpnEngine.Reality,
 				WorkingDirectory = Path.GetDirectoryName(CorePath),
 				UseShellExecute = false,
 				CreateNoWindow = true,
@@ -119,7 +132,7 @@ public sealed class CoreManager : IDisposable
 			process.Start();
 			if (generation != System.Threading.Volatile.Read(ref startGeneration) || stopping)
 			{
-				try { if (!startedProcess.HasExited) startedProcess.Kill(); } catch { }
+				StopOwnedProcess(startedProcess);
 				try { startedProcess.Dispose(); } catch { }
 				if (ReferenceEquals(process, startedProcess)) process = null;
 				SafeDeleteConfig();
@@ -151,35 +164,36 @@ public sealed class CoreManager : IDisposable
 	{
 		System.Threading.Interlocked.Increment(ref startGeneration);
 		stopping = true;
-		Process process = this.process;
-		this.process = null;
-		if (process != null)
-		{
-			try
-			{
-				if (!process.HasExited)
-				{
-					process.Kill();
-					process.WaitForExit(3000);
-				}
-			}
-			catch
-			{
-			}
-			try
-			{
-				process.Dispose();
-			}
-			catch
-			{
-			}
-		}
+        Process process = this.process;
+        if (process != null)
+        {
+            StopOwnedProcess(process);
+            if (ReferenceEquals(this.process,process)) this.process = null;
+            process.Dispose();
+        }
 		SafeDeleteConfig();
 		ConnectedAtUtc = default(DateTime);
 		connectedProfile = null;
 		Verification = new ConnectionVerification();
 		ChangeStatus(CoreStatus.Disconnected, "Не подключено");
 	}
+
+    private void StopOwnedProcess(Process owned)
+    {
+        if (owned == null || owned.HasExited) return;
+        if (Engine == VpnEngine.Reality)
+        {
+            // Closing the private stdin pipe triggers native route/TUN cleanup.
+            owned.StandardInput.Close();
+            if (!owned.WaitForExit(10000))
+                throw new InvalidOperationException("Ядро ещё завершает соединение. Повторите отключение; принудительная остановка не выполнена.");
+        }
+        else
+        {
+            owned.Kill();
+            if (!owned.WaitForExit(3000)) throw new InvalidOperationException("VPN-ядро ещё не завершилось.");
+        }
+    }
 
 	public async Task<int> TestLatencyAsync(VpnProfile profile)
 	{
@@ -190,14 +204,14 @@ public sealed class CoreManager : IDisposable
 	{
 		if (!IsCoreInstalled)
 		{
-			return "Не найдено VPN-ядро sing-box.";
+			return "Не найдено выбранное VPN-ядро: " + VpnEngines.DisplayName(Engine);
 		}
 		string runtimeDir = Path.Combine(StateStore.DirectoryPath, "runtime");
 		Directory.CreateDirectory(runtimeDir);
 		string path = Path.Combine(runtimeDir, "check-" + Guid.NewGuid().ToString("N") + ".json");
 		try
 		{
-			File.WriteAllText(path, ConfigBuilder.Build(profile, routing), new UTF8Encoding(false));
+			File.WriteAllText(path, BuildConfig(profile, routing), new UTF8Encoding(false));
 			return await RunCheckAsync(path);
 		}
 		catch (Exception ex)
@@ -219,7 +233,7 @@ public sealed class CoreManager : IDisposable
 		ProcessStartInfo start = new ProcessStartInfo
 		{
 			FileName = CorePath,
-			Arguments = "version",
+			Arguments = VpnEngines.VersionArguments(Engine),
 			WorkingDirectory = Path.GetDirectoryName(CorePath),
 			UseShellExecute = false,
 			CreateNoWindow = true,
@@ -270,7 +284,7 @@ public sealed class CoreManager : IDisposable
 			result.Message = "Контрольный запрос: " + LogSanitizer.Sanitize(ex.Message);
 		}
 		if (profile != null && generation == startGeneration && Status == CoreStatus.Connected)
-			result.ProfileProbe = await ServerMapHealthService.TestAsync(profile, CorePath,
+			result.ProfileProbe = await ServerMapHealthService.TestAsync(profile, ProbeCorePath,
 				Path.Combine(StateStore.DirectoryPath, "runtime", "map-probes"), System.Threading.CancellationToken.None);
 		result.Completed = true;
 		result.CheckedUtc = DateTime.UtcNow;
@@ -288,7 +302,7 @@ public sealed class CoreManager : IDisposable
 		ProcessStartInfo start = new ProcessStartInfo
 		{
 			FileName = CorePath,
-			Arguments = "check -c \"" + path + "\"",
+            Arguments = VpnEngines.CheckArguments(Engine, path),
 			WorkingDirectory = Path.GetDirectoryName(CorePath),
 			UseShellExecute = false,
 			CreateNoWindow = true,
@@ -297,25 +311,23 @@ public sealed class CoreManager : IDisposable
 			StandardErrorEncoding = Encoding.UTF8,
 			StandardOutputEncoding = Encoding.UTF8
 		};
-		Process check = Process.Start(start);
-		try
-		{
-			string stdout = await check.StandardOutput.ReadToEndAsync();
-			string stderr = await check.StandardError.ReadToEndAsync();
-			await Task.Run(delegate
-			{
-				check.WaitForExit();
-			});
-			return (check.ExitCode == 0) ? "" : (stderr + Environment.NewLine + stdout).Trim();
-		}
-		finally
-		{
-			if (check != null)
-			{
-				((IDisposable)check).Dispose();
-			}
-		}
-	}
+        using (Process check = Process.Start(start))
+        {
+            Task<string> stdout = check.StandardOutput.ReadToEndAsync();
+            Task<string> stderr = check.StandardError.ReadToEndAsync();
+            bool exited = await Task.Run(() => check.WaitForExit(15000));
+            if (!exited)
+            {
+                // Only this validation child is stopped; it never starts a tunnel.
+                try { check.Kill(); } catch (InvalidOperationException) { }
+                await Task.Run(() => check.WaitForExit(3000));
+                return "Проверка конфигурации ядра не завершилась за 15 секунд.";
+            }
+            string output = await stdout;
+            string error = await stderr;
+            return check.ExitCode == 0 ? "" : LogSanitizer.Sanitize((error + Environment.NewLine + output).Trim());
+        }
+    }
 
 	private void OnData(object sender, DataReceivedEventArgs e)
 	{

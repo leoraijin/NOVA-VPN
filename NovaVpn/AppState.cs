@@ -8,7 +8,10 @@ namespace NovaVpn;
 public sealed class AppState
 {
 	[DataMember]
-	public int SchemaVersion = 10;
+	public int SchemaVersion = 11;
+    [DataMember] public IdentityState SubscriptionIdentities = new IdentityState();
+
+    [DataMember] public int EngineSelection;
 
 	[DataMember]
 	public List<VpnProfile> Profiles = new List<VpnProfile>();
@@ -85,3 +88,4 @@ public sealed class AppState
 	[DataMember]
 	public ZapretSettings Zapret = new ZapretSettings();
 }
+

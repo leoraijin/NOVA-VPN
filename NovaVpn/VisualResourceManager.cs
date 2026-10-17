@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -46,10 +46,43 @@ public static class VisualResourceManager
 		application.Resources["NovaControlHeight"] = Math.Max(34.0 * VisualDesign.Density(visual), 30.0 * visual.TextScale);
 		if (installed) return;
 		installed = true;
-		application.Resources[typeof(ScrollBar)] = XamlReader.Parse(ScrollBarStyle) as Style;
+		application.Resources[typeof(ContextMenu)] = XamlReader.Parse(ContextMenuStyle) as Style;
+        application.Resources[typeof(MenuItem)] = XamlReader.Parse(MenuItemStyle) as Style;
+        application.Resources[typeof(ScrollBar)] = XamlReader.Parse(ScrollBarStyle) as Style;
 		application.Resources[typeof(Slider)] = XamlReader.Parse(SliderStyle) as Style;
 		application.Resources["NovaSelectorStyle"] = XamlReader.Parse(SelectorStyle) as Style;
 	}
+
+    private const string ContextMenuStyle = @"
+<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='{x:Type ContextMenu}'>
+  <Setter Property='Background' Value='{DynamicResource NovaPopupBrush}'/>
+  <Setter Property='Foreground' Value='{DynamicResource NovaTextBrush}'/>
+  <Setter Property='BorderBrush' Value='{DynamicResource NovaBorderBrush}'/>
+  <Setter Property='BorderThickness' Value='1'/>
+  <Setter Property='Padding' Value='4'/>
+  <Setter Property='FontFamily' Value='Segoe UI'/>
+  <Setter Property='FontSize' Value='{DynamicResource NovaControlFontSize}'/>
+  <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='{x:Type ContextMenu}'>
+    <Border Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='6' Padding='{TemplateBinding Padding}'>
+      <ScrollViewer CanContentScroll='True' VerticalScrollBarVisibility='Auto' HorizontalScrollBarVisibility='Disabled'><ItemsPresenter KeyboardNavigation.DirectionalNavigation='Cycle'/></ScrollViewer>
+    </Border>
+  </ControlTemplate></Setter.Value></Setter>
+</Style>";
+
+    private const string MenuItemStyle = @"
+<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='{x:Type MenuItem}'>
+  <Setter Property='Padding' Value='12,8'/>
+  <Setter Property='MinHeight' Value='34'/>
+  <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='{x:Type MenuItem}'>
+    <Border x:Name='Item' Background='Transparent' CornerRadius='4' Padding='{TemplateBinding Padding}'>
+      <ContentPresenter ContentSource='Header' RecognizesAccessKey='True' TextElement.Foreground='{TemplateBinding Foreground}' TextElement.FontSize='{TemplateBinding FontSize}' TextElement.FontFamily='{TemplateBinding FontFamily}'/>
+    </Border>
+    <ControlTemplate.Triggers>
+      <Trigger Property='IsHighlighted' Value='True'><Setter TargetName='Item' Property='Background' Value='{DynamicResource NovaSelectionBrush}'/></Trigger>
+      <Trigger Property='IsEnabled' Value='False'><Setter TargetName='Item' Property='Opacity' Value='0.45'/></Trigger>
+    </ControlTemplate.Triggers>
+  </ControlTemplate></Setter.Value></Setter>
+</Style>";
 
 	private const string SelectorStyle = @"
 <Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' xmlns:nova='clr-namespace:NovaVpn;assembly=NOVA VPN' TargetType='{x:Type ComboBox}'>
@@ -98,9 +131,9 @@ public static class VisualResourceManager
   <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='{x:Type ScrollBar}'>
     <Grid Background='Transparent'>
       <Track x:Name='PART_Track' Orientation='{TemplateBinding Orientation}' IsDirectionReversed='True' Focusable='False'>
-        <Track.DecreaseRepeatButton><RepeatButton Command='{x:Static ScrollBar.PageUpCommand}' Opacity='0'/></Track.DecreaseRepeatButton>
+        <Track.DecreaseRepeatButton><RepeatButton Focusable='False' IsTabStop='False' Command='{x:Static ScrollBar.PageUpCommand}' Opacity='0'/></Track.DecreaseRepeatButton>
         <Track.Thumb><Thumb MinHeight='38'><Thumb.Template><ControlTemplate TargetType='{x:Type Thumb}'><Border x:Name='Grip' Background='{DynamicResource NovaBorderBrush}' CornerRadius='3' Width='6' HorizontalAlignment='Center' Opacity='0.7'/><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Grip' Property='Opacity' Value='1'/></Trigger><Trigger Property='IsDragging' Value='True'><Setter TargetName='Grip' Property='Background' Value='{DynamicResource NovaAccentBrush}'/></Trigger><DataTrigger Binding='{Binding Orientation, RelativeSource={RelativeSource AncestorType={x:Type ScrollBar}}}' Value='Horizontal'><Setter TargetName='Grip' Property='Width' Value='Auto'/><Setter TargetName='Grip' Property='Height' Value='6'/><Setter TargetName='Grip' Property='HorizontalAlignment' Value='Stretch'/></DataTrigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
-        <Track.IncreaseRepeatButton><RepeatButton Command='{x:Static ScrollBar.PageDownCommand}' Opacity='0'/></Track.IncreaseRepeatButton>
+        <Track.IncreaseRepeatButton><RepeatButton Focusable='False' IsTabStop='False' Command='{x:Static ScrollBar.PageDownCommand}' Opacity='0'/></Track.IncreaseRepeatButton>
       </Track>
     </Grid>
   </ControlTemplate></Setter.Value></Setter>
@@ -113,9 +146,9 @@ public static class VisualResourceManager
     <Grid>
       <Border Height='4' CornerRadius='2' Background='{DynamicResource NovaBorderBrush}' VerticalAlignment='Center'/>
       <Track x:Name='PART_Track'>
-        <Track.DecreaseRepeatButton><RepeatButton Command='{x:Static Slider.DecreaseLarge}' Background='{DynamicResource NovaAccentBrush}' Height='4' VerticalAlignment='Center' BorderThickness='0'/></Track.DecreaseRepeatButton>
+        <Track.DecreaseRepeatButton><RepeatButton Focusable='False' IsTabStop='False' Command='{x:Static Slider.DecreaseLarge}' Background='{DynamicResource NovaAccentBrush}' Height='4' VerticalAlignment='Center' BorderThickness='0'/></Track.DecreaseRepeatButton>
         <Track.Thumb><Thumb Width='16' Height='16'><Thumb.Template><ControlTemplate TargetType='{x:Type Thumb}'><Ellipse Fill='{DynamicResource NovaAccentBrush}' Stroke='{DynamicResource NovaTextBrush}' StrokeThickness='1'/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
-        <Track.IncreaseRepeatButton><RepeatButton Command='{x:Static Slider.IncreaseLarge}' Background='Transparent' Height='4' VerticalAlignment='Center' BorderThickness='0'/></Track.IncreaseRepeatButton>
+        <Track.IncreaseRepeatButton><RepeatButton Focusable='False' IsTabStop='False' Command='{x:Static Slider.IncreaseLarge}' Background='Transparent' Height='4' VerticalAlignment='Center' BorderThickness='0'/></Track.IncreaseRepeatButton>
       </Track>
     </Grid>
   </ControlTemplate></Setter.Value></Setter>

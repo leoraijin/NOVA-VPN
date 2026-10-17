@@ -37,6 +37,7 @@ public static class PortableConfigService
         AppState safeState = CloneState(state);
         ZapretRoutingTransitionService.SetActive(safeState, false);
         if (safeState.Zapret != null) safeState.Zapret.Mode = "VPN";
+        safeState.SubscriptionIdentities = new IdentityState();
         safeState.Profiles = new System.Collections.Generic.List<VpnProfile>();
         safeState.SelectedProfileId = null;
         safeState.ConnectionHistory.Clear();
@@ -93,6 +94,16 @@ public static class PortableConfigService
         return state;
     }
 
+    public static void ApplySettingsOnly(AppState target, AppState imported)
+    {
+        if (target == null || imported == null) throw new ArgumentNullException();
+        if (target.Zapret?.RoutingChangesApplied == true)
+            throw new InvalidOperationException("Сначала выключите Zapret перед изменением маршрутов.");
+        target.Routing = RoutingOverlayService.Clone(imported.Routing ?? new RoutingSettings());
+        target.Visual = (imported.Visual ?? new VisualPreferences()).Clone();
+        target.Visual.MigrateWindowsDesign();
+    }
+
     private static AppState ReadPackage(string path, string expectedFormat)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("Переносимый конфиг не найден.", path);
@@ -118,3 +129,4 @@ public static class PortableConfigService
         }
     }
 }
+

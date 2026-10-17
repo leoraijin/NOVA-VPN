@@ -1,5 +1,7 @@
-using System;
+﻿using System;
 using System.Diagnostics;
+using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -19,7 +21,7 @@ public sealed class ServerMapHealth
 	public string Message = "Не проверен";
 	public bool IsFresh => CheckedUtc != default(DateTime) && DateTime.UtcNow - CheckedUtc < TimeSpan.FromMinutes(3);
 	public string Label => !Supported ? Message : !IsFresh ? "Нужна свежая проверка" :
-		(Success ? "HTTPS работает · " + LatencyMs + " мс" : Message) + " · " + Math.Max(0, (int)(DateTime.UtcNow - CheckedUtc).TotalSeconds) + " с назад";
+		(Success ? "HTTPS-отклик · " + LatencyMs + " мс" : Message) + " · " + Math.Max(0, (int)(DateTime.UtcNow - CheckedUtc).TotalSeconds) + " с назад";
 }
 
 public static class ServerMapHealthService
@@ -59,7 +61,7 @@ public static class ServerMapHealthService
 			process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
 			using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(token))
 			{
-				deadline.CancelAfter(TimeSpan.FromSeconds(16));
+				deadline.CancelAfter(TimeSpan.FromSeconds(30));
 				bool ready = false;
 				for (int i = 0; i < 40 && !process.HasExited; i++)
 				{
@@ -76,28 +78,33 @@ public static class ServerMapHealthService
 				using (var handler = new HttpClientHandler { UseProxy = true, Proxy = proxy, AllowAutoRedirect = false })
 				using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) })
 				{
-					var watch = Stopwatch.StartNew();
+					
 					// Numeric HTTPS endpoint avoids depending on the user's browser DNS.
-					for (int i = 0; i < 2; i++)
+					// First request establishes proxy/TLS; three warm responses measure latency.
+                    result.LatencyMs = await WarmHttpsLatency.MeasureAsync(async () =>
 					{
 						using (var request = new HttpRequestMessage(HttpMethod.Get, "https://1.1.1.1/cdn-cgi/trace"))
 						{
-							request.Headers.ConnectionClose = true;
+							request.Headers.ConnectionClose = false;
+                            request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
+                            var watch = Stopwatch.StartNew();
 							using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false))
 							{
-								if (response.StatusCode != HttpStatusCode.OK) throw new IOException("Probe response failed");
+								watch.Stop();
+                                if (response.Headers.ConnectionClose == true) throw new IOException("Persistent HTTPS unavailable");
+                                if (response.StatusCode != HttpStatusCode.OK) throw new IOException("Probe response failed");
 								using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
 								{
 									var buffer = new byte[4096]; int count = 0, read;
 									while (count < buffer.Length && (read = await stream.ReadAsync(buffer, count, buffer.Length - count, deadline.Token).ConfigureAwait(false)) > 0) count += read;
 									if (!Encoding.UTF8.GetString(buffer, 0, count).Contains("\nip=")) throw new IOException("Unexpected probe body");
 								}
+                                return (int)Math.Max(1, watch.ElapsedMilliseconds);
 							}
 						}
-					}
-					result.LatencyMs = (int)Math.Max(1, watch.ElapsedMilliseconds / 2);
+					}).ConfigureAwait(false);
 					result.Success = true;
-					result.Message = "Два HTTPS-запроса через профиль выполнены";
+					result.Message = "Медиана трёх HTTPS-ответов после установления соединения";
 				}
 			}
 		}
@@ -111,4 +118,20 @@ public static class ServerMapHealthService
 		result.CheckedUtc = DateTime.UtcNow;
 		return result;
 	}
+}
+
+internal static class WarmHttpsLatency
+{
+    internal static async Task<int> MeasureAsync(Func<Task<int>> validResponse)
+    {
+        // Setup request is validated, but excluded from the reported latency.
+        if (await validResponse().ConfigureAwait(false) <= 0) throw new IOException("Invalid warm-up");
+        var values = new int[3];
+        for (int i = 0; i < values.Length; i++) {
+            values[i] = await validResponse().ConfigureAwait(false);
+            if (values[i] <= 0) throw new IOException("Invalid sample");
+        }
+        Array.Sort(values);
+        return values[1];
+    }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -142,7 +142,7 @@ public sealed partial class MainWindow
         var title = T(step.Title, 21, TextColor, FontWeights.SemiBold); title.TextWrapping = TextWrapping.Wrap; copy.Children.Add(title);
         var description = T(step.Copy, 13, TextColor); description.TextWrapping = TextWrapping.Wrap; description.Margin = new Thickness(0, 10, 0, 16); copy.Children.Add(description);
         var actions = new WrapPanel();
-        var skip = SmallButton("Пропустить"); skip.MinHeight = 44; skip.Click += delegate { EndGuidedTour(); }; actions.Children.Add(skip);
+        var skip = SmallButton("Пропустить"); skip.MinHeight = 44; skip.Click += delegate { EndGuidedTour(); }; if (tourIndex < tourSteps.Length - 1) actions.Children.Add(skip);
         var back = SmallButton("Назад"); back.MinHeight = 44; back.Margin = new Thickness(8, 0, 8, 0); back.IsEnabled = tourIndex > 0; back.Click += delegate { tourIndex--; ShowTourStep(); }; actions.Children.Add(back);
         var next = PrimaryButton(tourIndex == tourSteps.Length - 1 ? "Завершить" : "Далее →", 104); next.MinHeight = 44; next.Click += delegate { TourNext(); }; actions.Children.Add(next);
         copy.Children.Add(actions);

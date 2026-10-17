@@ -1,14 +1,13 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
-
 namespace NovaVpn;
-
 [DataContract]
 public sealed class VisualPreferences
 {
 	[DataMember] public string ThemeName = ThemePalette.Windows;
 	[DataMember] public bool DarkMode;
+    [DataMember] public int DesignSchemaVersion;
 	[DataMember] public double MaterialHue = 275;
 	[DataMember] public string AccentHex = "";
 	[DataMember] public string SuccessHex = "";
@@ -38,15 +37,28 @@ public sealed class VisualPreferences
 	[DataMember] public List<string> HomeCardOrder = new List<string> { "Speed", "Protocol", "Latency", "Session", "Privacy" };
 	[DataMember] public List<string> HiddenHomeCards = new List<string>();
 	[DataMember] public Dictionary<string, VisualThemeOverrides> ThemeOverrides = new Dictionary<string, VisualThemeOverrides>(StringComparer.OrdinalIgnoreCase);
-
 	[OnDeserializing]
 	private void BeforeDeserialize(StreamingContext context) { MaterialHue = 275; }
-
+    [OnDeserialized]
+    private void AfterDeserialize(StreamingContext context) { MigrateWindowsDesign(); }
+    public void MigrateWindowsDesign()
+    {
+        if (DesignSchemaVersion >= 1) { ThemeName = ThemePalette.Windows; return; }
+        DarkMode = DarkMode || ThemePalette.IsLegacyDark(ThemeName);
+        ThemeName = ThemePalette.Windows;
+        AccentHex = SuccessHex = CustomBackgroundPath = "";
+        CornerRadius = 8; SurfaceOpacity = 1; BackgroundMode = "Solid";
+        GlowIntensity = BackgroundBlur = BackgroundDim = GlassShadow = GlassHighlight = 0;
+        ConnectButtonStyle = "Windows"; Density = "Standard";
+        AnimationSpeed = 1; AnimationFrameRate = 60;
+        ThemeOverrides = new Dictionary<string, VisualThemeOverrides>(StringComparer.OrdinalIgnoreCase);
+        DesignSchemaVersion = 1;
+    }
 	public VisualPreferences Clone()
 	{
 		VisualPreferences copy = new VisualPreferences
 		{
-			ThemeName = ThemeName, DarkMode = DarkMode, MaterialHue = MaterialHue,
+			ThemeName = ThemeName, DarkMode = DarkMode, MaterialHue = MaterialHue, DesignSchemaVersion = DesignSchemaVersion,
 			AccentHex = AccentHex,
 			SuccessHex = SuccessHex,
 			CornerRadius = CornerRadius,
@@ -82,12 +94,11 @@ public sealed class VisualPreferences
 					copy.ThemeOverrides[ThemePalette.NormalizeName(pair.Key)] = pair.Value.Clone();
 		return copy;
 	}
-
 	public void CopyFrom(VisualPreferences other)
 	{
 		if (other == null) return;
 		VisualPreferences copy = other.Clone();
-		ThemeName = copy.ThemeName; DarkMode = copy.DarkMode; MaterialHue = copy.MaterialHue;
+		ThemeName = copy.ThemeName; DarkMode = copy.DarkMode; MaterialHue = copy.MaterialHue; DesignSchemaVersion = copy.DesignSchemaVersion;
 		AccentHex = copy.AccentHex;
 		SuccessHex = copy.SuccessHex;
 		CornerRadius = copy.CornerRadius;
@@ -117,13 +128,11 @@ public sealed class VisualPreferences
 		HiddenHomeCards = copy.HiddenHomeCards;
 		ThemeOverrides = copy.ThemeOverrides;
 	}
-
 	public void StoreActiveThemeSettings()
 	{
 		if (ThemeOverrides == null) ThemeOverrides = new Dictionary<string, VisualThemeOverrides>(StringComparer.OrdinalIgnoreCase);
 		ThemeOverrides[ThemePalette.NormalizeName(ThemeName)] = VisualThemeOverrides.From(this);
 	}
-
 	public void LoadThemeSettings(string themeName)
 	{
 		ThemeName = ThemePalette.NormalizeName(themeName);
@@ -134,7 +143,6 @@ public sealed class VisualPreferences
 			VisualThemeOverrides.DefaultsFor(ThemeName).ApplyTo(this);
 	}
 }
-
 [DataContract]
 public sealed class VisualThemeOverrides
 {
@@ -157,7 +165,6 @@ public sealed class VisualThemeOverrides
 	[DataMember] public double SoftContrast;
 	[DataMember] public bool ReduceMotion;
 	[DataMember] public bool FollowSystemMotion = true;
-
 	public static VisualThemeOverrides From(VisualPreferences value) => new VisualThemeOverrides
 	{
 		AccentHex = value.AccentHex,
@@ -180,7 +187,6 @@ public sealed class VisualThemeOverrides
 		ReduceMotion = value.ReduceMotion,
 		FollowSystemMotion = value.FollowSystemMotion
 	};
-
 	public static VisualThemeOverrides DefaultsFor(string themeName)
 	{
 		VisualThemeOverrides result = new VisualThemeOverrides();
@@ -199,9 +205,7 @@ public sealed class VisualThemeOverrides
 		}
 		return result;
 	}
-
 	public VisualThemeOverrides Clone() => (VisualThemeOverrides)MemberwiseClone();
-
 	public void ApplyTo(VisualPreferences value)
 	{
 		if (value == null) return;

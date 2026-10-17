@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.Serialization;
 
 namespace NovaVpn;
@@ -65,6 +65,7 @@ public sealed class VpnProfile
 
 	[DataMember]
 	public string RawJson;
+    [DataMember] public string PortableOutboundJson;
 
 	[DataMember]
 	public string Source;

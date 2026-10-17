@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -142,8 +142,11 @@ public static class ConfigBuilder
 		return "prefer_ipv4";
 	}
 
-	private static Dictionary<string, object> BuildProxy(VpnProfile p)
+	public static string ExportOutbound(VpnProfile p) => new JavaScriptSerializer().Serialize(BuildProxy(p));
+    private static Dictionary<string, object> BuildProxy(VpnProfile p)
 	{
+        if(!String.IsNullOrWhiteSpace(p.PortableOutboundJson)) { var saved=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(p.PortableOutboundJson);saved["tag"]="proxy";return saved; }
+
 		Dictionary<string, object> dictionary = Obj("type", p.Protocol, "tag", "proxy", "server", p.Server, "server_port", p.Port, "domain_resolver", "local-dns");
 		switch ((p.Protocol ?? "").ToLowerInvariant())
 		{

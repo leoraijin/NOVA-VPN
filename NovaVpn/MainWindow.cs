@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -165,7 +165,7 @@ public sealed partial class MainWindow : Window
 
 	private Forms.NotifyIcon trayIcon;
 
-	private Forms.ToolStripMenuItem trayConnectItem;
+
 
 	private HwndSource hotkeySource;
 
@@ -184,9 +184,11 @@ public sealed partial class MainWindow : Window
 	{
 		snapshotMode = snapshot;
 		state = snapshotMode ? StateStore.CreateEphemeral() : StateStore.Load();
+		state.Visual.MigrateWindowsDesign();
 		if (snapshotMode) PrepareSnapshotData();
 		ApplyVisualPalette();
 		core = new CoreManager();
+        core.SelectEngine(state.EngineSelection == 1 ? VpnEngine.Reality : VpnEngine.SingBox);
 		zapret.StrategyProgress += message => Dispatcher.BeginInvoke((Action)(() =>
 		{
 			if (!closing && currentPage == "home") RefreshCurrentPage();
@@ -291,6 +293,10 @@ public sealed partial class MainWindow : Window
 			UseAeroCaptionButtons = false
 		});
 		BuildShell();
+        WindowsWindowBounds.Attach(this);
+        SourceInitialized += delegate { RefreshWindowMaterial(); };
+        Activated += delegate { RefreshWindowMaterial(); };
+        Deactivated += delegate { RefreshWindowMaterial(); };
 		if (!snapshotMode)
 		{
 			InitializeTray();
@@ -404,112 +410,113 @@ public sealed partial class MainWindow : Window
 		});
 	}
 
-	private UIElement BuildSidebar()
-	{
-		bool compact = responsiveMode == "Compact";
-		Grid grid = new Grid();
-		grid.Background = new SolidColorBrush(Sidebar);
-		Grid grid2 = grid;
-		grid2.RowDefinitions.Add(new RowDefinition
-		{
-			Height = new GridLength(compact ? 82.0 : 118.0)
-		});
-		grid2.RowDefinitions.Add(new RowDefinition
-		{
-			Height = new GridLength(1.0, GridUnitType.Star)
-		});
-		grid2.RowDefinitions.Add(new RowDefinition
-		{
-			Height = new GridLength(compact ? 68.0 : 92.0)
-		});
-		Grid grid3 = new Grid();
-		grid3.Margin = compact ? new Thickness(15.0, 13.0, 15.0, 12.0) : new Thickness(25.0, 25.0, 20.0, 22.0);
-		Grid grid4 = grid3;
-		grid4.ColumnDefinitions.Add(new ColumnDefinition
-		{
-			Width = new GridLength(50.0)
-		});
-		grid4.ColumnDefinitions.Add(new ColumnDefinition());
-		Border border = new Border();
-		border.Width = 40.0;
-		border.Height = 40.0;
-		border.CornerRadius = Radius(13.0);
-		border.Background = Brushes.Transparent;
-		Border border2 = border;
-		try { border2.Child = new Image { Source = new BitmapImage(new Uri("pack://application:,,,/Assets/nova-mark.png", UriKind.Absolute)), Stretch = Stretch.Uniform }; }
-		catch { border2.Child = IconFactory.Create("shield", 25, AccentLight); }
-		grid4.Children.Add(border2);
-		if (!compact)
-		{
-			StackPanel stackPanel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-			stackPanel.Children.Add(T("NOVA", 16.0, TextColor, FontWeights.SemiBold));
-			TextBlock brandCaption = T("PRIVATE NETWORK", 8.5, Muted, FontWeights.SemiBold);
-			brandCaption.Margin = new Thickness(0.0, 2.0, 0.0, 0.0);
-			stackPanel.Children.Add(brandCaption);
-			Grid.SetColumn(stackPanel, 1);
-			grid4.Children.Add(stackPanel);
-		}
-		grid2.Children.Add(grid4);
-		StackPanel stackPanel3 = new StackPanel();
-		stackPanel3.Margin = compact ? new Thickness(8.0, 5.0, 8.0, 0.0) : new Thickness(14.0, 4.0, 14.0, 0.0);
-		StackPanel stackPanel4 = stackPanel3;
-		stackPanel4.Children.Add(Nav("home", "home", "Главная"));
-		stackPanel4.Children.Add(Nav("servers", "servers", "Серверы"));
-		stackPanel4.Children.Add(Nav("routing", "routing", "Маршрутизация"));
-		stackPanel4.Children.Add(Nav("diagnostics", "diagnostics", "Диагностика"));
-		stackPanel4.Children.Add(Nav("settings", "settings", "Настройки"));
-		Button startTour = (Button)Nav("tour", "list", "Начать обучение");
-		stackPanel4.Children.Add(startTour);
-		Grid.SetRow(stackPanel4, 1);
-		grid2.Children.Add(stackPanel4);
-		Border border3 = new Border();
-		border3.Margin = compact ? new Thickness(10.0, 0.0, 10.0, 12.0) : new Thickness(20.0, 0.0, 20.0, 22.0);
-		border3.Padding = compact ? new Thickness(8.0, 8.0, 8.0, 8.0) : new Thickness(12.0, 10.0, 12.0, 10.0);
-		border3.Background = new SolidColorBrush(Surface);
-		border3.CornerRadius = Radius(12.0);
-		Border border4 = border3;
-		Grid grid5 = new Grid();
-		if (compact) grid5.ColumnDefinitions.Add(new ColumnDefinition());
-		else
-		{
-			grid5.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14.0) });
-			grid5.ColumnDefinitions.Add(new ColumnDefinition());
-		}
-		statusDot = new Border
-		{
-			Width = 7.0,
-			Height = 7.0,
-			CornerRadius = new CornerRadius(4.0),
-			Background = new SolidColorBrush(Muted),
-			HorizontalAlignment = compact ? HorizontalAlignment.Center : HorizontalAlignment.Left,
-			VerticalAlignment = VerticalAlignment.Center
-		};
-		grid5.Children.Add(statusDot);
-		if (!compact)
-		{
-			StackPanel stackPanel5 = new StackPanel();
-			statusText = T("Не подключено", 11.0, Muted, FontWeights.SemiBold);
-			stackPanel5.Children.Add(statusText);
-			stackPanel5.Children.Add(T("Ядро sing-box", 9.0, C("#626A7A")));
-			Grid.SetColumn(stackPanel5, 1);
-			grid5.Children.Add(stackPanel5);
-			border4.ToolTip = "Состояние NOVA VPN";
-		}
-		else
-		{
-			AutomationProperties.SetName(border4, "Состояние NOVA VPN");
-			statusText = null;
-		}
-		border4.Child = grid5;
-		Grid.SetRow(border4, 2);
-		grid2.Children.Add(border4);
-		return grid2;
-	}
+    private System.Windows.Controls.Primitives.ToggleButton themeSwitch;
+    private bool micaEnabled;
+    private bool snapshotNativeMaterial;
+    public void EnableNativeMaterialForSnapshotPreview()
+    {
+        if (!snapshotMode) throw new InvalidOperationException("Native material preview requires isolated snapshot state.");
+        snapshotNativeMaterial = true;
+        RefreshWindowMaterial();
+    }
+    private void RefreshWindowMaterial()
+    {
+        micaEnabled = WindowsBackdrop.Apply(this,state.Visual.DarkMode,(snapshotMode && !snapshotNativeMaterial) || state.Visual.HighContrast || !IsActive);
+        Background = micaEnabled ? Brushes.Transparent : new SolidColorBrush(Bg);
+        if (shellRoot != null) shellRoot.Background = micaEnabled ? Brushes.Transparent : new SolidColorBrush(Bg);
+    }
+    private UIElement BuildSidebar()
+    {
+        bool compact = responsiveMode == "Compact";
+        var root = new Grid { Background = Brushes.Transparent, Margin = new Thickness(8,0,8,8) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition());
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var brand = new TextBlock { Text = compact ? "N" : "NOVA VPN", FontSize = compact ? 20 : 16, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(TextColor), Margin = new Thickness(compact ? 15 : 16,18,8,24) };
+        root.Children.Add(brand);
+        var links = new StackPanel();
+        links.Children.Add(Nav("home", "home", "Главная"));
+        links.Children.Add(Nav("servers", "servers", "Серверы"));
+        links.Children.Add(Nav("routing", "routing", "Маршруты"));
+        links.Children.Add(Nav("diagnostics", "diagnostics", "Диагностика"));
+        links.Children.Add(Nav("engine", "shield", "VPN-ядро"));
+        Grid.SetRow(links,1);root.Children.Add(links);
+        var footer = new StackPanel();
+        footer.Children.Add(Nav("settings", "settings", "Настройки"));
+        var theme = new System.Windows.Controls.Primitives.ToggleButton {
+            Content = ThemeSwitchContent(compact), HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(3),
+            IsChecked = state.Visual.DarkMode, MinHeight = 36, Margin = new Thickness(4,8,4,8),
+            Background = new SolidColorBrush(Surface), Foreground = new SolidColorBrush(TextColor),
+            BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1),
+            ToolTip = "Light / Dark — сменить тему", FontSize = 12
+        };
+        themeSwitch = theme;
+        AutomationProperties.SetName(theme,"Тёмная тема — Light / Dark");
+        theme.Click += delegate { ChangeColorMode(theme.IsChecked == true); };
+        footer.Children.Add(theme);
+        statusDot = new Border { Width = 6, Height = 6, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(Muted), Margin = new Thickness(6), VerticalAlignment = VerticalAlignment.Center };
+        statusText = T("Не подключено",11,Muted); statusText.VerticalAlignment = VerticalAlignment.Center;
+        var status = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4,4,4,4) };
+        status.Children.Add(statusDot); if (!compact) status.Children.Add(statusText);
+        footer.Children.Add(status);Grid.SetRow(footer,2);root.Children.Add(footer);
+        return root;
+    }
+
+    private UIElement ThemeSwitchContent(bool compact)
+    {
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        if (!compact) row.ColumnDefinitions.Add(new ColumnDefinition());
+        for (int i = 0; i < (compact ? 1 : 2); i++) {
+            bool dark = compact ? state.Visual.DarkMode : i == 1;
+            bool selected = dark == state.Visual.DarkMode;
+            var label = new TextBlock { Text = dark ? "Dark" : "Light", FontSize = 12,
+                FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush(selected ? Accent : Muted) };
+            var segment = new Border { Child = label, CornerRadius = new CornerRadius(4),
+                MinHeight = 28, Background = new SolidColorBrush(selected ? Surface2 : Surface),
+                BorderBrush = new SolidColorBrush(selected ? BorderColor : Surface), BorderThickness = new Thickness(1) };
+            Grid.SetColumn(segment,i); row.Children.Add(segment);
+        }
+        return row;
+    }
+
+    private void ChangeColorMode(bool dark)
+    {
+        if (state.Visual.DarkMode == dark) return;
+        bool restoreThemeFocus = themeSwitch?.IsKeyboardFocusWithin == true;
+        var inputs = Descendants<TextBox>(contentHost).Select(x => new { x.Text, x.CaretIndex, x.SelectionStart, x.SelectionLength }).ToList();
+        var scrolls = Descendants<ScrollViewer>(contentHost).Select(x => x.VerticalOffset).ToList();
+        state.Visual.DarkMode = dark;
+        if (!snapshotMode) StateStore.Save(state);
+        BuildShell();
+        var nextInputs = Descendants<TextBox>(contentHost).ToList();
+        for (int i=0; i<Math.Min(inputs.Count,nextInputs.Count); i++) {
+            if (nextInputs[i].IsReadOnly) continue;
+            nextInputs[i].Text = inputs[i].Text; nextInputs[i].CaretIndex = inputs[i].CaretIndex;
+            nextInputs[i].Select(inputs[i].SelectionStart,inputs[i].SelectionLength);
+        }
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded,(Action)delegate {
+            var nextScrolls = Descendants<ScrollViewer>(contentHost).ToList();
+            for (int i=0;i<Math.Min(scrolls.Count,nextScrolls.Count);i++) nextScrolls[i].ScrollToVerticalOffset(scrolls[i]);
+            if (restoreThemeFocus) themeSwitch?.Focus();
+        });
+    }
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        if (root == null) yield break;
+        for (int i=0;i<VisualTreeHelper.GetChildrenCount(root);i++) {
+            var child = VisualTreeHelper.GetChild(root,i);
+            if (child is T match) yield return match;
+            foreach (var nested in Descendants<T>(child)) yield return nested;
+        }
+    }
 
 	private UIElement BuildTitlebar()
 	{
 		Grid grid = new Grid();
-		grid.Background = new SolidColorBrush(Bg);
+		grid.Background = Brushes.Transparent;
 		Grid grid2 = grid;
 		grid2.MouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e)
 		{
@@ -535,7 +542,7 @@ public sealed partial class MainWindow : Window
 		{
 			Width = new GridLength(46.0)
 		});
-		TextBlock textBlock = T("Ключи защищены Windows", 10.0, C("#687184"));
+		TextBlock textBlock = T("NOVA VPN", 12.0, Muted);
 		textBlock.VerticalAlignment = VerticalAlignment.Center;
 		textBlock.Margin = new Thickness(34.0, 0.0, 0.0, 0.0);
 		grid2.Children.Add(textBlock);
@@ -633,7 +640,8 @@ public sealed partial class MainWindow : Window
 		base.Background = new SolidColorBrush(Bg);
 		base.Foreground = new SolidColorBrush(TextColor);
 		navItems.Clear();
-		Grid outer = new Grid { Background = new SolidColorBrush(Bg) };
+		RefreshWindowMaterial();
+        Grid outer = new Grid { Background = micaEnabled ? Brushes.Transparent : new SolidColorBrush(Bg) };
 		UIElement backdrop = BuildBackdrop();
 		if (backdrop != null) outer.Children.Add(backdrop);
 		Grid app = new Grid();
@@ -666,7 +674,7 @@ public sealed partial class MainWindow : Window
 		Navigate(currentPage);
 	}
 
-	private UIElement BuildBackdrop() => VisualDesign.Backdrop(state.Visual);
+	private UIElement BuildBackdrop() => null;
 
 	private static ScrollViewer TouchScrollViewer(ScrollViewer viewer)
 	{
@@ -678,7 +686,7 @@ public sealed partial class MainWindow : Window
 	{
 		bool compact = responsiveMode == "Compact";
 		Button button = new Button();
-		button.Height = Math.Max(52.0, (compact ? 54.0 : palette.Name == ThemePalette.OneUi ? 62.0 : 56.0) * VisualDesign.Density(state.Visual));
+		button.MinHeight = Math.Max(40, 36 * state.Visual.TextScale);
 		button.Margin = new Thickness(0.0, 0.0, 0.0, 6.0);
 		button.Background = Brushes.Transparent;
 		button.BorderThickness = new Thickness(0.0);
@@ -708,6 +716,7 @@ public sealed partial class MainWindow : Window
 		Grid.SetColumn(textBlock, 1);
 		grid.Children.Add(textBlock);
 		TextBlock textBlock2 = T(label, 12.5, Muted, FontWeights.SemiBold);
+        textBlock2.TextTrimming = TextTrimming.None; textBlock2.TextWrapping = TextWrapping.Wrap; textBlock2.Margin = new Thickness(0,8,8,8);
 		textBlock2.VerticalAlignment = VerticalAlignment.Center;
 		if (compact) textBlock2.Visibility = Visibility.Collapsed;
 		Grid.SetColumn(textBlock2, 2);
@@ -756,6 +765,7 @@ public sealed partial class MainWindow : Window
 			"routing" => BuildRoutingPage(),
 			"diagnostics" => BuildDiagnosticsPage(),
 			"settings" => BuildSettingsPage(),
+            "engine" => BuildEnginePage(),
 			_ => BuildHomePage(),
 		};
 		// Build the replacement before detaching the visible page. Background
@@ -810,10 +820,10 @@ public sealed partial class MainWindow : Window
 		{
 			Height = GridLength.Auto
 		});
-		Button pauseButton = SmallButton(core.Status == CoreStatus.Connected ? "Пауза 15 минут" : "Возобновить");
+		Button pauseButton = SmallButton("Пауза 15 минут");
 		homePauseButton = pauseButton;
-		pauseButton.Visibility = core.Status == CoreStatus.Connected || state.PauseUntilUtc > DateTime.UtcNow ? Visibility.Visible : Visibility.Collapsed;
-		pauseButton.Click += async delegate
+		pauseButton.Visibility = core.Status == CoreStatus.Connected ? Visibility.Visible : Visibility.Collapsed;
+		pauseButton.Click += delegate
 		{
 			if (core.Status == CoreStatus.Connected)
 			{
@@ -825,21 +835,11 @@ public sealed partial class MainWindow : Window
 				StateStore.Save(state);
 				UpdateHomeConnectionStatus();
 			}
-			else if (state.PauseUntilUtc > DateTime.UtcNow)
-			{
-				state.PauseUntilUtc = default(DateTime); StateStore.Save(state);
-				await ToggleConnectionAsync();
-			}
 		};
 		WrapPanel headerActions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
 		if (pauseButton != null) { pauseButton.Margin = new Thickness(0, 0, 8, 0); headerActions.Children.Add(pauseButton); }
-		Button chooseBestHome = SmallButton("⚡  Выбрать лучший конфиг");
-		homeBestButton = chooseBestHome;
-		chooseBestHome.IsEnabled = state.Profiles.Count > 0 && core.Status != CoreStatus.Connecting && !profileSwitchInProgress;
-		chooseBestHome.ToolTip = "Проверить серверы и выбрать конфиг с минимальным стабильным пингом";
-		chooseBestHome.Click += async delegate { await ChooseBestProfileAsync(); };
-		headerActions.Children.Add(chooseBestHome);
-		Grid element = PageHeader(Greeting(), "Ваше защищенное соединение", headerActions, null);
+        homeBestButton = null;
+        Grid element = PageHeader("Главная", "Подключение и состояние сети", headerActions, null);
 		grid.Children.Add(element);
 		Border border = new Border();
 		border.Background = SoftSurface(true);
@@ -873,7 +873,7 @@ public sealed partial class MainWindow : Window
 		StackPanel stackPanel = new StackPanel();
 		stackPanel.VerticalAlignment = VerticalAlignment.Center;
 		StackPanel stackPanel2 = stackPanel;
-		stackPanel2.Children.Add(Label("АКТИВНЫЙ СЕРВЕР"));
+		stackPanel2.Children.Add(Label("ВЫБРАННЫЙ СЕРВЕР"));
 		VpnProfile vpnProfile = SelectedProfile();
 		Border border3 = new Border();
 		border3.Margin = new Thickness(0.0, 12.0, 12.0, 0.0);
@@ -927,6 +927,7 @@ public sealed partial class MainWindow : Window
 		connectButton = connectionControl.ActionButton;
 		TourAnchor("home.connect", connectionControl);
 		connectButtonLabel = connectionControl.Label;
+        UpdatePausedConnectionLabel();
 		connectButton.Click += async delegate { await ToggleConnectionAsync(); };
 		Viewbox grid5 = new Viewbox { Width = connectionFrameSize, Height = connectionFrameSize, Child = connectionControl, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
 		StackPanel stackPanel9 = new StackPanel();
@@ -1229,7 +1230,7 @@ public sealed partial class MainWindow : Window
 			using (var gate = new System.Threading.SemaphoreSlim(2))
 			{
 				var token = mapHealthCancellation.Token;
-				string corePath = core.CorePath, directory = System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "map-probes");
+				string corePath = core.ProbeCorePath, directory = System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "map-probes");
 				var tasks = candidates.Select(async profile => {
 					await gate.WaitAsync(token);
 					try {
@@ -1738,7 +1739,7 @@ public sealed partial class MainWindow : Window
 			while (candidates.Count > 0) {
 				token.ThrowIfCancellationRequested();
 				var target = await StartupProfileSelector.SelectAsync(candidates, preferred,
-					p => ServerMapHealthService.TestAsync(p, core.CorePath, System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "startup-probes"), token), token);
+					p => ServerMapHealthService.TestAsync(p, core.ProbeCorePath, System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "startup-probes"), token), token);
 				if (target == null) break;
 				candidates.Remove(target); preferred = null;
 				token.ThrowIfCancellationRequested();
@@ -1768,7 +1769,7 @@ public sealed partial class MainWindow : Window
 	public void ConfigureSnapshot(string theme, string background, string density, string serverView, double textScale, bool highContrast)
 	{
 		if (!snapshotMode) return;
-		if (!string.IsNullOrWhiteSpace(theme)) state.Visual.ThemeName = theme;
+		if (!string.IsNullOrWhiteSpace(theme)) { state.Visual.DarkMode = ThemePalette.IsLegacyDark(theme); state.Visual.ThemeName = ThemePalette.Windows; }
 		if (!string.IsNullOrWhiteSpace(background)) state.Visual.BackgroundMode = background;
 		if (!string.IsNullOrWhiteSpace(density)) state.Visual.Density = density;
 		if (!string.IsNullOrWhiteSpace(serverView)) state.Visual.ServerViewMode = serverView;
@@ -1997,6 +1998,9 @@ public sealed partial class MainWindow : Window
 		}
 	}
 
+    private string serverSearch = "";
+    private bool serverFavoritesOnly;
+    private bool serverSortByLatency;
 	private UIElement BuildServersPage()
 	{
 		Grid grid = new Grid();
@@ -2009,13 +2013,13 @@ public sealed partial class MainWindow : Window
 			Height = new GridLength(20.0)
 		});
 		grid.RowDefinitions.Add(new RowDefinition());
-		Button addButton = PrimaryButton("+  Добавить ключ", 145.0);
+		Button addButton = PrimaryButton("Добавить конфигурацию", 190.0);
 		TourAnchor("servers.import", addButton);
 		addButton.Click += async delegate
 		{
 			await ShowImportDialogAsync();
 		};
-		Button testAll = SmallButton("Проверить все");
+		Button testAll = SmallButton(state.AutoSelectBestServer ? "Проверить и выбрать лучший" : "Проверить все");
 		testAll.IsEnabled = !profileSwitchInProgress && core.Status != CoreStatus.Connecting;
 		testAll.Click += async delegate
 		{
@@ -2031,7 +2035,7 @@ public sealed partial class MainWindow : Window
 			Navigate("servers");
 		};
 		Button chooseBest = SmallButton("Выбрать лучший");
-		TourAnchor("servers.best", chooseBest);
+		TourAnchor("servers.best", state.AutoSelectBestServer ? testAll : chooseBest);
 		chooseBest.IsEnabled = !profileSwitchInProgress && core.Status != CoreStatus.Connecting;
 		chooseBest.Click += async delegate
 		{
@@ -2058,20 +2062,19 @@ public sealed partial class MainWindow : Window
 			Navigate("servers");
 		};
 		WrapPanel actions = new WrapPanel { VerticalAlignment = VerticalAlignment.Center, MaxWidth = 620 };
-		Button viewMode = SmallButton(state.Visual.ServerViewMode == "Grid" ? "▦  Сетка" : state.Visual.ServerViewMode == "Compact" ? "☷  Компактно" : "☰  Подробно");
-		viewMode.ToolTip = "Переключить вид серверов";
-		viewMode.Click += delegate { state.Visual.ServerViewMode = state.Visual.ServerViewMode == "Detailed" ? "Compact" : state.Visual.ServerViewMode == "Compact" ? "Grid" : "Detailed"; StateStore.Save(state); Navigate("servers"); };
-		viewMode.Margin = new Thickness(0.0, 0.0, 8.0, 0.0);
 		testAll.Margin = new Thickness(0.0, 0.0, 8.0, 0.0);
 		chooseBest.Margin = new Thickness(0.0, 0.0, 8.0, 0.0);
 		update.Margin = new Thickness(0.0, 0.0, 8.0, 0.0);
-		actions.Children.Add(viewMode);
+
 		actions.Children.Add(testAll);
-		actions.Children.Add(chooseBest);
+		if (!state.AutoSelectBestServer) actions.Children.Add(chooseBest);
 		actions.Children.Add(update);
 		actions.Children.Add(addButton);
 		grid.Children.Add(PageHeader("Серверы", state.Profiles.Count + " профилей · " + state.Profiles.Count(p => p.IsFavorite) + " избранных", actions, null));
-		StackPanel stackPanel = new StackPanel();
+        var stackPanel = new StackPanel();
+        Action renderServers = delegate {
+            stackPanel.Children.Clear();
+
 		if (state.Profiles.Count == 0)
 		{
 			Border border = EmptyState("servers", "Здесь появятся ваши серверы", "Вставьте одиночный VPN-ключ или ссылку на подписку.");
@@ -2080,29 +2083,38 @@ public sealed partial class MainWindow : Window
 		}
 		else
 		{
-			var groups = state.Profiles.Where(p => p != null).GroupBy(ServerGroupingService.CountryLabel).OrderBy(group => group.Key == "Другие" ? 1 : 0).ThenBy(group => group.Key);
+			var visible = state.Profiles.Where(p => p != null && (!serverFavoritesOnly || p.IsFavorite) && (string.IsNullOrWhiteSpace(serverSearch) || (p.Name ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0 || (p.Endpoint ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
+            if (visible.Count == 0) stackPanel.Children.Add(EmptyState("servers", "Серверы не найдены", "Измените поисковый запрос или фильтр избранного."));
+            var groups = visible.GroupBy(ServerGroupingService.CountryLabel).OrderBy(group => group.Key == "Другие" ? 1 : 0).ThenBy(group => group.Key);
 			foreach (var group in groups)
 			{
 				TextBlock groupTitle = SectionTitle(group.Key.ToUpperInvariant() + " · " + group.Count());
 				groupTitle.Margin = new Thickness(2.0, stackPanel.Children.Count == 0 ? 0.0 : 12.0, 0.0, 8.0);
 				stackPanel.Children.Add(groupTitle);
-				IEnumerable<VpnProfile> sorted = group.OrderByDescending(p => p.IsFavorite).ThenBy(p => p.LastLatency > 0 ? p.LastLatency : int.MaxValue);
-				if (state.Visual.ServerViewMode == "Grid")
-				{
-					WrapPanel cards = new WrapPanel { Orientation = Orientation.Horizontal };
-					foreach (VpnProfile profile in sorted) cards.Children.Add(ServerGridCard(profile));
-					stackPanel.Children.Add(cards);
-				}
-				else foreach (VpnProfile profile in sorted) stackPanel.Children.Add(ServerCard(profile));
+				IEnumerable<VpnProfile> sorted = serverSortByLatency ? group.OrderBy(p => p.LastLatency > 0 ? p.LastLatency : int.MaxValue) : group.OrderBy(p => p.Name);
+                foreach (VpnProfile profile in sorted) stackPanel.Children.Add(ServerCard(profile));
 			}
 		}
+        };
+        var search = new TextBox { Text = serverSearch, MinHeight = 34, Padding = new Thickness(10,6,10,6), FontSize = 14, Background = new SolidColorBrush(palette.Input), Foreground = new SolidColorBrush(TextColor), BorderBrush = new SolidColorBrush(BorderColor), ToolTip = "Поиск по названию или адресу", Margin = new Thickness(0,0,12,0) };
+        AutomationProperties.SetName(search,"Поиск серверов");
+        search.TextChanged += delegate { serverSearch = search.Text; renderServers(); };
+        var filterBar = new Grid { Margin = new Thickness(0,0,0,16) };
+        filterBar.ColumnDefinitions.Add(new ColumnDefinition()); filterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); filterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        filterBar.Children.Add(search);
+        var favorites = new CheckBox { Content = "Избранные", IsChecked = serverFavoritesOnly, Foreground = new SolidColorBrush(TextColor), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0,0,12,0) };
+        favorites.Click += delegate { serverFavoritesOnly = favorites.IsChecked == true; renderServers(); };Grid.SetColumn(favorites,1);filterBar.Children.Add(favorites);
+        var sort = new ComboBox { ItemsSource = new[] { "По названию", "По задержке" }, SelectedIndex = serverSortByLatency ? 1 : 0, MinWidth = 140, Style = Application.Current.Resources["NovaSelectorStyle"] as Style };
+        AutomationProperties.SetName(sort,"Сортировка серверов");
+        sort.SelectionChanged += delegate { serverSortByLatency = sort.SelectedIndex == 1; renderServers(); };Grid.SetColumn(sort,2);filterBar.Children.Add(sort);
+        renderServers();
 		ScrollViewer scrollViewer = TouchScrollViewer(new ScrollViewer());
 		scrollViewer.Content = stackPanel;
 		scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
 		scrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-		ScrollViewer element = scrollViewer;
-		Grid.SetRow(element, 2);
-		grid.Children.Add(element);
+        var results = new Grid();results.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });results.RowDefinitions.Add(new RowDefinition());
+        results.Children.Add(filterBar); Grid.SetRow(scrollViewer,1);results.Children.Add(scrollViewer);
+        Grid.SetRow(results,2);grid.Children.Add(results);
 		return grid;
 	}
 
@@ -2127,7 +2139,7 @@ public sealed partial class MainWindow : Window
 		grid.ColumnDefinitions.Add(new ColumnDefinition());
 		grid.ColumnDefinitions.Add(new ColumnDefinition
 		{
-			Width = new GridLength(112.0)
+			Width = new GridLength(0.0)
 		});
 		grid.ColumnDefinitions.Add(new ColumnDefinition
 		{
@@ -2135,7 +2147,7 @@ public sealed partial class MainWindow : Window
 		});
 		grid.ColumnDefinitions.Add(new ColumnDefinition
 		{
-			Width = new GridLength(38.0)
+			Width = new GridLength(0.0)
 		});
 		grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38.0) });
 		grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38.0) });
@@ -2154,7 +2166,7 @@ public sealed partial class MainWindow : Window
 		stackPanel4.Children.Add(serverName);
 		if (selected)
 		{
-			TextBlock textBlock = T("АКТИВНЫЙ", 8.0, AccentLight, FontWeights.Bold);
+			TextBlock textBlock = T(core.Status == CoreStatus.Connected && core.ActiveProfileId == profile.Id ? "ПОДКЛЮЧЁН" : "ВЫБРАН", 8.0, AccentLight, FontWeights.Bold);
 			textBlock.Margin = new Thickness(10.0, 4.0, 0.0, 0.0);
 			stackPanel4.Children.Add(textBlock);
 		}
@@ -2167,7 +2179,7 @@ public sealed partial class MainWindow : Window
 		stackPanel2.Children.Add(endpointLine);
 		TextBlock provider = T(ServerGroupingService.ProviderLabel(profile), 8.5, C("#6F788A"));
 		provider.ToolTip = "Источник профиля";
-		if (!compact) stackPanel2.Children.Add(provider);
+		if (!compact && !string.Equals(ServerGroupingService.ProviderLabel(profile), profile.Server, StringComparison.OrdinalIgnoreCase)) stackPanel2.Children.Add(provider);
 		TextBlock health = T(profile.HealthStatus ?? "Не проверен", 9.0, profile.ConsecutiveFailures > 0 ? Danger : profile.LastLatency > 0 ? Green : Muted);
 		health.ToolTip = profile.LastTestMessage;
 		if (!compact) { stackPanel2.Children.Add(health); stackPanel2.Children.Add(T(profile.LastLatency > 0 ? "Потери " + profile.LastLossPercent + "% · средняя " + profile.AverageLatency + " мс" : "Проверка ещё не выполнялась", 8.5, profile.LastLossPercent > 0 ? Warning : Muted)); }
@@ -2208,7 +2220,7 @@ public sealed partial class MainWindow : Window
 			}
 		};
 		Grid.SetColumn(edit, 4);
-		grid.Children.Add(edit);
+
 		Button favorite = VectorIconButton("star", profile.IsFavorite ? "Убрать из избранного" : "Добавить в избранное", profile.IsFavorite ? Warning : Muted, profile.IsFavorite);
 		favorite.ToolTip = profile.IsFavorite ? "Убрать из избранного" : "Добавить в избранное";
 		favorite.Foreground = new SolidColorBrush(profile.IsFavorite ? Warning : Muted);
@@ -2243,9 +2255,34 @@ public sealed partial class MainWindow : Window
 			}
 		};
 		Grid.SetColumn(button, 6);
-		grid.Children.Add(button);
+        var more = SmallButton("⋯"); more.MinWidth = 0; more.Width = 34; more.Padding = new Thickness(0); more.FontSize = 22; more.ToolTip = "Действия сервера";
+        AutomationProperties.SetName(more,"Действия сервера " + profile.Name);
+        var menu = new ContextMenu { Background = new SolidColorBrush(Surface), Foreground = new SolidColorBrush(TextColor), BorderBrush = new SolidColorBrush(BorderColor), FontFamily = VisualDesign.InterfaceFont(state.Visual), FontSize = 13 * state.Visual.TextScale };
+        more.ContextMenu = menu;
+        var rename = new MenuItem { Header = "Переименовать" }; rename.Click += delegate { edit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); };
+        var remove = new MenuItem { Header = "Удалить профиль", Foreground = new SolidColorBrush(Danger) }; remove.Click += delegate { button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); };
+        menu.Items.Add(rename);menu.Items.Add(new Separator());menu.Items.Add(remove);
+        more.Click += delegate(object sender,RoutedEventArgs e) { e.Handled=true; menu.PlacementTarget=more;menu.IsOpen=true; };
+        Grid.SetColumn(more,6);grid.Children.Add(more);
 		border2.Child = grid;
-		border2.MouseLeftButtonUp += async delegate { await SelectProfileAsync(profile); };
+        border2.Focusable = true;
+        AutomationProperties.SetName(border2, "Выбрать сервер " + profile.Name);
+        border2.KeyDown += async delegate(object sender, KeyEventArgs e) {
+            if (e.OriginalSource == border2 && (e.Key == Key.Enter || e.Key == Key.Space)) {
+                e.Handled = true;
+                await SelectProfileAsync(profile);
+            }
+        };
+        border2.MouseLeftButtonUp += async delegate(object sender, MouseButtonEventArgs e) {
+            if (e.Handled) return;
+            DependencyObject source = e.OriginalSource as DependencyObject;
+            while (source != null && source != border2) {
+                if (source is System.Windows.Controls.Primitives.ButtonBase) return;
+                source = VisualTreeHelper.GetParent(source);
+            }
+            e.Handled = true;
+            await SelectProfileAsync(profile);
+        };
 		EnableCardMotion(border2);
 		return border2;
 	}
@@ -2443,7 +2480,8 @@ public sealed partial class MainWindow : Window
 			CornerRadius = Radius(14)
 		};
 		StackPanel content = new StackPanel();
-		content.Children.Add(T("Выберите программу и нажимайте переключатель: по умолчанию → VPN → напрямую.", 10.5, TextColor));
+		var routingHint = T("Выберите программу и нажимайте переключатель: по умолчанию → VPN → напрямую.", 14, TextColor);
+        routingHint.TextWrapping = TextWrapping.Wrap; routingHint.TextTrimming = TextTrimming.None; content.Children.Add(routingHint);
 		TextBlock explanation = T("Правило задаётся по полному пути к .exe. Пока Zapret включён, домены Zapret и приложения из VPN-маршрутов перемещаются в «Напрямую»; при выключении Zapret VPN-маршруты восстанавливаются.", 9.5, Muted);
 		explanation.TextWrapping = TextWrapping.Wrap;
 		explanation.Margin = new Thickness(0, 4, 0, 12);
@@ -2910,7 +2948,7 @@ public sealed partial class MainWindow : Window
 			Foreground = new SolidColorBrush(C("#CBD1DC")),
 			CaretBrush = new SolidColorBrush(AccentLight),
 			FontFamily = new FontFamily("Consolas"),
-			FontSize = 10.5,
+			FontSize = 13 * state.Visual.TextScale,
 			AcceptsReturn = true,
 			TextWrapping = TextWrapping.NoWrap,
 			VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -2942,6 +2980,33 @@ public sealed partial class MainWindow : Window
 		EnableCardMotion(border2);
 		return border2;
 	}
+
+    private UIElement BuildConnectionJournal()
+    {
+        var panel = new StackPanel();
+        var header = new DockPanel { Margin = new Thickness(0,0,0,12) };
+        var copy = SmallButton("Копировать журнал");
+        DockPanel.SetDock(copy, Dock.Right);
+        header.Children.Add(copy);
+        header.Children.Add(T("Журнал подключения",16,TextColor,FontWeights.SemiBold));
+        panel.Children.Add(header);
+        var logs = EditorBox(string.IsNullOrWhiteSpace(core.Logs)
+            ? "Журнал пока пуст. Подключитесь к серверу, чтобы увидеть подробности."
+            : LogSanitizer.Sanitize(core.Logs), true);
+        logs.Height = 220;
+        logs.FontFamily = new FontFamily("Consolas");
+        logs.FontSize = 13 * state.Visual.TextScale;
+        copy.IsEnabled = !string.IsNullOrWhiteSpace(core.Logs);
+        copy.Click += delegate {
+            Clipboard.SetText(LogSanitizer.Sanitize(core.Logs));
+            Toast("Журнал скопирован без секретов.",Green);
+        };
+        panel.Children.Add(logs);
+        return new Border { Child = panel, Padding = new Thickness(16),
+            Margin = new Thickness(0,0,0,22), Background = new SolidColorBrush(Surface),
+            BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1),
+            CornerRadius = Radius(8) };
+    }
 
 	private UIElement BuildDiagnosticsPage()
 	{
@@ -3025,6 +3090,7 @@ public sealed partial class MainWindow : Window
 			}
 		};
 
+		content.Children.Add(BuildConnectionJournal());
 		content.Children.Add(SectionTitle("ПОЧЕМУ ТАКОЙ МАРШРУТ?"));
 		Border routeCard = new Border
 		{
@@ -3131,7 +3197,7 @@ public sealed partial class MainWindow : Window
 			BorderBrush = new SolidColorBrush(C("#242A37")),
 			BorderThickness = new Thickness(1.0),
 			FontFamily = new FontFamily("Consolas"),
-			FontSize = 10.5,
+			FontSize = 13 * state.Visual.TextScale,
 			IsReadOnly = readOnly,
 			TextWrapping = TextWrapping.Wrap,
 			AcceptsReturn = true,
@@ -3139,6 +3205,45 @@ public sealed partial class MainWindow : Window
 			Padding = new Thickness(10.0, 8.0, 10.0, 8.0)
 		};
 	}
+
+    private UIElement BuildEnginePage()
+    {
+        var body = new StackPanel();
+        body.Children.Add(PageHeader("VPN-ядро", "Выберите движок подключения", null, null));
+        var hint = T("Выбор сохраняется для следующих подключений. Менять ядро можно после отключения VPN.",14,Muted);
+        hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0,18,0,20); body.Children.Add(hint);
+        foreach (VpnEngine engine in new[] { VpnEngine.SingBox, VpnEngine.Reality })
+        {
+            bool installed = File.Exists(VpnEngines.ExecutablePath(engine));
+            var copy = new StackPanel();
+            copy.Children.Add(T(VpnEngines.DisplayName(engine),17,TextColor,FontWeights.SemiBold));
+            var description = T(engine == VpnEngine.SingBox
+                ? "Основное ядро NOVA. Полный набор профилей и настроек клиента."
+                : "Альтернативное ядро для VLESS и Trojan. Неподдерживаемые параметры проверяются до подключения.",14,Muted);
+            description.TextWrapping = TextWrapping.Wrap; description.Margin = new Thickness(0,8,0,8); copy.Children.Add(description);
+            copy.Children.Add(T(installed ? "Установлено" : "Файл ядра отсутствует в сборке",12,installed ? Green : Warning));
+            var choice = new RadioButton { GroupName = "VpnEngine", Content = copy, IsChecked = core.Engine == engine,
+                IsEnabled = installed && core.Status != CoreStatus.Connected && core.Status != CoreStatus.Connecting,
+                Foreground = new SolidColorBrush(TextColor), Padding = new Thickness(12),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            AutomationProperties.SetName(choice,VpnEngines.DisplayName(engine));
+            choice.Checked += delegate {
+                if (core.Engine == engine) return;
+                try {
+                    core.SelectEngine(engine); state.EngineSelection = (int)engine;
+                    if (!snapshotMode) StateStore.Save(state);
+                    Navigate("engine",false);
+                } catch (Exception ex) { Toast(LogSanitizer.Sanitize(ex.Message),Warning); Navigate("engine",false); }
+            };
+            body.Children.Add(new Border { Child = choice, Padding = new Thickness(12), Margin = new Thickness(0,0,0,12),
+                Background = new SolidColorBrush(core.Engine == engine ? palette.SoftSelection : Surface),
+                BorderBrush = new SolidColorBrush(core.Engine == engine ? Accent : BorderColor),
+                BorderThickness = new Thickness(1), CornerRadius = Radius(8) });
+        }
+        var details = T("Reality Core: нужен защищённый DNS и отключённый обход DNS локальных имён. Для правил сайтов и блокировки рекламы нужен sing-box. Правила приложений и другие несовместимые параметры проверяются перед подключением.\n\nЛокальные SOCKS/VLESS-проверки пройдены. Работа Windows TUN и реального провайдера в этой сборке ещё не подтверждена.",14,Muted);
+        details.TextWrapping = TextWrapping.Wrap; details.Margin = new Thickness(0,12,0,0); body.Children.Add(details);
+        return TouchScrollViewer(new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+    }
 
 	private UIElement BuildSettingsPage()
 	{
@@ -3152,7 +3257,7 @@ public sealed partial class MainWindow : Window
 			Height = new GridLength(18.0)
 		});
 		grid.RowDefinitions.Add(new RowDefinition());
-		Button appearance = PrimaryButton("✦  Персонализация", 154.0);
+		Button appearance = SmallButton("Интерфейс и доступность");
 		TourAnchor("settings.appearance", appearance);
 		appearance.Click += delegate
 		{
@@ -3169,7 +3274,10 @@ public sealed partial class MainWindow : Window
 				Toast("Оформление сохранено.", Green);
 			}
 		};
-		grid.Children.Add(PageHeader("Настройки", "Поведение клиента и оформление", appearance, null));
+		var identityButton = SmallButton("Идентификация и перенос");
+        identityButton.Click += delegate { var dialog = new IdentityWindow(state.SubscriptionIdentities, state.Visual, state, ()=>core.Status!=CoreStatus.Connected&&core.Status!=CoreStatus.Connecting&&state.Zapret?.RoutingChangesApplied!=true) { Owner = this }; if(dialog.ShowDialog()==true) { if(dialog.FullRestore!=null) { CopyState(dialog.FullRestore);BuildShell(); } else state.SubscriptionIdentities=dialog.Result; if(!snapshotMode)StateStore.Save(state); } };
+        var settingsActions=new WrapPanel();settingsActions.Children.Add(appearance);identityButton.Margin=new Thickness(8,0,0,0);settingsActions.Children.Add(identityButton);
+        grid.Children.Add(PageHeader("Настройки", "Поведение клиента и оформление", settingsActions, null));
 		Grid grid2 = new Grid();
 		grid2.ColumnDefinitions.Add(new ColumnDefinition());
 		grid2.ColumnDefinitions.Add(new ColumnDefinition
@@ -3179,7 +3287,8 @@ public sealed partial class MainWindow : Window
 		grid2.ColumnDefinitions.Add(new ColumnDefinition());
 		StackPanel stackPanel = new StackPanel();
 		stackPanel.Children.Add(SectionTitle("ОФОРМЛЕНИЕ"));
-		stackPanel.Children.Add(AppearanceSummaryCard());
+		stackPanel.Children.Add(T("Windows 11 · " + (state.Visual.DarkMode ? "Dark" : "Light") + " · Тема переключается в левой панели", 12, Muted));
+        Button tour = SmallButton("Начать обучение"); tour.Click += delegate { StartGuidedTour(); }; stackPanel.Children.Add(tour);
 		stackPanel.Children.Add(SectionTitle("ЗАПУСК", new Thickness(0.0, 20.0, 0.0, 10.0)));
 		stackPanel.Children.Add(TourAnchor("settings.startup", SettingCard("Запускать с Windows", "Открыть приложение после входа в Windows, без автоподключения", state.StartWithWindows, async delegate { await SetWindowsStartupAsync(false); })));
 		stackPanel.Children.Add(SettingCard("Запускать и подключать с Windows", "Без окна: последний использованный профиль, при отказе — лучший по HTTPS-проверке", state.StartConnectedWithWindows, async delegate { await SetWindowsStartupAsync(true); }));
@@ -3310,65 +3419,6 @@ public sealed partial class MainWindow : Window
 		GroupSettingsCards(stackPanel);
 		grid2.Children.Add(stackPanel);
 		StackPanel stackPanel2 = new StackPanel();
-		stackPanel2.Children.Add(SectionTitle("ДИАГНОСТИКА"));
-		Border border = new Border();
-		border.Padding = new Thickness(16.0);
-		border.Height = 264.0;
-		border.Background = new SolidColorBrush(Surface);
-		border.BorderBrush = new SolidColorBrush(BorderColor);
-		border.BorderThickness = new Thickness(1.0);
-		border.CornerRadius = Radius(15.0);
-		Border border2 = border;
-		Grid grid3 = new Grid();
-		grid3.RowDefinitions.Add(new RowDefinition
-		{
-			Height = GridLength.Auto
-		});
-		grid3.RowDefinitions.Add(new RowDefinition
-		{
-			Height = new GridLength(10.0)
-		});
-		grid3.RowDefinitions.Add(new RowDefinition());
-		Grid grid4 = new Grid();
-		grid4.ColumnDefinitions.Add(new ColumnDefinition());
-		grid4.ColumnDefinitions.Add(new ColumnDefinition
-		{
-			Width = new GridLength(84.0)
-		});
-		StackPanel stackPanel3 = new StackPanel();
-		stackPanel3.Children.Add(T("Журнал подключения", 12.0, TextColor, FontWeights.SemiBold));
-		stackPanel3.Children.Add(T("Полезен, если сервер не подключается", 9.5, Muted));
-		grid4.Children.Add(stackPanel3);
-		Button button = SmallButton("Копировать");
-		button.Click += delegate
-		{
-			if (!string.IsNullOrWhiteSpace(core.Logs))
-			{
-				Clipboard.SetText(core.Logs);
-			}
-			Toast("Журнал скопирован.", Green);
-		};
-		Grid.SetColumn(button, 1);
-		grid4.Children.Add(button);
-		grid3.Children.Add(grid4);
-		TextBox textBox = new TextBox();
-		textBox.Text = (string.IsNullOrWhiteSpace(core.Logs) ? "Журнал пока пуст.\nПодключитесь к серверу — здесь появятся технические детали." : core.Logs);
-		textBox.Background = new SolidColorBrush(C("#0E1117"));
-		textBox.Foreground = new SolidColorBrush(C("#9CA6B7"));
-		textBox.BorderBrush = new SolidColorBrush(C("#242A37"));
-		textBox.BorderThickness = new Thickness(1.0);
-		textBox.FontFamily = new FontFamily("Consolas");
-		textBox.FontSize = 9.5;
-		textBox.IsReadOnly = true;
-		textBox.TextWrapping = TextWrapping.Wrap;
-		textBox.AcceptsReturn = true;
-		textBox.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-		textBox.Padding = new Thickness(10.0);
-		TextBox element = textBox;
-		Grid.SetRow(element, 2);
-		grid3.Children.Add(element);
-		border2.Child = grid3;
-		stackPanel2.Children.Add(border2);
 		stackPanel2.Children.Add(SectionTitle("О ПРИЛОЖЕНИИ", new Thickness(0.0, 20.0, 0.0, 10.0)));
 		Border border3 = new Border();
 		border3.Padding = new Thickness(16.0);
@@ -3459,6 +3509,7 @@ public sealed partial class MainWindow : Window
 				try
 				{
 					CopyState(StateStore.ImportEncrypted(dialog.FileName));
+                    BuildShell();
 					StateStore.Save(state);
 					Toast("Резервная копия восстановлена.", Green);
 					Navigate("settings");
@@ -3469,51 +3520,29 @@ public sealed partial class MainWindow : Window
 				}
 			}
 		};
-		backupButtons.Children.Add(export);
-		backupButtons.Children.Add(import);
-		Button portableExport = SmallButton("Экспорт для другого ПК");
-		portableExport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
-		portableExport.Click += delegate
-		{
-			if (MessageBox.Show(this, "Переносимый файл содержит VPN-ключи, пароли и правила маршрутизации. Передавайте его только доверенному человеку.", "NOVA VPN", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-			SaveFileDialog dialog = new SaveFileDialog { Filter = "NOVA Portable Config (*.nova-config)|*.nova-config", FileName = "NOVA-Config-" + DateTime.Now.ToString("yyyyMMdd-HHmm") + ".nova-config" };
-			if (dialog.ShowDialog(this) == true)
-			{
-				try { PortableConfigService.Export(state, dialog.FileName); Toast("Переносимый конфиг сохранён.", Green); }
-				catch (Exception ex) { Toast("Не удалось сохранить конфиг: " + LogSanitizer.Sanitize(ex.Message), Danger); }
-			}
-		};
+
+
 		Button portableImport = SmallButton("Импорт конфига");
 		portableImport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
-		portableImport.Click += async delegate
+		portableImport.Click += delegate
 		{
 			if (core.Status == CoreStatus.Connected || core.Status == CoreStatus.Connecting) { Toast("Сначала отключите VPN.", Warning); return; }
-			OpenFileDialog dialog = new OpenFileDialog { Filter = "Конфиги NOVA, VPN-ссылки и JSON (*.nova-config;*.json;*.txt;*.conf)|*.nova-config;*.json;*.txt;*.conf|Все файлы (*.*)|*.*" };
+			OpenFileDialog dialog = new OpenFileDialog { Filter = "Переносимый конфиг NOVA (*.nova-config)|*.nova-config" };
 			if (dialog.ShowDialog(this) == true && MessageBox.Show(this, "Заменить текущие профили, маршруты и настройки данными из переносимого конфига?", "NOVA VPN", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
 			{
 				try
 				{
-					string extension = System.IO.Path.GetExtension(dialog.FileName);
-					if (string.Equals(extension, ".nova-config", StringComparison.OrdinalIgnoreCase))
-					{
-						CopyState(PortableConfigService.Import(dialog.FileName));
-						StateStore.Save(state);
-						Toast("Переносимый конфиг импортирован.", Green);
-					}
-					else
-					{
-						ImportResult importedFile = await LinkParser.ImportDetailedAsync(File.ReadAllText(dialog.FileName));
-						int added = MergeImportedProfiles(importedFile);
-						StateStore.Save(state);
-						Toast("Импортировано серверов: " + added, Green);
-					}
+                    CopyState(PortableConfigService.Import(dialog.FileName));
+                    BuildShell();
+                    StateStore.Save(state);
+                    Toast("Переносимый конфиг импортирован.", Green);
 					Navigate("settings");
 				}
 				catch (Exception ex) { Toast("Не удалось импортировать конфиг: " + LogSanitizer.Sanitize(ex.Message), Danger); }
 			}
 		};
-		backupButtons.Children.Add(portableExport);
-		backupButtons.Children.Add(portableImport);
+
+
 		Button settingsExport = SmallButton("Экспорт настроек без ключей");
 		settingsExport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
 		settingsExport.Click += delegate
@@ -3535,7 +3564,8 @@ public sealed partial class MainWindow : Window
 			{
 				try
 				{
-					CopyState(PortableConfigService.ImportSettingsOnly(dialog.FileName));
+					PortableConfigService.ApplySettingsOnly(state, PortableConfigService.ImportSettingsOnly(dialog.FileName));
+                    BuildShell();
 					StateStore.Save(state);
 					Toast("Настройки импортированы без VPN-профилей.", Green);
 					Navigate("settings");
@@ -3543,8 +3573,17 @@ public sealed partial class MainWindow : Window
 				catch (Exception ex) { Toast("Не удалось импортировать настройки: " + LogSanitizer.Sanitize(ex.Message), Danger); }
 			}
 		};
-		backupButtons.Children.Add(settingsExport);
-		backupButtons.Children.Add(settingsImport);
+
+
+        var exportMenu = SmallButton("Экспорт ▾");
+        var importMenu = SmallButton("Восстановление ▾");
+        exportMenu.Margin = new Thickness(0,0,8,0);
+        AttachActionMenu(exportMenu, new[] { "Локальная зашифрованная копия", "Настройки без VPN-ключей" },
+            new[] { export, settingsExport });
+        AttachActionMenu(importMenu, new[] { "Из локальной копии", "Из старого конфига NOVA", "Только настройки без VPN-ключей" },
+            new[] { import, portableImport, settingsImport });
+        backupButtons.Children.Add(exportMenu);
+        backupButtons.Children.Add(importMenu);
 		backupContent.Children.Add(backupButtons);
 		backupCard.Child = backupContent;
 		stackPanel2.Children.Add(backupCard);
@@ -3565,6 +3604,24 @@ public sealed partial class MainWindow : Window
 		grid.Children.Add(element2);
 		return grid;
 	}
+
+    private void AttachActionMenu(Button owner, string[] labels, Button[] actions)
+    {
+        var menu = new ContextMenu { Background = new SolidColorBrush(Surface),
+            Foreground = new SolidColorBrush(TextColor), FontFamily = VisualDesign.InterfaceFont(state.Visual), FontSize = 13 * state.Visual.TextScale };
+        owner.ContextMenu = menu;
+        for (int i=0; i<labels.Length; i++) {
+            Button action = actions[i];
+            var item = new MenuItem { Header = labels[i] };
+            item.Click += delegate { action.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); };
+            menu.Items.Add(item);
+        }
+        owner.Click += delegate {
+            menu.PlacementTarget = owner;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            menu.IsOpen = true;
+        };
+    }
 
 	private int MergeImportedProfiles(ImportResult importResult)
 	{
@@ -3781,14 +3838,16 @@ public sealed partial class MainWindow : Window
 		}
 		try
 		{
-			manualDisconnect = false;
+			state.PauseUntilUtc = default(DateTime);
+            StateStore.Save(state);
+            manualDisconnect = false;
 			connectionRequested = true;
 			await core.StartAsync(profile, EffectiveRouting());
 			currentSessionStartedUtc = DateTime.UtcNow;
-			RecordHistory("Подключено", "Туннель sing-box запущен.");
+			RecordHistory("Подключено", "Туннель запущен: " + VpnEngines.DisplayName(core.Engine) + ".");
 			profile.ConsecutiveFailures = 0;
 			profile.HealthStatus = "Подключён";
-			profile.LastTestMessage = "Туннель sing-box запущен.";
+			profile.LastTestMessage = "Туннель запущен: " + VpnEngines.DisplayName(core.Engine) + ".";
 			StateStore.Save(state);
 			reconnectAttempt = 0;
 		}
@@ -3964,10 +4023,7 @@ public sealed partial class MainWindow : Window
 				UpdateHomeConnectionStatus();
 				if (newStatus == CoreStatus.Error) AnimateConnectionError();
 			}
-			if (trayConnectItem != null)
-			{
-				trayConnectItem.Text = (newStatus == CoreStatus.Connected || newStatus == CoreStatus.Connecting) ? "Отключить" : "Подключить";
-			}
+
 			if (newStatus == CoreStatus.Connected)
 			{
 				if (!snapshotMode && core.Status == CoreStatus.Connected && core.ActiveProfileId != null) { state.LastConnectedProfileId = core.ActiveProfileId; StateStore.Save(state); }
@@ -3994,34 +4050,9 @@ public sealed partial class MainWindow : Window
 			Forms.ContextMenuStrip menu = new Forms.ContextMenuStrip();
 			Forms.ToolStripMenuItem open = new Forms.ToolStripMenuItem("Открыть NOVA");
 			open.Click += delegate { RestoreFromTray(); };
-			trayConnectItem = new Forms.ToolStripMenuItem("Подключить");
-			trayConnectItem.Click += async delegate { await base.Dispatcher.InvokeAsync(async () => await ToggleConnectionAsync()); };
-			Forms.ToolStripMenuItem pause = new Forms.ToolStripMenuItem("Пауза на 15 минут");
-			pause.Click += delegate
-			{
-				base.Dispatcher.BeginInvoke((Action)delegate
-				{
-					manualDisconnect = true;
-					connectionRequested = false;
-					core.Stop();
-					try
-					{
-						StopZapretForPause();
-					}
-					catch (Exception ex)
-					{
-						Toast("VPN приостановлен, но Zapret не удалось полностью остановить: " + LogSanitizer.Sanitize(ex.Message), Danger);
-					}
-					state.PauseUntilUtc = DateTime.UtcNow.AddMinutes(15.0);
-					RecordHistory("Пауза", "VPN приостановлен на 15 минут из меню уведомлений.");
-					StateStore.Save(state);
-				});
-			};
 			Forms.ToolStripMenuItem exit = new Forms.ToolStripMenuItem("Выход");
 			exit.Click += delegate { base.Dispatcher.BeginInvoke((Action)Close); };
 			menu.Items.Add(open);
-			menu.Items.Add(trayConnectItem);
-			menu.Items.Add(pause);
 			menu.Items.Add(new Forms.ToolStripSeparator());
 			menu.Items.Add(exit);
 			trayIcon.ContextMenuStrip = menu;
@@ -4133,15 +4164,23 @@ public sealed partial class MainWindow : Window
 		protectionIndicators.Children.Add(StatusPill("ИНТЕРНЕТ", core.Verification.InternetOk ? core.Verification.InternetLatencyMs + " мс" : tunnelOk ? core.Verification.Completed ? "проверка не прошла" : "проверяется" : "не проверен", core.Verification.InternetOk ? Green : tunnelOk ? core.Verification.Completed ? Danger : Warning : Muted));
 	}
 
+    private void UpdatePausedConnectionLabel()
+    {
+        if (connectionControl != null && core.Status != CoreStatus.Connected && core.Status != CoreStatus.Connecting
+            && state.PauseUntilUtc > DateTime.UtcNow)
+            connectionControl.Label.Text = "Возобновить";
+    }
+
 	private void UpdateHomeConnectionStatus()
 	{
 		if (trafficModeStatusText != null) trafficModeStatusText.Text = ZapretStatusCaption();
 		connectionControl?.Apply(state.Visual, core.Status, MotionAllowed);
+        UpdatePausedConnectionLabel();
 		UpdateVerificationDisplay();
 		if (homePauseButton != null)
 		{
-			homePauseButton.Content = core.Status == CoreStatus.Connected ? "Пауза 15 минут" : "Возобновить";
-			homePauseButton.Visibility = core.Status == CoreStatus.Connected || state.PauseUntilUtc > DateTime.UtcNow ? Visibility.Visible : Visibility.Collapsed;
+			homePauseButton.Content = "Пауза 15 минут";
+			homePauseButton.Visibility = core.Status == CoreStatus.Connected ? Visibility.Visible : Visibility.Collapsed;
 		}
 		if (homeBestButton != null) homeBestButton.IsEnabled = state.Profiles.Count > 0 && core.Status != CoreStatus.Connecting && !profileSwitchInProgress;
 		if (liveSessionText != null) liveSessionText.Text = SessionLabel();
@@ -4164,7 +4203,10 @@ public sealed partial class MainWindow : Window
 		{
 			throw new InvalidOperationException("Сначала выключите Zapret: исходные VPN-маршруты временно сохранены для автоматического возврата.");
 		}
-		state.Profiles = source.Profiles ?? new List<VpnProfile>();
+		core.SelectEngine(source.EngineSelection == 1 ? VpnEngine.Reality : VpnEngine.SingBox);
+        state.SubscriptionIdentities = source.SubscriptionIdentities ?? new IdentityState();
+        state.EngineSelection = (int)core.Engine;
+        state.Profiles = source.Profiles ?? new List<VpnProfile>();
 		state.SelectedProfileId = source.SelectedProfileId;
 		state.Routing = source.Routing ?? new RoutingSettings();
 		state.AutoConnect = source.AutoConnect;
@@ -4186,7 +4228,8 @@ public sealed partial class MainWindow : Window
 		state.LastSubscriptionUpdateUtc = source.LastSubscriptionUpdateUtc;
 		state.PauseUntilUtc = source.PauseUntilUtc;
 		state.ConnectionHistory = source.ConnectionHistory ?? new List<ConnectionHistoryItem>();
-		state.Visual = source.Visual ?? new VisualPreferences();
+		state.Visual = source.Visual?.Clone() ?? new VisualPreferences();
+        state.Visual.MigrateWindowsDesign();
 		state.Zapret = source.Zapret ?? new ZapretSettings();
 		state.SchemaVersion = source.SchemaVersion;
 	}
@@ -4283,7 +4326,7 @@ public sealed partial class MainWindow : Window
 		}
 		if (core.Status == CoreStatus.Error)
 		{
-			return "Откройте журнал в настройках или проверьте ключ.";
+			return "Откройте журнал в диагностике или проверьте ключ.";
 		}
 		if (SelectedProfile() != null)
 		{
@@ -4532,7 +4575,7 @@ public sealed partial class MainWindow : Window
 		button.Content = text;
 		button.MinWidth = width;
 		button.Padding = new Thickness(14, 0, 14, 0);
-		button.Height = Math.Max(48.0, Math.Max(48.0 * VisualDesign.Density(state.Visual), 32.0 * state.Visual.TextScale));
+		button.Height = Math.Max(34, 32 * state.Visual.TextScale);
 		button.Background = new SolidColorBrush(Accent);
 		button.Foreground = new SolidColorBrush(palette.AccentForeground);
 		button.BorderThickness = new Thickness(0.0);
@@ -4548,14 +4591,14 @@ public sealed partial class MainWindow : Window
 	{
 		Button button = new Button();
 		button.Content = text;
-		button.Height = Math.Max(48.0, Math.Max(48.0 * VisualDesign.Density(state.Visual), 32.0 * state.Visual.TextScale));
+		button.Height = Math.Max(34, 32 * state.Visual.TextScale);
 		button.MinWidth = 76.0;
 		button.Padding = new Thickness(13.0, 0.0, 13.0, 0.0);
 		button.Background = new SolidColorBrush(Surface2);
 		button.Foreground = new SolidColorBrush(C("#BBC2CF"));
 		button.BorderBrush = new SolidColorBrush(BorderColor);
 		button.BorderThickness = new Thickness(1.0);
-		button.FontSize = 11.5 * state.Visual.TextScale;
+		button.FontSize = 13 * state.Visual.TextScale;
 		button.Cursor = Cursors.Hand;
 		button.Template = ButtonTemplate(12.0);
 		EnableButtonMotion(button);
@@ -4839,7 +4882,7 @@ public sealed partial class MainWindow : Window
 	{
 		TextBlock textBlock = new TextBlock();
 		textBlock.Text = text;
-		textBlock.FontSize = Math.Max(10.5, size) * (state?.Visual?.TextScale ?? 1.0);
+		textBlock.FontSize = Math.Max(12.0, size) * (state?.Visual?.TextScale ?? 1.0);
 		textBlock.FontWeight = size < 12 && weight == FontWeights.SemiBold ? FontWeights.Medium : weight;
 		TextOptions.SetTextRenderingMode(textBlock, TextRenderingMode.Grayscale);
 		TextOptions.SetTextFormattingMode(textBlock, TextFormattingMode.Display);

@@ -50,6 +50,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="NovaVpn\AppState.cs" />
+    <Compile Include="NovaVpn\SubscriptionIdentity.cs" />
+    <Compile Include="NovaVpn\IdentityWindow.cs" />
+    <Compile Include="NovaVpn\IdentityQr.cs" />
+    <Compile Include="NovaVpn\FullTransfer.cs" />
 	<Compile Include="NovaVpn\ApplicationCatalog.cs" />
 	<Compile Include="NovaVpn\ApplicationRoutingService.cs" />
     <Compile Include="NovaVpn\AppearanceWindow.cs" />
@@ -64,6 +68,8 @@
     <Compile Include="NovaVpn\StrictDirectRouting.cs" />
     <Compile Include="NovaVpn\ConnectionHistoryItem.cs" />
     <Compile Include="NovaVpn\ConnectionVerification.cs" />
+    <Compile Include="NovaVpn\VpnEngine.cs" />
+    <Compile Include="NovaVpn\RealityConfigBuilder.cs" />
     <Compile Include="NovaVpn\CoreManager.cs" />
     <Compile Include="NovaVpn\CoreStatus.cs" />
     <Compile Include="NovaVpn\DiagnosticItem.cs" />
@@ -80,6 +86,8 @@
     <Compile Include="NovaVpn\GuidedTour.cs" />
     <Compile Include="NovaVpn\ConnectionControl.cs" />
     <Compile Include="NovaVpn\VisualDesign.cs" />
+    <Compile Include="NovaVpn\WindowsBackdrop.cs" />
+    <Compile Include="NovaVpn\WindowsWindowBounds.cs" />
     <Compile Include="NovaVpn\GlassBackdropLayer.cs" />
     <Compile Include="NovaVpn\NetworkSpeedResult.cs" />
     <Compile Include="NovaVpn\NetworkSpeedService.cs" />
@@ -128,4 +136,7 @@
     <None Include="app-test.manifest" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+<ItemGroup><Reference Include="zxing"><HintPath>libs\zxing.dll</HintPath><Private>True</Private></Reference></ItemGroup>
 </Project>
+
+

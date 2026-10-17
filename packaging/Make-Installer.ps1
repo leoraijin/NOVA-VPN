@@ -52,6 +52,11 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $uninstaller -PathType 
 Copy-Item -LiteralPath $AppOutput -Destination (Join-Path $payload 'NOVA VPN.exe')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $payload 'LICENSE')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY.md') -Destination (Join-Path $payload 'THIRD_PARTY.md')
+foreach ($dependency in @('zxing.dll','LICENSE-ZXing.txt')) {
+    $dependencyPath = Join-Path $PSScriptRoot ('..\libs\' + $dependency)
+    if (-not (Test-Path -LiteralPath $dependencyPath -PathType Leaf)) { throw "Missing required identity/QR dependency: $dependency" }
+    Copy-Item -LiteralPath $dependencyPath -Destination (Join-Path $payload $dependency)
+}
 $payloadAssets = Join-Path $payload 'Assets'
 New-Item -ItemType Directory -Path $payloadAssets -Force | Out-Null
 foreach ($assetName in @('nova-mark.png','nova-backup.png','nova-v2.ico')) {
@@ -303,7 +308,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.25.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.30.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),
@@ -323,6 +328,6 @@ Copy-Item -LiteralPath $stagedSetup -Destination $finalTarget -Force
     InstallerBytes = (Get-Item -LiteralPath $finalTarget).Length
     InstallerSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $finalTarget).Hash
     ZapretRelease = '1.10.3'
-    ZapretArchiveSha256 = $(if ($actualHash) { $actualHash } else { 'Inherited from verified public NOVA VPN 2.3.9 installer payload' })
+    ZapretArchiveSha256 = $(if ($actualHash) { $actualHash } else { 'Recovered payload; provenance recorded separately by the publisher' })
     Stage = $stageRoot
 } | Format-List

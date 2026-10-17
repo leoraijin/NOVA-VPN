@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -27,6 +27,7 @@ public static class Program
 		string snapshotServerView = null;
 		double snapshotScroll = 0;
 		double snapshotTextScale = 0;
+        double snapshotWidth = 0, snapshotHeight = 0;
 		bool snapshotHighContrast = false;
 		for (int i = 0; i + 1 < args.Length; i++)
 		{
@@ -38,7 +39,9 @@ public static class Program
 			{
 				text2 = args[i + 1];
 			}
-			if (string.Equals(args[i], "--theme", StringComparison.OrdinalIgnoreCase)) snapshotTheme = args[i + 1];
+			if (string.Equals(args[i], "--width", StringComparison.OrdinalIgnoreCase)) double.TryParse(args[i + 1], out snapshotWidth);
+            if (string.Equals(args[i], "--height", StringComparison.OrdinalIgnoreCase)) double.TryParse(args[i + 1], out snapshotHeight);
+            if (string.Equals(args[i], "--theme", StringComparison.OrdinalIgnoreCase)) snapshotTheme = args[i + 1];
 			if (string.Equals(args[i], "--background", StringComparison.OrdinalIgnoreCase)) snapshotBackground = args[i + 1];
 			if (string.Equals(args[i], "--density", StringComparison.OrdinalIgnoreCase)) snapshotDensity = args[i + 1];
 			if (string.Equals(args[i], "--server-view", StringComparison.OrdinalIgnoreCase)) snapshotServerView = args[i + 1];
@@ -67,6 +70,8 @@ public static class Program
 		if (!string.IsNullOrWhiteSpace(text))
 		{
 			string target = text;
+            if (snapshotWidth >= window.MinWidth && snapshotWidth <= 3840) window.Width = snapshotWidth;
+            if (snapshotHeight >= window.MinHeight && snapshotHeight <= 2160) window.Height = snapshotHeight;
 			string page = text2;
 			string theme = snapshotTheme;
 			string background = snapshotBackground;

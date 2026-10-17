@@ -4,6 +4,8 @@
 | --- | --- |
 | sing-box | [SagerNet/sing-box](https://github.com/SagerNet/sing-box) |
 | Zapret | [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) |
+| Reality Core (экспериментальный) | [ERGFT/vpn-core](https://github.com/ERGFT/vpn-core), GPL-3.0-or-later; лицензия и зависимости в core/ |
+| ZXing.Net 0.16.11 | [micjahn/ZXing.Net](https://github.com/micjahn/ZXing.Net), Apache-2.0; libs/LICENSE-ZXing.txt |
 
 Точные уведомления входят в установщик: `THIRD-PARTY-NOTICES.txt`, `ZAPRET-NOTICE.txt`, `ASSET-NOTICES.txt` и файлы в папках компонентов.
 

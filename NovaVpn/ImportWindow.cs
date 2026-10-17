@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -60,19 +60,9 @@ public sealed class ImportWindow : Window
 		});
 		grid.RowDefinitions.Add(new RowDefinition
 		{
-			Height = new GridLength(50.0)
+			Height = GridLength.Auto
 		});
-		Grid grid2 = new Grid
-		{
-			ColumnDefinitions =
-			{
-				new ColumnDefinition(),
-				new ColumnDefinition
-				{
-					Width = new GridLength(48.0)
-				}
-			}
-		};
+		Grid grid2 = new Grid();
 		StackPanel element = new StackPanel
 		{
 			Children =
@@ -80,14 +70,14 @@ public sealed class ImportWindow : Window
 				(UIElement)new TextBlock
 				{
 					Text = "Добавить сервер",
-					FontSize = (palette.Name == ThemePalette.OneUi ? 26.0 : 21.0) * preferences.TextScale,
+					FontSize = 21.0 * preferences.TextScale,
 					FontWeight = FontWeights.SemiBold,
 					Foreground = new SolidColorBrush(palette.Text)
 				},
 				(UIElement)new TextBlock
 				{
 					Text = "Ключ, sing-box JSON или ссылка на подписку",
-					FontSize = 10.5 * preferences.TextScale,
+					FontSize = 12.0 * preferences.TextScale,
 					TextWrapping = TextWrapping.Wrap,
 					Foreground = new SolidColorBrush(palette.Muted),
 					Margin = new Thickness(0.0, 4.0, 0.0, 0.0)
@@ -95,24 +85,6 @@ public sealed class ImportWindow : Window
 			}
 		};
 		grid2.Children.Add(element);
-		Button button = new Button
-		{
-			Content = "×",
-			Width = 48.0,
-			Height = 48.0,
-			Background = Brushes.Transparent,
-			Foreground = new SolidColorBrush(palette.Muted),
-			BorderThickness = new Thickness(0.0),
-			FontSize = 20.0,
-			Cursor = Cursors.Hand
-		};
-		RoutedEventHandler value = delegate
-		{
-			base.DialogResult = false;
-		};
-		button.Click += value;
-		Grid.SetColumn(button, 1);
-		grid2.Children.Add(button);
 		grid2.MouseLeftButtonDown += delegate
 		{
 			DragMove();
@@ -133,7 +105,7 @@ public sealed class ImportWindow : Window
 			CaretBrush = new SolidColorBrush(palette.AccentLight),
 			BorderThickness = new Thickness(0.0),
 			FontFamily = new FontFamily("Consolas"),
-			FontSize = 11.0 * preferences.TextScale,
+			FontSize = 13.0 * preferences.TextScale,
 			TextWrapping = TextWrapping.Wrap,
 			AcceptsReturn = true,
 			VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -162,14 +134,18 @@ public sealed class ImportWindow : Window
 				}
 			}
 		};
+		grid3.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+		grid3.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 		TextBlock element2 = new TextBlock
 		{
 			Text = "Можно вставить несколько ключей — по одному в строке",
-			FontSize = 9.5 * preferences.TextScale,
+			FontSize = 12.0 * preferences.TextScale,
 			TextWrapping = TextWrapping.Wrap,
 			Foreground = new SolidColorBrush(palette.Muted),
 			VerticalAlignment = VerticalAlignment.Center
 		};
+		element2.Margin = new Thickness(0, 0, 0, 12);
+		Grid.SetColumnSpan(element2, 4);
 		grid3.Children.Add(element2);
 		Button button2 = new Button
 		{
@@ -185,8 +161,10 @@ public sealed class ImportWindow : Window
 		{
 			base.DialogResult = false;
 		};
+		button2.IsCancel = true;
+		Grid.SetRow(button2, 1);
 		Grid.SetColumn(button2, 1);
-		button2.Template = VisualDesign.ButtonTemplate(preferences, 16);
+		button2.Template = VisualDesign.ButtonTemplate(preferences, 4);
 		button2.FontSize = 12 * preferences.TextScale;
 		grid3.Children.Add(button2);
 		Button button3 = new Button
@@ -206,8 +184,9 @@ public sealed class ImportWindow : Window
 				base.DialogResult = true;
 			}
 		};
+		Grid.SetRow(button3, 1);
 		Grid.SetColumn(button3, 3);
-		button3.Template = VisualDesign.ButtonTemplate(preferences, 16);
+		button3.Template = VisualDesign.ButtonTemplate(preferences, 4);
 		button3.FontSize = 12 * preferences.TextScale;
 		grid3.Children.Add(button3);
 		Grid.SetRow(grid3, 4);

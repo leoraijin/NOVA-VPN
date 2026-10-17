@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Serialization.Json;
@@ -102,7 +102,8 @@ public static class StateStore
 	{
 		if (state != null)
 		{
-			if (state.SchemaVersion < 2)
+			state.SubscriptionIdentities = state.SubscriptionIdentities ?? new IdentityState();
+            if (state.SchemaVersion < 2)
 			{
 				state.AutoReconnect = true;
 				state.ShowAnimations = true;
@@ -347,7 +348,7 @@ public static class StateStore
 	private static void NormalizeVisual(VisualPreferences visual)
 	{
 		if (visual == null) return;
-		if (ThemePalette.NormalizeName(visual.ThemeName) == ThemePalette.WindowsDark) { visual.DarkMode = true; visual.ThemeName = ThemePalette.Windows; }
+		if (ThemePalette.IsLegacyDark(visual.ThemeName)) { visual.DarkMode = true; visual.ThemeName = ThemePalette.Windows; }
         visual.ThemeName = ThemePalette.NormalizeName(visual.ThemeName);
         if (double.IsNaN(visual.MaterialHue) || double.IsInfinity(visual.MaterialHue)) visual.MaterialHue = 275;
         visual.MaterialHue = Math.Max(0, Math.Min(360, visual.MaterialHue));
@@ -361,7 +362,7 @@ public static class StateStore
 		visual.GlassHighlight = ClampVisual(visual.GlassHighlight, 0, 1, 1);
 		visual.SoftContrast = ClampVisual(visual.SoftContrast, 0, 1, 0);
 		visual.GlowIntensity = ClampVisual(visual.GlowIntensity, 0.0, 0.6, 0.18);
-		visual.TextScale = ClampVisual(visual.TextScale, 0.85, 1.35, 1.0);
+		visual.TextScale = ClampVisual(visual.TextScale, 1.0, 1.5, 1.0);
 		visual.AnimationSpeed = ClampVisual(visual.AnimationSpeed, 0.5, 2.0, 1.0);
 		if (visual.AnimationFrameRate != 0 && visual.AnimationFrameRate != 60 && visual.AnimationFrameRate != 120) visual.AnimationFrameRate = 120;
 		visual.Density = NormalizeVisualChoice(visual.Density, "Compact", "Comfortable", "Standard");
@@ -369,7 +370,7 @@ public static class StateStore
 		visual.BackgroundDim = ClampVisual(visual.BackgroundDim, 0.0, 0.7, 0.0);
 		visual.BackgroundBlur = ClampVisual(visual.BackgroundBlur, 0.0, 24.0, 0.0);
 		visual.CustomBackgroundPath = "";
-		visual.ConnectButtonStyle = "Orb";
+		visual.ConnectButtonStyle = "Windows";
 		if (visual.HomeCardOrder == null || visual.HomeCardOrder.Count == 0) visual.HomeCardOrder = new List<string> { "Speed", "Protocol", "Latency", "Session", "Privacy" };
 		if (visual.HiddenHomeCards == null) visual.HiddenHomeCards = new List<string>();
 		Dictionary<string, VisualThemeOverrides> normalized = new Dictionary<string, VisualThemeOverrides>(StringComparer.OrdinalIgnoreCase);
@@ -390,7 +391,7 @@ public static class StateStore
 				settings.GlassHighlight = ClampVisual(settings.GlassHighlight, 0, 1, defaults.GlassHighlight);
 				settings.SoftContrast = ClampVisual(settings.SoftContrast, 0, 1, 0);
 				settings.GlowIntensity = ClampVisual(settings.GlowIntensity, 0.0, 0.6, defaults.GlowIntensity);
-				settings.TextScale = ClampVisual(settings.TextScale, 0.85, 1.35, defaults.TextScale);
+				settings.TextScale = ClampVisual(settings.TextScale, 1.0, 1.5, defaults.TextScale);
 				settings.AnimationSpeed = ClampVisual(settings.AnimationSpeed, 0.5, 2.0, defaults.AnimationSpeed);
 				if (settings.AnimationFrameRate != 0 && settings.AnimationFrameRate != 60 && settings.AnimationFrameRate != 120) settings.AnimationFrameRate = 120;
 				settings.Density = NormalizeVisualChoice(settings.Density, "Compact", "Comfortable", defaults.Density);
