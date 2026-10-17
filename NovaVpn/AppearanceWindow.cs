@@ -44,6 +44,8 @@ public sealed class AppearanceWindow : Window
         body.Children.Add(Check("Показывать график скорости", working.ShowLiveGraph, value => working.ShowLiveGraph = value));
         body.Children.Add(Check("Показывать схему соединения", working.ShowConnectionMap, value => working.ShowConnectionMap = value));
         scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        SmoothScrollBehavior.Attach(scroll, () => allowAnimations && !working.ReduceMotion &&
+            (!working.FollowSystemMotion || SystemParameters.ClientAreaAnimation));
         Grid.SetRow(scroll,1); root.Children.Add(scroll);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0,20,0,0) };
         var cancel = Action("Отмена", false); cancel.IsCancel = true; cancel.Click += delegate { DialogResult = false; };

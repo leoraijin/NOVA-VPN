@@ -676,9 +676,10 @@ public sealed partial class MainWindow : Window
 
 	private UIElement BuildBackdrop() => null;
 
-	private static ScrollViewer TouchScrollViewer(ScrollViewer viewer)
+	private ScrollViewer TouchScrollViewer(ScrollViewer viewer)
 	{
 		ScrollViewer.SetPanningMode(viewer, PanningMode.VerticalOnly);
+		SmoothScrollBehavior.Attach(viewer, () => MotionAllowed);
 		return viewer;
 	}
 
@@ -1561,6 +1562,7 @@ public sealed partial class MainWindow : Window
 			Margin = new Thickness(0, 0, 0, 14)
 		};
 		Grid.SetRow(notesScroll, 1);
+		SmoothScrollBehavior.Attach(notesScroll, () => MotionAllowed);
 		layout.Children.Add(notesScroll);
 
 		StackPanel footer = new StackPanel();

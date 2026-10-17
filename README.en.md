@@ -1,6 +1,6 @@
 # NOVA VPN
 
-Release **2.3.31** downloads, verifies SHA-256 and launches the installer when Update is clicked, instead of opening a browser. Windows 11 themes and encrypted local identity/transfer features from 2.3.30 are included. Windows engine binaries were not rebuilt; Reality Core remains experimental and Android JNI/UID integration is not claimed on Windows. Screenshots below show older versions.
+Release **2.3.32** adds smooth page-wheel scrolling targeting 120 Hz, without an idle timer and respecting reduced motion. Actual FPS depends on the display and load. Verified automatic installer launch from 2.3.31, Windows themes and encrypted identity/transfer features are preserved. Windows engines were not rebuilt; Reality Core remains experimental. Screenshots below show older versions.
 
 [Русский](README.md) | **English**
 
