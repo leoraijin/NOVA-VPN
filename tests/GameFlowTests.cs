@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -17,11 +17,15 @@ internal static class GameFlowTests
     static Task Call(MainWindow window, string method, params object[] args) => (Task)typeof(MainWindow).GetMethod(method, Private).Invoke(window, args);
     static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
     static VpnProfile Profile(string id, int port) => new VpnProfile { Id = id, Name = id, Protocol = "vless", PortableOutboundJson = new JavaScriptSerializer().Serialize(new { type = "socks", tag = "proxy", server = "127.0.0.1", server_port = port, version = "5", bind_interface = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces().First(n => n.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback).Name }) };
-    static async Task<string> Request(string executable) {
+    static async Task<string> Request(string executable, string stage, CoreManager core, FixtureSocksServer regular, FixtureSocksServer gaming) {
+        Console.WriteLine("FLOW REQUEST: " + stage + " · " + Path.GetFileName(executable) + " · core=" + core.Status);
         using (var process = Process.Start(new ProcessStartInfo(executable, "198.18.0.10 18080") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true })) {
             var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
-            if (await Task.WhenAny(output, Task.Delay(10000)) != output) { process.Kill(); throw new Exception("Client flow traffic timed out"); }
-            process.WaitForExit(); if (process.ExitCode != 0) throw new Exception(await error); return await output;
+            if (await Task.WhenAny(output, Task.Delay(10000)) != output) { process.Kill(); process.WaitForExit(3000); throw new Exception("Client flow traffic timed out at " + stage + "; core=" + core.Status + "; regular=" + regular.Diagnostics + "; gaming=" + gaming.Diagnostics + "\nCORE LOG:\n" + core.Logs); }
+            process.WaitForExit();
+            if (process.ExitCode != 0) throw new Exception("Traffic failed at " + stage + "; core=" + core.Status +
+                "; regular=" + regular.Diagnostics + "; gaming=" + gaming.Diagnostics + "\n" + await error + "\nCORE LOG:\n" + core.Logs);
+            Console.WriteLine("FLOW RESPONSE: " + stage + " · " + await output); return await output;
         }
     }
     static async Task Run(string corePath, string work)
@@ -47,20 +51,20 @@ internal static class GameFlowTests
                 finally { cancellation.Cancel(); try { await scan; } catch (OperationCanceledException) { } }
             }
             Console.WriteLine("PASS: normal client connection can start while isolated gaming probes are active.");
-            Check((await Request(otherExe)).EndsWith("REGULAR"), "Baseline app rule failed before gaming");
+            Check((await Request(otherExe, "baseline", core, regular, gaming)).EndsWith("REGULAR"), "Baseline app rule failed before gaming");
             var preference = (GamePreferences)typeof(MainWindow).GetMethod("GetGamePreferences", Private).Invoke(window, new object[] { game.Id }); preference.ProfileId = picked.Id;
             Set(window, "gamingAutomaticResult", new AutomaticGamingResult { ProfileId = picked.Id });
             Set(window, "gamingRecommendation", new GamingRecommendationStamp(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, false, core.Engine, core.Status, DateTime.UtcNow));
             await Call(window, "ApplyGamingAsync");
             Check(Field(window, "gamingSession") != null && core.Status == CoreStatus.Connected, "Client failed to activate gaming: " + Field(window, "gamingMessage"));
-            Check((await Request(gameExe)).EndsWith("GAME"), "Client game traffic did not use selected config");
-            Check((await Request(otherExe)).EndsWith("REGULAR"), "Client changed ordinary application route");
+            Check((await Request(gameExe, "gaming", core, regular, gaming)).EndsWith("GAME"), "Client game traffic did not use selected config");
+            Check((await Request(otherExe, "ordinary-during-game", core, regular, gaming)).EndsWith("REGULAR"), "Client changed ordinary application route");
             state.Routing.ProxyDomains.Add("edited-during-session.invalid"); state.Routing.ProxyProcessPaths.Add(gameExe);
             await Call(window, "StopGamingAsync", "Fixture finished.");
             Check(Field(window, "gamingSession") == null && core.Status == CoreStatus.Connected && core.ActiveProfileId == basis.Id, "Client did not restore original normal connection");
             Check(core.LastConnectedRouting.Gaming == null && core.LastConnectedRouting.ProxyDomains.Contains("edited-during-session.invalid"), "Client restored an obsolete routing snapshot over user edits");
-            Check((await Request(gameExe)).EndsWith("REGULAR"), "Game did not return to latest ordinary app rule");
-            Check((await Request(otherExe)).EndsWith("REGULAR"), "Ordinary app failed after client session stop");
+            Check((await Request(gameExe, "game-restored", core, regular, gaming)).EndsWith("REGULAR"), "Game did not return to latest ordinary app rule");
+            Check((await Request(otherExe, "ordinary-restored", core, regular, gaming)).EndsWith("REGULAR"), "Ordinary app failed after client session stop");
             var manager = (GamingSessionManager)Field(window, "gamingSessions"); Check(manager.Phase == GamingSessionPhase.Idle, "Client journal was not finished");
             Console.WriteLine("PASS: actual MainWindow/CoreManager lifecycle with real Windows TUN: game-only override, other app preserved, normal VPN restored and latest user edits applied.");
             // A bad route must be rejected before the working baseline process is stopped.

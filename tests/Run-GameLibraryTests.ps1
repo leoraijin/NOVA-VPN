@@ -1,12 +1,12 @@
-param([Parameter(Mandatory=$true)][string]$AssemblyPath,[Parameter(Mandatory=$true)][string]$WorkPath,[Parameter(Mandatory=$true)][string]$CscPath,[string]$CorePath)
+﻿param([Parameter(Mandatory=$true)][string]$AssemblyPath,[Parameter(Mandatory=$true)][string]$WorkPath,[Parameter(Mandatory=$true)][string]$CscPath,[string]$CorePath)
 $ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Path $WorkPath -Force | Out-Null
 $testApp=Join-Path $WorkPath 'NOVA VPN.exe'
 Copy-Item -LiteralPath $AssemblyPath -Destination $testApp -Force
 Copy-Item -LiteralPath (Join-Path (Split-Path ([IO.Path]::GetFullPath($AssemblyPath))) 'NOVA Core Host.exe') -Destination (Join-Path $WorkPath 'NOVA Core Host.exe') -Force
-foreach($name in @('GameLibraryTests','AutomaticGamingTests','GameUdpDiscoveryTests','UdpTrafficFixture','CoreLifetimeTests','GameTunIsolationTests','GameFlowTests','GameTrafficFixture')) {
+foreach($name in @('GameLibraryTests','AutomaticGamingTests','GameUdpDiscoveryTests','UdpTrafficFixture','CoreLifetimeTests','GameTunIsolationTests','GameFlowTests','GameTrafficFixture','GameTrafficProtocolTests')) {
   $extra=@()
-  if($name -in @('GameTunIsolationTests','GameFlowTests')){$extra += Join-Path $PSScriptRoot 'FixtureSocksServer.cs'}
+  if($name -in @('GameTunIsolationTests','GameFlowTests','GameTrafficProtocolTests')){$extra += Join-Path $PSScriptRoot 'FixtureSocksServer.cs'}
   if($name -eq 'GameFlowTests'){
     $wpf=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\WPF'
     foreach($reference in @('PresentationFramework','PresentationCore','WindowsBase')){$extra += '/reference:'+(Join-Path $wpf ($reference+'.dll'))}
@@ -16,6 +16,8 @@ foreach($name in @('GameLibraryTests','AutomaticGamingTests','GameUdpDiscoveryTe
 }
 & $CscPath /nologo /target:exe "/out:$(Join-Path $WorkPath 'CoreTreeFixture.exe')" (Join-Path $PSScriptRoot 'CoreTreeFixture.cs')
 if($LASTEXITCODE -ne 0){throw 'Fixture compilation failed'}
+& (Join-Path $WorkPath 'GameTrafficProtocolTests.exe') (Join-Path $WorkPath 'GameTrafficFixture.exe')
+if($LASTEXITCODE -ne 0){throw 'HTTP/probe fixture protocol regression failed'}
 & (Join-Path $WorkPath 'GameLibraryTests.exe') (Join-Path $WorkPath 'library-fixtures')
 if($LASTEXITCODE -ne 0){throw 'Game library/policy tests failed'}
 & (Join-Path $WorkPath 'AutomaticGamingTests.exe') ([IO.Path]::GetFullPath($WorkPath))

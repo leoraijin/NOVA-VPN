@@ -72,8 +72,17 @@ No claim of universal exact ping measurement, guaranteed improvement or complete
 live-game verification is justified by the current tests.
 
 Native UDP observation and real-TUN isolation passed on GitHub run 39228983963.
-Expanded orphan-recovery and actual MainWindow/CoreManager lifecycle tests are pending
-on the next source revision; do not treat the earlier green run as their evidence.
+Run 39232373560 on 90f992a passed orphan recovery, job isolation and the separate TUN
+fixture, but failed in the actual MainWindow/CoreManager flow. On 19 October, the HTTP
+fixture was corrected to consume Content-Length rather than transport EOF. A loopback
+regression fails with the original reader and passes with the corrected one; truncated
+bodies are rejected. The SOCKS fixture now uses async IO and remains responsive under
+48 idle clients. Flow logs identify each phase, core state and fixture counters.
+The corrected GameFlow has NOT yet passed the required isolated Windows CI. Local
+IPv6 loopback fails with AccessDenied/10013, so it is explicitly skipped locally after
+a failed control connection, but remains mandatory in CI. No local network policy is changed.
+Version/installer metadata now target 2.6.0. Publication is explicit workflow_dispatch
+with publish=true, refuses an existing release and never replaces published 2.5.0.
 
 Windows endpoint layout references:
 - https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getextendedtcptable

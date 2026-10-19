@@ -125,13 +125,24 @@ public static class GamingTests
                 new[] { FakeProfile() }, core, work, true, null, CancellationToken.None);
             Check(results.Count == 2 && results.All(r => r.Reliable), "TCP direct and authenticated SOCKS CONNECT failed");
         } finally { stop = true; listener.Stop(); await accept; }
-        if (Socket.OSSupportsIPv6) {
+        bool ipv6Available = Socket.OSSupportsIPv6;
+        if (ipv6Available) {
+            var control = new TcpListener(IPAddress.IPv6Loopback, 0); control.Start();
+            try { using (var client = new TcpClient(AddressFamily.InterNetworkV6)) { await client.ConnectAsync(IPAddress.IPv6Loopback, ((IPEndPoint)control.LocalEndpoint).Port); using (var peer = await control.AcceptTcpClientAsync()) { } } }
+            catch (SocketException ex) {
+                if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true") throw;
+                ipv6Available = false;
+                Console.WriteLine("SKIP: local IPv6 loopback control denied/unavailable (" + ex.SocketErrorCode + ", " + ex.NativeErrorCode + "). IPv6 coverage remains REQUIRED in CI; network policy unchanged.");
+            } finally { control.Stop(); }
+        }
+        if (ipv6Available) {
             var ipv6 = new TcpListener(IPAddress.IPv6Loopback, 0); ipv6.Start();
             bool done = false;
             var accepting = Task.Run(async () => { try { while (!done) { using (var client = await ipv6.AcceptTcpClientAsync()) { } } } catch (ObjectDisposedException) { } catch (SocketException) { } });
             try {
                 var results = await new GamingProbeService().ScanAsync(new GamingTarget { Host = "::1", Port = ((IPEndPoint)ipv6.LocalEndpoint).Port },
                     new[] { FakeProfile() }, core, work, true, null, CancellationToken.None);
+                foreach(var result in results) Console.WriteLine("IPv6 fixture: " + result.Name + " · " + result.Summary + " · " + result.Error);
                 Check(results.Count == 2 && results.All(r => r.Reliable), "IPv6 direct and authenticated SOCKS CONNECT failed");
             } finally { done = true; ipv6.Stop(); await accepting; }
         }

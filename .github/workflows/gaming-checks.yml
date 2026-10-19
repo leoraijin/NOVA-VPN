@@ -22,7 +22,8 @@ jobs:
           Invoke-WebRequest 'https://github.com/leoraijin/NOVA-VPN/releases/download/v2.3.36/NOVA-VPN-Windows-2.3.36-Portable.zip' -OutFile work/runtime.zip
           if ((Get-FileHash work/runtime.zip -Algorithm SHA256).Hash -ne 'F6A4A388EEB00127EBAE7AE68D68584C091BEB332EFB150F581BDA0598BE4FDE') { throw 'Runtime checksum mismatch' }
           Expand-Archive work/runtime.zip work/payload
-      - name: Build and check automatic gaming
+      - name: Build
+        id: build
         shell: pwsh
         run: |
           $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
@@ -30,9 +31,37 @@ jobs:
           & $msbuild 'NOVA VPN.csproj' /t:Rebuild /p:Configuration=Release /v:minimal /nologo
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
           $csc = Join-Path (Split-Path $msbuild) 'Roslyn\csc.exe'
-          ./tests/Run-GamingTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/gaming-tests) -CscPath $csc
-          ./tests/Run-GameLibraryTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/library-tests) -CscPath $csc
-          powershell -NoProfile -STA -File tests/GamingUiTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
+          "csc=$csc" >> $env:GITHUB_OUTPUT
+      - name: Network probes
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./tests/Run-GamingTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/gaming-tests) -CscPath '${{ steps.build.outputs.csc }}' 2>&1 | Tee-Object work/network.log
+      - name: Library, recovery and actual client lifecycle
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./tests/Run-GameLibraryTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/library-tests) -CscPath '${{ steps.build.outputs.csc }}' 2>&1 | Tee-Object work/lifecycle.log
+      - name: Gaming UI
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          powershell -NoProfile -STA -File tests/GamingUiTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -ScreenshotPath work/gaming-ui.png
           if ($LASTEXITCODE -ne 0) { throw 'Gaming UI failed' }
+      - name: Existing-page scroll regression
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
           powershell -NoProfile -STA -File tests/SmoothScrollIntegrationTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Existing page regression' }
+          powershell -NoProfile -File tests/ReleaseNotesTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Release notes regression' }
+      - name: Save synthetic diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: automatic-gaming-verification
+          path: |
+            work/*.log
+            work/gaming-ui.png
+          if-no-files-found: ignore
