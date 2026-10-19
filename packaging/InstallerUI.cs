@@ -16,13 +16,13 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NOVA VPN Setup")]
 [assembly: AssemblyProduct("NOVA VPN")]
-[assembly: AssemblyVersion("2.4.0.0")]
-[assembly: AssemblyFileVersion("2.4.0.0")]
+[assembly: AssemblyVersion("2.4.1.0")]
+[assembly: AssemblyFileVersion("2.4.1.0")]
 
 internal sealed class NovaInstaller : Form
 {
     private new const string ProductName = "NOVA VPN";
-    private const string DisplayVersion = "2.4.0";
+    private const string DisplayVersion = "2.4.1";
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NOVA VPN";
     private readonly Color background = Color.FromArgb(233, 239, 246);
     private readonly Color panel = Color.FromArgb(248, 250, 253);
@@ -357,6 +357,8 @@ internal sealed class NovaInstaller : Form
     {
         InstallOptions options = (InstallOptions)e.Argument;
         Directory.CreateDirectory(options.Target);
+        worker.ReportProgress(0, "Завершение компонентов прежней версии…");
+        StopInstalledComponents(options.Target);
         List<string> installed = new List<string>();
         string prefix = Path.GetFullPath(options.Target).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         using (Stream file = Assembly.GetExecutingAssembly().GetManifestResourceStream("NOVA.Payload.zip"))
@@ -364,6 +366,8 @@ internal sealed class NovaInstaller : Form
         if (file == null) throw new FileNotFoundException("В установщике не найден архив компонентов.");
         using (ZipArchive archive = new ZipArchive(file, ZipArchiveMode.Read))
         {
+            // Detect a locked payload before replacing any application files.
+            PreflightInstallFiles(archive, options.Target);
             long total = Math.Max(1, archive.Entries.Sum(x => x.Length));
             long complete = 0;
             foreach (ZipArchiveEntry entry in archive.Entries)
@@ -427,6 +431,63 @@ internal sealed class NovaInstaller : Form
             key.SetValue("EstimatedSize", (int)Math.Min(Int32.MaxValue, installedBytes / 1024), RegistryValueKind.DWord);
         }
     }
+
+    private static void StopInstalledComponents(string target)
+    {
+        foreach (string relative in new[] { "core\\sing-box.exe", "core\\reality-client.exe", "zapret\\current\\bin\\winws.exe" })
+        {
+            string expected = Path.GetFullPath(Path.Combine(target, relative));
+            foreach (Process candidate in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(relative)))
+            using (candidate)
+            {
+                // Never stop another VPN's core merely because its process name matches.
+                string actual = ProcessImagePath(candidate.Id);
+                if (actual == null || !String.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)) continue;
+                try
+                {
+                    if (!candidate.HasExited) candidate.Kill();
+                    if (!candidate.WaitForExit(5000))
+                        throw new IOException("Компонент NOVA ещё завершает работу: " + Path.GetFileName(relative));
+                }
+                catch (InvalidOperationException) { } // Exited between discovery and termination.
+            }
+        }
+    }
+
+    private static string ProcessImagePath(int id)
+    {
+        IntPtr handle = OpenProcess(0x1000, false, id); // QUERY_LIMITED_INFORMATION
+        if (handle == IntPtr.Zero) return null;
+        try
+        {
+            var path = new StringBuilder(32768);
+            int length = path.Capacity;
+            return QueryFullProcessImageName(handle, 0, path, ref length) ? Path.GetFullPath(path.ToString()) : null;
+        }
+        finally { CloseHandle(handle); }
+    }
+
+    private static void PreflightInstallFiles(ZipArchive archive, string target)
+    {
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            if (String.IsNullOrEmpty(entry.Name)) continue;
+            string path = SafeInstallPath(target, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(path)) continue;
+            try { using (var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { } }
+            catch (IOException)
+            {
+                throw new IOException("Файл занят: " + path + ". Закройте NOVA VPN и повторите установку. Файлы приложения ещё не заменялись.");
+            }
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool QueryFullProcessImageName(IntPtr process, int flags, StringBuilder name, ref int size);
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
 
     private void WorkerProgressChanged(object sender, ProgressChangedEventArgs e)
     {

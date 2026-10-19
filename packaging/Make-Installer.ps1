@@ -73,6 +73,10 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ASSET-NOTICES.txt') -Destination $payload
 $releaseNotes = @'
+NOVA VPN 2.4.1 — исправление обновления
+- Завершение оставшихся процессов ядра из папки установки и ожидание их выхода.
+- Проверка блокировок до замены файлов. Чужие ядра и личные профили сохраняются.
+
 NOVA VPN 2.4.0 — 19 октября 2026
 - Игровой режим: отдельный выход для игры, подбор среди профилей, сравнение с прямым маршрутом по разрешению.
 - TCP CONNECT — оценка; A2S UDP — ответ query-порта. 10 серий, медиана, p95 и доля неотвеченных проб.
@@ -344,7 +348,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.4.0.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.4.1.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),
