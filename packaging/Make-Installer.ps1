@@ -74,7 +74,7 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ASSET-NOTICES.txt') -Destination $payload
 $releaseNotes = @'
-NOVA VPN 2.6.0 — библиотека игр и возврат маршрутов
+NOVA VPN 2.6.1 — проверка выигрыша у прямого соединения
 - Автоматическое обнаружение Steam/Epic/GOG/Riot, карточки и конфиг только для игровых EXE.
 - Временный слой маршрутизации, завершение по выходу из игры, журнал аварийного восстановления.
 - Контролируемое дерево ядра завершается при падении владельца; обычные настройки сохраняются.
@@ -354,7 +354,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.6.0.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.6.1.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

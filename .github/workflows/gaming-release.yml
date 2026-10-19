@@ -54,16 +54,16 @@ jobs:
         shell: pwsh
         run: |
           ./packaging/Make-Installer.ps1 -AppOutput 'bin/Release/NOVA VPN.exe' -RecoveredPayloadDirectory (Resolve-Path work/payload).Path -OutputDirectory (Join-Path $PWD outputs)
-          Copy-Item 'outputs/NOVA VPN Setup 2.6.0.exe' 'outputs/NOVA.VPN.Setup.2.6.0.exe'
-          powershell -NoProfile -File tests/InstallerPayloadTests.ps1 -InstallerPath 'outputs/NOVA.VPN.Setup.2.6.0.exe' -AppPath 'bin/Release/NOVA VPN.exe'
+          Copy-Item 'outputs/NOVA VPN Setup 2.6.1.exe' 'outputs/NOVA.VPN.Setup.2.6.1.exe'
+          powershell -NoProfile -File tests/InstallerPayloadTests.ps1 -InstallerPath 'outputs/NOVA.VPN.Setup.2.6.1.exe' -AppPath 'bin/Release/NOVA VPN.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Installer validation failed' }
-          powershell -NoProfile -File tests/InstallerLockTests.ps1 -InstallerPath 'outputs/NOVA.VPN.Setup.2.6.0.exe' -WorkPath 'work/installer-lock-tests'
+          powershell -NoProfile -File tests/InstallerLockTests.ps1 -InstallerPath 'outputs/NOVA.VPN.Setup.2.6.1.exe' -WorkPath 'work/installer-lock-tests'
           if ($LASTEXITCODE -ne 0) { throw 'Installer lock regression failed' }
-          $setup = [Reflection.Assembly]::LoadFile((Resolve-Path 'outputs/NOVA.VPN.Setup.2.6.0.exe').Path)
+          $setup = [Reflection.Assembly]::LoadFile((Resolve-Path 'outputs/NOVA.VPN.Setup.2.6.1.exe').Path)
           $stream = $setup.GetManifestResourceStream('NOVA.Payload.zip')
-          $portable = [IO.File]::Create((Join-Path $PWD 'outputs/NOVA-VPN-Windows-2.6.0-Portable.zip'))
+          $portable = [IO.File]::Create((Join-Path $PWD 'outputs/NOVA-VPN-Windows-2.6.1-Portable.zip'))
           try { $stream.CopyTo($portable) } finally { $portable.Dispose(); $stream.Dispose() }
-          git archive --format=zip --output=outputs/NOVA-VPN-Windows-2.6.0-source.zip HEAD
+          git archive --format=zip --output=outputs/NOVA-VPN-Windows-2.6.1-source.zip HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
           Copy-Item docs/GAMING-RELEASE-NOTES.md outputs/RELEASE-NOTES.md
           @"
@@ -83,14 +83,14 @@ jobs:
             '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Set-Content outputs/SHA256SUMS.txt -Encoding ascii
           # Publish the dot-separated installer name used by the existing updater.
-          Move-Item -LiteralPath 'outputs/NOVA VPN Setup 2.6.0.exe' -Destination 'work/NOVA VPN Setup 2.6.0.exe'
+          Move-Item -LiteralPath 'outputs/NOVA VPN Setup 2.6.1.exe' -Destination 'work/NOVA VPN Setup 2.6.1.exe'
           Get-ChildItem outputs -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Set-Content outputs/SHA256SUMS.txt -Encoding ascii
       - name: Save verified packages
         uses: actions/upload-artifact@v4
         with:
-          name: NOVA-VPN-Windows-2.6.0-verified
+          name: NOVA-VPN-Windows-2.6.1-verified
           path: outputs/*
           retention-days: 14
           if-no-files-found: error
@@ -100,20 +100,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view v2.6.0 --repo leoraijin/NOVA-VPN --json id 2>$null
+          gh release view v2.6.1 --repo leoraijin/NOVA-VPN --json id 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; existing assets must never be overwritten' }
           if ($LASTEXITCODE -ne 0) {
-            gh release create v2.6.0 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft --prerelease=false --title 'NOVA VPN 2.6.0 — библиотека игр и возврат маршрутов' --notes-file docs/GAMING-RELEASE-NOTES.md
+            gh release create v2.6.1 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft --prerelease=false --title 'NOVA VPN 2.6.1 — библиотека игр и возврат маршрутов' --notes-file docs/GAMING-RELEASE-NOTES.md
             if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }
           }
           foreach ($asset in Get-ChildItem outputs -File) {
             $uploaded = $false
             for ($attempt = 0; $attempt -lt 3; $attempt++) {
-              gh release upload v2.6.0 --repo leoraijin/NOVA-VPN $asset.FullName
+              gh release upload v2.6.1 --repo leoraijin/NOVA-VPN $asset.FullName
               if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
               Start-Sleep -Seconds 3
             }
             if (!$uploaded) { throw "Asset upload failed: $($asset.Name)" }
           }
-          gh release edit v2.6.0 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft=false --prerelease=false --latest --title 'NOVA VPN 2.6.0 — библиотека игр и возврат маршрутов' --notes-file docs/GAMING-RELEASE-NOTES.md
+          gh release edit v2.6.1 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft=false --prerelease=false --latest --title 'NOVA VPN 2.6.1 — библиотека игр и возврат маршрутов' --notes-file docs/GAMING-RELEASE-NOTES.md
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

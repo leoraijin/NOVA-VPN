@@ -38,11 +38,22 @@ try {
   $stamp=[Activator]::CreateInstance($stampType,[object[]]@($library[0],$state.Profiles,$network,$core.ActiveProfileId,$false,$core.Engine,$core.Status,[DateTime]::UtcNow))
   $result=[Activator]::CreateInstance($assembly.GetType('NovaVpn.AutomaticGamingResult'))
   $result.ProfileId=$state.Profiles[0].Id;$result.Message='Fixture recommendation'
+  $result.GameProtocol=$true
+  $direct=[Activator]::CreateInstance($assembly.GetType('NovaVpn.GamingProbeResult'));$direct.ProfileId='direct';$direct.Attempts=10
+  $candidate=[Activator]::CreateInstance($assembly.GetType('NovaVpn.GamingProbeResult'));$candidate.ProfileId=$result.ProfileId;$candidate.Attempts=10
+  1..10 | ForEach-Object {$direct.Samples.Add(80.0);$candidate.Samples.Add(40.0)}
+  $comparison=[Activator]::CreateInstance($assembly.GetType('NovaVpn.GamingRouteComparison'));$comparison.TargetKey='fixture/a2s';$comparison.Direct=$direct;$comparison.Candidate=$candidate
+  $result.Comparisons.Add($comparison)
+
   $type.GetField('gamingAutomaticResult',$flags).SetValue($window,$result)
   $type.GetField('gamingRecommendation',$flags).SetValue($window,$stamp)
   $window.ShowPageForSnapshot('gaming');$window.UpdateLayout()
   $nodes=@(Nodes ($type.GetField('contentHost',$flags).GetValue($window)))
   if(@($nodes | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Играть'}).Count -ne 1){throw 'Valid automatic result did not produce one Play action'}
+  $result.GameProtocol=$false
+  $window.ShowPageForSnapshot('gaming');$window.UpdateLayout()
+  if(@(Nodes ($type.GetField('contentHost',$flags).GetValue($window)) | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Играть'}).Count){throw 'Unverified TCP result retained Play action'}
+  $result.GameProtocol=$true
   $oldServer=$state.Profiles[0].Server;$state.Profiles[0].Server='changed-fixture.invalid'
   $window.ShowPageForSnapshot('gaming');$window.UpdateLayout()
   if(@(Nodes ($type.GetField('contentHost',$flags).GetValue($window)) | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Играть'}).Count){throw 'Changed server retained Play action'}

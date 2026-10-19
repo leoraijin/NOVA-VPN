@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -18,13 +18,23 @@ internal static class AutomaticGamingTests
     static List<GamingProbeResult> Rows(params GamingProbeResult[] rows) => rows.ToList();
     static int Main(string[] args) {
         try {
-            Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 50), Row("b", 47)) }, "a") == "a", "Tiny gain changed current exit");
-            Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 50), Row("b", 35)) }, "a") == "b", "Material stable improvement ignored");
-            Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 50), Row("b", 1, 1)) }, "a") == "a", "One fast reply won");
-            Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 50), Row("b", 30)), Rows(Row("a", 50), Row("b", 30, 1)) }, "a") == "a", "Winner failed another target");
-            Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 100), Row("b", 20)), Rows(Row("a", 50), Row("b", 60)) }, "a") == "a", "Average gain hid worse tail at second server");
-            Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 50, 1), Row("b", 60)) }, "a") == "b", "Unreliable baseline was retained");
-            Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 1, 1)) }, null) == null, "Failed measurement produced a recommendation");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 50), Row("b", 35)) }, "a") == null, "VPN-only comparison authorized a route without direct");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50), Row("b", 47)) }, "a") == "direct", "Noise must retain direct");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50), Row("b", 35)) }, "a") == "b", "Material stable improvement ignored");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50), Row("b", 1, 1)) }, "a") == "direct", "One fast reply won");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50), Row("b", 30)), Rows(Row("direct", 50), Row("b", 30, 1)) }, "a") == "direct", "Winner failed another target");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 100), Row("b", 20)), Rows(Row("direct", 50), Row("b", 60)) }, "a") == "direct", "Average gain hid worse second server");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50, 1), Row("b", 30)) }, "a") == null, "Unreliable direct baseline authorized VPN");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50), Row("b", 50)) }, "a") == "direct", "Equal ping enabled VPN");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 40), Row("b", 50)) }, "b") == "direct", "Slower active VPN beat direct");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 100), Row("active", 30), Row("best", 25)) }, "active") == "best", "Active VPN preference hid minimum median");
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50), Row("b", 20)), Rows(Row("b", 20)) }, "a") == null, "Missing direct on second target accepted");
+            var tail = Row("vpn", 20); tail.Samples[9] = 60;
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50), tail) }, "a") == "direct", "Worse VPN tail accepted");
+            var loss = Row("vpn", 20, 8);
+            Check(AutomaticGamingService.Choose(new[] { Rows(Row("direct", 50), loss) }, "a") == "direct", "Worse VPN loss accepted");
+            var directJson = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(AutomaticGamingService.DirectProfile("Physical-Fixture").PortableOutboundJson);
+            Check((string)directJson["type"] == "direct" && (string)directJson["bind_interface"] == "Physical-Fixture" && !directJson.ContainsKey("detour"), "Direct control was not pinned to a physical exit");
             var endpoints = new List<GameEndpoint>();
             for (int i = 1; i <= 5; i++) endpoints.Add(new GameEndpoint { Address = "203.0.113." + i, Port = 27015, Network = "udp", Bytes = i * 100 });
             endpoints.Add(new GameEndpoint { Address = "203.0.113.10", Port = 443, Network = "tcp", Bytes = 100 });
@@ -40,31 +50,46 @@ internal static class AutomaticGamingTests
             Check(fortnite.Count == 1 && !fortnite[0].GameProtocol, "Fortnite UDP was falsely labelled query-compatible");
             endpoints.Add(endpoints.Last());
             Check(AutomaticGamingService.Targets(new InstalledGame { Name = "Fortnite" }, endpoints).Count == 1, "Duplicate destination measured twice");
+            int measurementCalls = 0;
             var seen = new HashSet<string>(); var verified = new HashSet<string>(); int largestBatch = 0;
             var engine = new AutomaticGamingService((target, profiles, rounds, token) => {
+                measurementCalls++;
                 token.ThrowIfCancellationRequested(); largestBatch = Math.Max(largestBatch, profiles.Count);
                 foreach (var profile in profiles) { seen.Add(profile.Id); if (rounds == 10) verified.Add(profile.Id); }
-                return Task.FromResult(profiles.Select(p => Row(p.Id, p.Id == "p9" ? 10 : 100 + int.Parse(p.Id.Substring(1)))).ToList());
+                return Task.FromResult(profiles.Select(p => Row(p.Id, p.Id == "direct" ? 150 : p.Id == "p9" ? 10 : 100 + int.Parse(p.Id.Substring(1)))).ToList());
             });
             var users = Enumerable.Range(1, 9).Select(i => new VpnProfile { Id = "p" + i, Protocol = "vless" }).ToList();
-            var automatic = engine.SelectAsync(new InstalledGame { Name = "Fortnite" }, endpoints, users, "p1", "unused", "unused", null, CancellationToken.None).GetAwaiter().GetResult();
-            Check(seen.Count == 9 && automatic.ProfileId == "p9", "Best user server beyond first eight was never tested");
-            Check(largestBatch <= 4 && verified.Contains("p9") && verified.Contains("p1"), "Shortlist missed winner or baseline, or spawned unbounded cores");
-            Check(!automatic.GameProtocol && !automatic.KeptCurrent, "Service TCP estimate claimed game-protocol evidence");
+            var automatic = engine.SelectAsync(new InstalledGame { Name = "Rust" }, endpoints, users, "p1", "unused", "unused", null, CancellationToken.None).GetAwaiter().GetResult();
+            Check(seen.Count == 10 && automatic.ProfileId == "p9", "Best user server beyond first eight or mandatory direct was not tested");
+            Check(largestBatch <= 4 && verified.Count == 10 && verified.Contains("p9") && verified.Contains("direct"), "Shortlist missed winner or direct baseline, or spawned unbounded cores");
+            Check(automatic.GameProtocol && automatic.HasVerifiedImprovement && automatic.CanPlay, "Verified query improvement rejected");
+            Check(automatic.Comparisons.All(c => c.Direct.ProfileId == "direct" && c.Candidate.ProfileId == "p9"), "Result lost same-target direct evidence");
+            automatic.ProfileId = "p2"; Check(!automatic.HasVerifiedImprovement && !automatic.CanPlay, "Changed profile inherited another profile's evidence"); automatic.ProfileId = "p9";
+            automatic.GameProtocol = false; Check(!automatic.CanPlay, "TCP result authorized game route"); automatic.GameProtocol = true;
+            automatic.Comparisons[0].Direct.Samples.Clear(); Check(!automatic.CanPlay, "Damaged direct evidence authorized route");
+            int callsBefore = measurementCalls;
+            var unsupported = engine.SelectAsync(new InstalledGame { Name = "Fortnite" }, endpoints, users, "p1", "unused", "unused", null, CancellationToken.None).GetAwaiter().GetResult();
+            Check(unsupported.ProfileId == null && !unsupported.CanPlay && measurementCalls == callsBefore, "Fortnite TCP estimate became an automatic VPN recommendation");
             bool cancelled = false; using (var cts = new CancellationTokenSource()) {
                 cts.Cancel(); try { engine.SelectAsync(new InstalledGame { Name = "Fortnite" }, endpoints, users, null, "unused", "unused", null, cts.Token).GetAwaiter().GetResult(); }
                 catch (OperationCanceledException) { cancelled = true; }
             }
             Check(cancelled, "Cancellation produced an automatic recommendation");
-            bool directSeen = false;
+            bool directSeen = false; int directCalls = 0;
             var directEngine = new AutomaticGamingService((target, profiles, rounds, token) => {
-                directSeen |= profiles.Any(p => p.Id == "direct");
+                directCalls++; directSeen |= profiles.Any(p => p.Id == "direct");
                 return Task.FromResult(profiles.Select(p => Row(p.Id, p.Id == "direct" ? 20 : 40)).ToList());
             });
-            var withoutDirect = directEngine.SelectAsync(new InstalledGame { Name = "Fortnite" }, endpoints, users, null, "unused", "unused", null, CancellationToken.None).GetAwaiter().GetResult();
-            Check(!directSeen && withoutDirect.ProfileId != "direct", "Direct baseline escaped explicit caller policy");
-            var withDirect = directEngine.SelectAsync(new InstalledGame { Name = "Fortnite" }, endpoints, users, null, "unused", "unused", null, CancellationToken.None, true).GetAwaiter().GetResult();
-            Check(directSeen && withDirect.ProfileId == "direct" && withDirect.KeptCurrent, "Ordinary connection was not kept when better");
+            var blocked = directEngine.SelectAsync(new InstalledGame { Name = "Rust" }, endpoints, users, "p1", "unused", "unused", null, CancellationToken.None, false).GetAwaiter().GetResult();
+            Check(!directSeen && directCalls == 0 && blocked.ProfileId == null, "Kill Switch policy bypassed or missing direct allowed recommendation");
+            var withDirect = directEngine.SelectAsync(new InstalledGame { Name = "Rust" }, endpoints, users, "p1", "unused", "unused", null, CancellationToken.None, true).GetAwaiter().GetResult();
+            Check(directSeen && withDirect.ProfileId == "direct" && withDirect.CanPlay && !withDirect.HasVerifiedImprovement, "Direct was not selected when VPN was worse despite an active VPN baseline");
+            Check(withDirect.Message.Contains("Лучше остаться на прямом"), "Slower VPN result lacks direct recommendation");
+            var tcpOnly = directEngine.SelectAsync(new InstalledGame { Name = "Rust" }, endpoints.Where(e => e.Network == "tcp"), users, "p1", "unused", "unused", null, CancellationToken.None).GetAwaiter().GetResult();
+            Check(tcpOnly.ProfileId == null && !tcpOnly.CanPlay, "Rust TCP fallback authorized VPN without game-query evidence");
+            var unavailable = new AutomaticGamingService((target, profiles, rounds, token) => Task.FromResult(profiles.Select(p => Row(p.Id, 10, p.Id == "direct" ? 0 : 10)).ToList()));
+            var noDirect = unavailable.SelectAsync(new InstalledGame { Name = "Rust" }, endpoints, users, null, "unused", "unused", null, CancellationToken.None).GetAwaiter().GetResult();
+            Check(noDirect.ProfileId == null && !noDirect.CanPlay, "VPN-only reachable target authorized route");
             var steam = GameLaunchService.Build(new InstalledGame { Source = "Steam", LaunchUri = "steam://rungameid/252490", InstallDirectory = @"D:\Games" });
             Check(steam.FileName == "steam://rungameid/252490", "Steam game bypassed launcher");
             bool rejected = false;
@@ -89,7 +114,7 @@ internal static class AutomaticGamingTests
             Check(!stamp.IsCurrent(identity, new VpnProfile[0], "network-a", "vpn", false, VpnEngine.SingBox, CoreStatus.Connected, now), "Deleted profile retained recommendation");
             File.WriteAllText(file, "new game version with a different size"); Check(!current(), "Game update retained recommendation");
             File.Delete(file);
-            Console.WriteLine("PASS: " + checks + " automatic selection checks: comparable targets, stable current route, unreliable probes and protocol confidence.");
+            Console.WriteLine("PASS: " + checks + " automatic selection checks: mandatory physical direct baseline, strict improvements, same targets, protocol evidence and activation gates.");
             return 0;
         } catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }

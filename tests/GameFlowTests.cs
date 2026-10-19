@@ -53,7 +53,17 @@ internal static class GameFlowTests
             Console.WriteLine("PASS: normal client connection can start while isolated gaming probes are active.");
             Check((await Request(otherExe, "baseline", core, regular, gaming)).EndsWith("REGULAR"), "Baseline app rule failed before gaming");
             var preference = (GamePreferences)typeof(MainWindow).GetMethod("GetGamePreferences", Private).Invoke(window, new object[] { game.Id }); preference.ProfileId = picked.Id;
+            int baselineOwner = ((Process)Field(core, "process")).Id;
             Set(window, "gamingAutomaticResult", new AutomaticGamingResult { ProfileId = picked.Id });
+            Set(window, "gamingRecommendation", new GamingRecommendationStamp(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, false, core.Engine, core.Status, DateTime.UtcNow));
+            await Call(window, "ApplyGamingAsync");
+            Check(Field(window, "gamingSession") == null && ((Process)Field(core, "process")).Id == baselineOwner, "Unverified TCP recommendation interrupted baseline");
+            Console.WriteLine("PASS: unverified gaming result cannot activate a route or restart the working VPN.");
+            var directEvidence = new GamingProbeResult { ProfileId = "direct", Attempts = 10 };
+            var gameEvidence = new GamingProbeResult { ProfileId = picked.Id, Attempts = 10 };
+            directEvidence.Samples.AddRange(Enumerable.Repeat(80.0, 10)); gameEvidence.Samples.AddRange(Enumerable.Repeat(40.0, 10));
+            Set(window, "gamingAutomaticResult", new AutomaticGamingResult { ProfileId = picked.Id, GameProtocol = true,
+                Comparisons = new List<GamingRouteComparison> { new GamingRouteComparison { TargetKey = "198.18.0.10:18080/a2s", Direct = directEvidence, Candidate = gameEvidence } } });
             Set(window, "gamingRecommendation", new GamingRecommendationStamp(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, false, core.Engine, core.Status, DateTime.UtcNow));
             await Call(window, "ApplyGamingAsync");
             Check(Field(window, "gamingSession") != null && core.Status == CoreStatus.Connected, "Client failed to activate gaming: " + Field(window, "gamingMessage"));
