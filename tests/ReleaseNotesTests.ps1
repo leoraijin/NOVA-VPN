@@ -20,7 +20,7 @@ if ($allNotes[$allNotes.Count - 1].Version.ToString(3) -ne $currentText) {
 $seenCurrent = $getPending.Invoke($null, [object[]]@($currentText, $current))
 if ($seenCurrent.Count -ne 0) { throw 'Release notes should not reappear after the current version was acknowledged.' }
 
-$previous = [Version]::new($current.Major, $current.Minor, $current.Build - 1)
+$previous = if ($allNotes.Count -gt 1) { $allNotes[$allNotes.Count - 2].Version } else { [Version]::new(0, 0, 0) }
 $afterPrevious = $getPending.Invoke($null, [object[]]@($previous.ToString(3), $current))
 if ($afterPrevious.Count -ne 1 -or $afterPrevious[0].Version.ToString(3) -ne $currentText) {
     throw 'Only versions newer than the last-seen release should be shown.'

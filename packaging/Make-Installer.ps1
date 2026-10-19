@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$ZapretArchive = (Join-Path $PSScriptRoot '..\..\zapret-1.10.3.zip'),
     [string]$AppOutput = (Join-Path $PSScriptRoot '..\bin\Release\NOVA VPN.exe'),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\..\outputs'),
@@ -27,11 +27,9 @@ if (-not (Test-Path -LiteralPath $AppOutput -PathType Leaf)) { throw "Не на�
 
 $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $csc -PathType Leaf)) { throw 'Не найден компилятор C# для сборки интерфейса установщика.' }
-$msbuild = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe'
-if (-not (Test-Path -LiteralPath $msbuild -PathType Leaf)) { throw 'Не найден MSBuild Visual Studio Build Tools 2022.' }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$stageRoot = Join-Path $root ("work\single-file-installer-stage\build-$stamp")
+$stageRoot = Join-Path $PSScriptRoot ("..\obj\installer\build-$stamp")
 $payload = Join-Path $stageRoot 'payload'
 $zapretExtract = Join-Path $stageRoot 'zapret-extracted'
 $setupFiles = Join-Path $stageRoot 'setup-files'
@@ -75,6 +73,11 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ASSET-NOTICES.txt') -Destination $payload
 $releaseNotes = @'
+NOVA VPN 2.4.0 — 19 октября 2026
+- Игровой режим: отдельный выход для игры, подбор среди профилей, сравнение с прямым маршрутом по разрешению.
+- TCP CONNECT — оценка; A2S UDP — ответ query-порта. 10 серий, медиана, p95 и доля неотвеченных проб.
+- Маршрут закреплён. Адрес цели вводится вручную. Реальные игры и улучшение пинга не подтверждены.
+
 NOVA VPN 2.3.36 — 17 октября 2026
 - Сдвиг готового содержимого вместо переразмещения всей страницы при каждом кадре прокрутки.
 - Сохранены полосы прокрутки, клавиатура, вложенные списки и переход к полям.
@@ -341,7 +344,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.3.36.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.4.0.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

@@ -346,6 +346,8 @@ public sealed partial class MainWindow : Window
 		}
 		base.Closing += delegate
 		{
+            gamingCancellation?.Cancel();
+            GamingProbeService.StopAll();
 			startupCancellation.Cancel();
 			closing = true;
 			reconnectTimer.Stop();
@@ -438,6 +440,7 @@ public sealed partial class MainWindow : Window
         links.Children.Add(Nav("home", "home", "Главная"));
         links.Children.Add(Nav("servers", "servers", "Серверы"));
         links.Children.Add(Nav("routing", "routing", "Маршруты"));
+        links.Children.Add(Nav("gaming", "servers", "Игровой режим"));
         links.Children.Add(Nav("diagnostics", "diagnostics", "Диагностика"));
         links.Children.Add(Nav("engine", "shield", "VPN-ядро"));
         Grid.SetRow(links,1);root.Children.Add(links);
@@ -764,6 +767,7 @@ public sealed partial class MainWindow : Window
 		{
 			"servers" => BuildServersPage(),
 			"routing" => BuildRoutingPage(),
+            "gaming" => BuildGamingPage(),
 			"diagnostics" => BuildDiagnosticsPage(),
 			"settings" => BuildSettingsPage(),
             "engine" => BuildEnginePage(),
@@ -1289,6 +1293,7 @@ public sealed partial class MainWindow : Window
 
 	private async Task ApplyTrafficModeAsync(string mode)
 	{
+        if (gamingSession != null || gamingCancellation != null) { Toast("Сначала выключите игровой режим или отмените подбор.", Warning); return; }
 		if (zapret.LifecycleState == ZapretLifecycleState.Starting) zapret.StopAndVerify();
 		await trafficModeGate.WaitAsync();
 		try
@@ -1700,7 +1705,13 @@ public sealed partial class MainWindow : Window
 
 	private RoutingSettings EffectiveRouting()
 	{
-		return RoutingOverlayService.Clone(state.Routing);
+        var result = RoutingOverlayService.Clone(state.Routing);
+        if (gamingSession != null && core.Engine == VpnEngine.SingBox) {
+            if (gamingSession.Profile == null && state.KillSwitch)
+                throw new InvalidOperationException("Выключите игровой режим: прямой маршрут запрещён Kill Switch.");
+            result.Gaming = gamingSession;
+        }
+        return result;
 	}
 
 	private async Task SetWindowsStartupAsync(bool connect)
@@ -1879,6 +1890,7 @@ public sealed partial class MainWindow : Window
 
 	private async Task SelectProfileAsync(VpnProfile profile)
 	{
+        if (gamingSession != null || gamingCancellation != null) { Toast("Сначала выключите игровой режим или отмените подбор.", Warning); return; }
 		startupCancellation.Cancel();
 		if (profile == null || closing) return;
 		if (profileSwitchInProgress)
@@ -2294,6 +2306,7 @@ public sealed partial class MainWindow : Window
 
 	private UIElement BuildRoutingPage()
 	{
+        if (gamingSession != null) return PageHeader("Маршруты закреплены", "Выключите игровой режим перед изменением правил.", null, null);
 		Grid grid = new Grid();
 		grid.RowDefinitions.Add(new RowDefinition
 		{
@@ -3202,6 +3215,7 @@ public sealed partial class MainWindow : Window
     private UIElement BuildEnginePage()
     {
         var body = new StackPanel();
+        if (gamingSession != null || gamingCancellation != null) return PageHeader("Игровой режим", "Сначала выключите игровой режим или отмените подбор.", null, null);
         body.Children.Add(PageHeader("VPN-ядро", "Выберите движок подключения", null, null));
         var hint = T("Выбор сохраняется для следующих подключений. Менять ядро можно после отключения VPN.",14,Muted);
         hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0,18,0,20); body.Children.Add(hint);
@@ -3305,6 +3319,7 @@ public sealed partial class MainWindow : Window
 		}));
 		stackPanel.Children.Add(SettingCard("Kill Switch", "Строгая маршрутизация и восстановление туннеля при обрыве", state.KillSwitch, delegate
 		{
+            if (gamingSession != null || gamingCancellation != null) { Toast("Сначала выключите игровой режим или отмените подбор.", Warning); return; }
 			state.KillSwitch = !state.KillSwitch;
 			if (state.KillSwitch)
 			{
@@ -3784,6 +3799,7 @@ public sealed partial class MainWindow : Window
 
 	private async Task ToggleConnectionAsync()
 	{
+        if (gamingCancellation != null) { Toast("Отмените игровую проверку перед подключением.", Warning); return; }
 		startupCancellation.Cancel();
 		if (profileSwitchInProgress)
 		{
@@ -3955,7 +3971,7 @@ public sealed partial class MainWindow : Window
 					failed.LastTestMessage = core.LastError;
 				}
 				RecordHistory("Обрыв", core.LastError);
-				if (state.AutoSelectBestServer)
+				if (state.AutoSelectBestServer && gamingSession == null)
 				{
 					VpnProfile alternative = HealthCheckService.BestAvailable(state.Profiles.Where(p => p != failed));
 					if (alternative != null)

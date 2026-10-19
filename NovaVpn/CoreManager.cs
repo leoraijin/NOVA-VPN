@@ -71,6 +71,7 @@ public sealed class CoreManager : IDisposable
 
 	public async Task StartAsync(VpnProfile profile, RoutingSettings routing)
 	{
+        if (GamingProbeService.IsScanning) throw new InvalidOperationException("Дождитесь завершения игровой проверки или отмените её.");
 		if (Status != CoreStatus.Connected && Status != CoreStatus.Connecting)
 		{
 			if (!IsCoreInstalled)

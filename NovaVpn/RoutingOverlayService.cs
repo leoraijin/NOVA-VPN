@@ -25,6 +25,7 @@ public static class RoutingOverlayService
 		if (source == null) return new RoutingSettings();
 		return new RoutingSettings
 		{
+            Gaming = source.Gaming,
 			Mode = source.Mode,
 			DefaultRoute = source.DefaultRoute,
 			BypassLan = source.BypassLan,
