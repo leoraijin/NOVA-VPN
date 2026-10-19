@@ -9,6 +9,7 @@ internal static class GameTrafficFixture
         try {
             using (var socket = new TcpClient()) {
                 socket.ReceiveTimeout = 5000; socket.SendTimeout = 5000; socket.Connect(args[0], int.Parse(args[1]));
+                Console.Error.WriteLine("Fixture PID=" + System.Diagnostics.Process.GetCurrentProcess().Id + "; image=" + System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName + "; source=" + socket.Client.LocalEndPoint);
                 var stream = socket.GetStream(); byte[] request = Encoding.ASCII.GetBytes("GET / HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n"); stream.Write(request, 0, request.Length);
                 // HTTP completion is Content-Length, not transport EOF. A TUN relay may keep
                 // a half-closed TCP connection alive after the entire response arrived.

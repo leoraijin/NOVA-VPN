@@ -57,6 +57,10 @@ internal static class GameFlowTests
             Set(window, "gamingRecommendation", new GamingRecommendationStamp(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, false, core.Engine, core.Status, DateTime.UtcNow));
             await Call(window, "ApplyGamingAsync");
             Check(Field(window, "gamingSession") != null && core.Status == CoreStatus.Connected, "Client failed to activate gaming: " + Field(window, "gamingMessage"));
+            Check(core.LastConnectedRouting.Gaming != null && core.LastConnectedRouting.Gaming.Profile?.Id == picked.Id, "Active core snapshot lost the game overlay");
+            string activeConfig = File.ReadAllText((string)Field(core, "configPath"));
+            var activeJson = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(activeConfig);
+            Console.WriteLine("FLOW ACTIVE ROUTE: " + new JavaScriptSerializer().Serialize(activeJson["route"]));
             Check((await Request(gameExe, "gaming", core, regular, gaming)).EndsWith("GAME"), "Client game traffic did not use selected config");
             Check((await Request(otherExe, "ordinary-during-game", core, regular, gaming)).EndsWith("REGULAR"), "Client changed ordinary application route");
             state.Routing.ProxyDomains.Add("edited-during-session.invalid"); state.Routing.ProxyProcessPaths.Add(gameExe);
