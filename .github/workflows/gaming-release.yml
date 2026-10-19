@@ -68,10 +68,29 @@ jobs:
           Get-ChildItem outputs -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Set-Content outputs/SHA256SUMS.txt -Encoding ascii
+          # Publish the dot-separated installer name used by the existing updater.
+          Move-Item -LiteralPath 'outputs/NOVA VPN Setup 2.4.0.exe' -Destination 'work/NOVA VPN Setup 2.4.0.exe'
+          Get-ChildItem outputs -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content outputs/SHA256SUMS.txt -Encoding ascii
       - name: Publish prerelease after all checks
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v2.4.0-beta.1 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --prerelease --title 'NOVA VPN 2.4.0 beta 1 — игровой режим' --notes-file docs/GAMING-RELEASE-NOTES.md outputs/*
+          gh release view v2.4.0-beta.1 --repo leoraijin/NOVA-VPN --json id 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create v2.4.0-beta.1 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft --prerelease --title 'NOVA VPN 2.4.0 beta 1 — игровой режим' --notes-file docs/GAMING-RELEASE-NOTES.md
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }
+          }
+          foreach ($asset in Get-ChildItem outputs -File) {
+            $uploaded = $false
+            for ($attempt = 0; $attempt -lt 3; $attempt++) {
+              gh release upload v2.4.0-beta.1 --repo leoraijin/NOVA-VPN --clobber $asset.FullName
+              if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
+              Start-Sleep -Seconds 3
+            }
+            if (!$uploaded) { throw "Asset upload failed: $($asset.Name)" }
+          }
+          gh release edit v2.4.0-beta.1 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft=false --prerelease --title 'NOVA VPN 2.4.0 beta 1 — игровой режим' --notes-file docs/GAMING-RELEASE-NOTES.md
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
