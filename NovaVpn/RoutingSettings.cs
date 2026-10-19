@@ -6,6 +6,8 @@ namespace NovaVpn;
 [DataContract]
 public sealed class RoutingSettings
 {
+    // Session-only overlay. Never persisted into personal routing settings.
+    public GamingRoute Gaming;
 	[DataMember]
 	public string Mode = "Smart";
 

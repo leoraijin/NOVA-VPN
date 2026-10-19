@@ -63,6 +63,9 @@
     <Compile Include="NovaVpn\DragRouteSwitch.cs" />
     <Compile Include="NovaVpn\ReleaseNotesService.cs" />
     <Compile Include="NovaVpn\ConfigBuilder.cs" />
+    <Compile Include="NovaVpn\GamingModels.cs" />
+    <Compile Include="NovaVpn\GamingProbeService.cs" />
+    <Compile Include="NovaVpn\GamingPage.cs" />
 	<Compile Include="NovaVpn\ServerMapHealthService.cs" />
 	<Compile Include="NovaVpn\InteractiveServerMap.cs" />
 	<Compile Include="NovaVpn\ServerMapViewport.cs" />

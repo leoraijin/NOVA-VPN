@@ -29,6 +29,7 @@ public static class ConfigBuilder
 		}
 		if (profile.Protocol == "sing-box")
 		{
+            if (routing.Gaming != null) throw new NotSupportedException("Игровой режим требует обычный профиль вместо полной sing-box конфигурации.");
 			if (string.IsNullOrWhiteSpace(profile.RawJson))
 			{
 				throw new InvalidOperationException("Пустая sing-box конфигурация.");
@@ -97,7 +98,7 @@ public static class ConfigBuilder
 		dictionary["route"] = Obj("rules", list2.ToArray(), "final", text, "auto_detect_interface", true, "default_domain_resolver", "local-dns");
 		JavaScriptSerializer javaScriptSerializer = new JavaScriptSerializer();
 		javaScriptSerializer.MaxJsonLength = int.MaxValue;
-		return PrettyJson(StrictDirectRouting.Apply(javaScriptSerializer.Serialize(dictionary), routing));
+		return PrettyJson(GamingRouting.Apply(StrictDirectRouting.Apply(javaScriptSerializer.Serialize(dictionary), routing), routing.Gaming));
 	}
 
 	private static Dictionary<string, object> BuildDnsServer(RoutingSettings routing)
