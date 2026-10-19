@@ -86,6 +86,13 @@ jobs:
           Get-ChildItem outputs -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Set-Content outputs/SHA256SUMS.txt -Encoding ascii
+      - name: Save verified packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-VPN-Windows-2.6.0-verified
+          path: outputs/*
+          retention-days: 14
+          if-no-files-found: error
       - name: Publish release after all checks
         if: github.event_name == 'workflow_dispatch' && inputs.publish
         shell: pwsh
