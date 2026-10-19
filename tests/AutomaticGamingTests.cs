@@ -69,7 +69,7 @@ internal static class AutomaticGamingTests
             automatic.Comparisons[0].Direct.Samples.Clear(); Check(!automatic.CanPlay, "Damaged direct evidence authorized route");
             int callsBefore = measurementCalls;
             var unsupported = engine.SelectAsync(new InstalledGame { Name = "Fortnite" }, endpoints, users, "p1", "unused", "unused", null, CancellationToken.None).GetAwaiter().GetResult();
-            Check(unsupported.ProfileId == null && !unsupported.CanPlay && measurementCalls == callsBefore, "Fortnite TCP estimate became an automatic VPN recommendation");
+            Check(unsupported.ProfileId == "direct" && unsupported.CanPlay && !unsupported.HasVerifiedImprovement && measurementCalls == callsBefore, "Fortnite TCP estimate became an automatic VPN recommendation");
             bool cancelled = false; using (var cts = new CancellationTokenSource()) {
                 cts.Cancel(); try { engine.SelectAsync(new InstalledGame { Name = "Fortnite" }, endpoints, users, null, "unused", "unused", null, cts.Token).GetAwaiter().GetResult(); }
                 catch (OperationCanceledException) { cancelled = true; }

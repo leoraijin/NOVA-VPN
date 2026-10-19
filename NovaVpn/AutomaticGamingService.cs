@@ -35,8 +35,8 @@ public sealed class AutomaticGamingResult
         Comparisons.Count > 0 && Comparisons.All(c => c != null && !string.IsNullOrEmpty(c.TargetKey) &&
             c.Direct?.ProfileId == "direct" && c.Candidate?.ProfileId == ProfileId) &&
         AutomaticGamingService.BeatsDirect(Comparisons.Select(c => c.Direct).ToList(), Comparisons.Select(c => c.Candidate).ToList());
-    public bool CanPlay => HasVerifiedImprovement || (ProfileId == "direct" && GameProtocol && Comparisons.Count > 0 &&
-        Comparisons.All(c => c != null && !string.IsNullOrEmpty(c.TargetKey) && c.Direct?.ProfileId == "direct" && c.Direct.Reliable && c.Candidate?.ProfileId == "direct" && c.Candidate.Reliable));
+    // An explicit direct launch needs no claim of a VPN improvement. Only VPN needs evidence.
+    public bool CanPlay => ProfileId == "direct" || HasVerifiedImprovement;
     public string ResponseLabel {
         get {
             if (!GameProtocol || Comparisons.Count == 0) return "Игровая задержка не подтверждена. TCP и пинг до VPN не используются для включения маршрута.";
@@ -60,8 +60,9 @@ public sealed class AutomaticGamingService
     public static List<AutomaticGameTarget> Targets(InstalledGame game, IEnumerable<GameEndpoint> observed) => GameAdapter.Targets(game, observed);
     public static bool SupportsGameQuery(InstalledGame game) => GameAdapter.Kind(game) == GameAdapterKind.Rust || GameAdapter.Kind(game) == GameAdapterKind.Source;
     public static AutomaticGamingResult Unsupported(InstalledGame game) => new AutomaticGamingResult {
+        ProfileId = "direct",
         Message = "Не удалось подтвердить меньшую игровую задержку для «" + game.Name + "». " +
-            "TCP-соединения и пинг до дата-центра не доказывают выигрыш в матче. Игровой VPN не включён; текущая маршрутизация сохранена."
+            "TCP-соединения и пинг до дата-центра не доказывают выигрыш в матче. Игровой VPN не выбран. Нажмите «Играть напрямую», чтобы исключить игру из обычного VPN."
     };
 
     // A physical-network baseline must never reuse the active VPN or an imported detour.

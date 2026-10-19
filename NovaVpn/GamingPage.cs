@@ -161,7 +161,13 @@ public sealed partial class MainWindow
         InvalidateGamingResults(); GamingOptions.ProfileId = null;
         try {
             if (state.KillSwitch) throw new InvalidOperationException("Kill Switch запрещает прямое сравнение. Игровой VPN без него не включается.");
-            if (!AutomaticGamingService.SupportsGameQuery(game)) { gamingAutomaticResult = AutomaticGamingService.Unsupported(game); gamingMessage = gamingAutomaticResult.Message; return; }
+            if (!AutomaticGamingService.SupportsGameQuery(game)) {
+                gamingAutomaticResult = AutomaticGamingService.Unsupported(game); gamingMessage = gamingAutomaticResult.Message;
+                GamingOptions.ProfileId = "direct"; GamingOptions.AllowDirect = true;
+                gamingNetwork = GameCatalog.NetworkKey();
+                gamingRecommendation = new GamingRecommendationStamp(game, state.Profiles, gamingNetwork, core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
+                SaveGameOptions(); return;
+            }
             if (!game.Executables.Any(File.Exists)) throw new InvalidOperationException("Файлы игры не найдены. Обновите библиотеку после установки игры.");
             if (!File.Exists(core.ProbeCorePath)) throw new InvalidOperationException("Не найден компонент проверки серверов. Переустановите NOVA.");
             var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
@@ -238,11 +244,8 @@ public sealed partial class MainWindow
         if (!IsGamingRecommendationCurrent(gamingSelected)) { await PickGamingAutomaticallyAsync(); return; }
         var game = gamingSelected;
         if (game.IsRunning) { gamingMessage = "Маршрут готов. Завершите текущий сеанс игры и нажмите «Играть»: NOVA не меняет выход во время матча."; Navigate("gaming"); return; }
-        bool unchanged = gamingAutomaticResult.ProfileId == "direct" && core.Status == CoreStatus.Disconnected && !state.KillSwitch;
-        if (!unchanged) {
-            await ApplyGamingAsync();
-            if (gamingSession?.GameId != game.Id) return;
-        }
+        await ApplyGamingAsync();
+        if (gamingSession?.GameId != game.Id) return;
         try {
             GameLaunchService.Start(game);
         } catch (Exception ex) {
@@ -268,7 +271,7 @@ public sealed partial class MainWindow
             if (pref.ProfileId == null || (pref.ProfileId != "direct" && chosen == null)) throw new InvalidOperationException("Выберите конфиг для игры.");
             if (chosen == null && (!pref.AllowDirect || state.KillSwitch)) throw new InvalidOperationException("Прямой игровой выход запрещён.");
             if (!IsGamingRecommendationCurrent(gamingSelected)) throw new InvalidOperationException("Результат устарел. Нажмите «Подобрать конфиг» ещё раз.");
-            bool connected = core.Status == CoreStatus.Connected; var basis = state.Profiles.FirstOrDefault(p => p.Id == core.ActiveProfileId) ?? SelectedProfile() ?? chosen;
+            bool connected = core.Status == CoreStatus.Connected; var basis = state.Profiles.FirstOrDefault(p => p.Id == core.ActiveProfileId) ?? SelectedProfile() ?? chosen ?? (pref.ProfileId == "direct" ? new VpnProfile { Id = "direct-game-session", Protocol = "direct", PortableOutboundJson = "{\"type\":\"direct\",\"tag\":\"proxy\"}" } : null);
             if (basis == null || basis.Protocol == "sing-box") throw new InvalidOperationException("Выберите обычный профиль NOVA.");
             var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
             var route = new GamingRoute { GameId = gamingSelected.Id, Game = gamingSelected.Name, ExecutablePaths = paths, Processes = paths.Select(Path.GetFileName).ToArray(), GameOnly = !connected, Profile = chosen == null ? null : serializer.Deserialize<VpnProfile>(serializer.Serialize(chosen)) };

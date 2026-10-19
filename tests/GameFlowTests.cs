@@ -81,6 +81,22 @@ internal static class GameFlowTests
             Check((await Request(otherExe, "ordinary-restored", core, regular, gaming)).EndsWith("REGULAR"), "Ordinary app failed after client session stop");
             var manager = (GamingSessionManager)Field(window, "gamingSessions"); Check(manager.Phase == GamingSessionPhase.Idle, "Client journal was not finished");
             Console.WriteLine("PASS: actual MainWindow/CoreManager lifecycle with real Windows TUN: game-only override, other app preserved, normal VPN restored and latest user edits applied.");
+            preference.ProfileId = "direct"; preference.AllowDirect = true;
+            Set(window, "gamingAutomaticResult", new AutomaticGamingResult { ProfileId = "direct", Message = "Explicit direct fallback" });
+            Set(window, "gamingRecommendation", new GamingRecommendationStamp(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, false, core.Engine, core.Status, DateTime.UtcNow));
+            await Call(window, "ApplyGamingAsync");
+            Check(Field(window, "gamingSession") != null && core.LastConnectedRouting.Gaming.Profile == null, "Explicit direct fallback failed to activate");
+            var directConfig = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText((string)Field(core, "configPath")));
+            var directRoute = (Dictionary<string, object>)directConfig["route"];
+            var directRules = ((object[])directRoute["rules"]).OfType<Dictionary<string, object>>().Where(row => row.ContainsKey("process_path") && ((object[])row["process_path"]).Cast<string>().Contains(gameExe)).ToList();
+            Check(directRules.Count > 0 && (string)directRules[0]["outbound"] == "direct", "Ordinary game VPN rule defeated explicit direct fallback");
+            Check((await Request(otherExe, "ordinary-during-direct-game", core, regular, gaming)).EndsWith("REGULAR"), "Direct fallback changed another application's route");
+            await Call(window, "StopGamingAsync", "Direct fixture finished.");
+            Check((await Request(gameExe, "game-after-direct-session", core, regular, gaming)).EndsWith("REGULAR"), "Direct fallback did not restore ordinary game VPN rule");
+            Console.WriteLine("PASS: explicit direct game fallback overrides ordinary VPN rule, preserves other app and restores normal policy.");
+            preference.ProfileId = picked.Id; preference.AllowDirect = false;
+            Set(window, "gamingAutomaticResult", new AutomaticGamingResult { ProfileId = picked.Id, GameProtocol = true,
+                Comparisons = new List<GamingRouteComparison> { new GamingRouteComparison { TargetKey = "198.18.0.10:18080/a2s", Direct = directEvidence, Candidate = gameEvidence } } });
             // A bad route must be rejected before the working baseline process is stopped.
             picked.PortableOutboundJson = "{\"type\":\"unsupported-fixture-outbound\"}";
             Set(window, "gamingRecommendation", new GamingRecommendationStamp(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, false, core.Engine, core.Status, DateTime.UtcNow));
