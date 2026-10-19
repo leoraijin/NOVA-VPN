@@ -93,7 +93,7 @@ internal static class GameLibraryTests
     }
     public static int Main(string[] args)
     {
-        try { Directory.CreateDirectory(args[0]); Discovery(args[0]); Policy(args[0]); Monitor(); Console.WriteLine("PASS: " + count + " library, exact-route, edits-preserved, journal-recovery and endpoint-identity checks."); return 0; }
+        try { string work = Path.GetFullPath(args[0]); Directory.CreateDirectory(work); Discovery(work); Policy(work); Monitor(); Console.WriteLine("PASS: " + count + " library, exact-route, edits-preserved, journal-recovery and endpoint-identity checks."); return 0; }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }
 }

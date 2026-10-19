@@ -39,8 +39,8 @@ jobs:
           & $msbuild 'NOVA VPN.csproj' /t:Rebuild /p:Configuration=Release /v:minimal /nologo
           if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
           $csc = Join-Path (Split-Path $msbuild) 'Roslyn\csc.exe'
-          ./tests/Run-GamingTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath work/gaming-tests -CscPath $csc
-          ./tests/Run-GameLibraryTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath work/game-library-tests -CscPath $csc
+          ./tests/Run-GamingTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/gaming-tests) -CscPath $csc
+          ./tests/Run-GameLibraryTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/game-library-tests) -CscPath $csc
           powershell -NoProfile -STA -File tests/GamingUiTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Gaming UI tests failed' }
           powershell -NoProfile -STA -File tests/SmoothScrollIntegrationTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
