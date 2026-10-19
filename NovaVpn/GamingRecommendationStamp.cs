@@ -37,7 +37,7 @@ public sealed class GamingRecommendationStamp
             configuration.Add(serializer.Serialize(fields.OrderBy(p => p.Key, StringComparer.Ordinal).ToDictionary(p => p.Key, p => p.Value)));
         }
         var files = new List<string>();
-        foreach (string path in game.Executables.OrderBy(p => p, StringComparer.OrdinalIgnoreCase)) {
+        foreach (string path in game.Executables.Where(p => !string.IsNullOrWhiteSpace(p)).OrderBy(p => p, StringComparer.OrdinalIgnoreCase)) {
             try { var file = new FileInfo(path); files.Add(Path.GetFullPath(path).ToLowerInvariant() + ":" + (file.Exists ? file.Length + ":" + file.LastWriteTimeUtc.Ticks : "missing")); }
             catch (IOException) { files.Add(path + ":unavailable"); }
             catch (UnauthorizedAccessException) { files.Add(path + ":denied"); }

@@ -271,7 +271,7 @@ public sealed partial class MainWindow : Window
 		base.Title = "NOVA VPN";
 		// Explicit window icon is also used when Windows pins a running WPF window.
 		// Do not depend on the shell extracting it from a custom-chrome window.
-		base.Icon = BitmapDecoder.Create(new Uri("pack://application:,,,/Assets/nova-desktop-v3.ico", UriKind.Absolute), BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames.OrderByDescending(frame => frame.PixelWidth).First();
+		base.Icon = BitmapDecoder.Create(new Uri("pack://application:,,,/" + typeof(MainWindow).Assembly.GetName().Name + ";component/Assets/nova-desktop-v3.ico", UriKind.Absolute), BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames.OrderByDescending(frame => frame.PixelWidth).First();
 		base.Width = Math.Min(1180.0, SystemParameters.WorkArea.Width);
 		base.Height = Math.Min(760.0, SystemParameters.WorkArea.Height);
 		base.MinWidth = Math.Min(680.0, SystemParameters.WorkArea.Width);

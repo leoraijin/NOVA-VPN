@@ -77,7 +77,8 @@ public sealed class CoreManager : IDisposable
 
 	public async Task StartAsync(VpnProfile profile, RoutingSettings routing)
 	{
-        if (GamingProbeService.IsScanning) throw new InvalidOperationException("Дождитесь завершения игровой проверки или отмените её.");
+        // Gaming probes own separate SOCKS-only cores and private configs. They must not
+        // prevent the normal VPN from reconnecting after an unrelated network outage.
 		if (Status != CoreStatus.Connected && Status != CoreStatus.Connecting)
 		{
 			if (!IsCoreInstalled)

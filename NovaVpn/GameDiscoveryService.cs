@@ -29,7 +29,7 @@ public sealed class InstalledGame
     public bool IsRunning => RunningPaths().Any();
     public IEnumerable<string> RunningPaths()
     {
-        var allowed = new HashSet<string>(Executables ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+        var allowed = new HashSet<string>((Executables ?? new List<string>()).Where(p => !string.IsNullOrWhiteSpace(p)), StringComparer.OrdinalIgnoreCase);
         foreach (var process in Process.GetProcesses()) using (process) {
             string path = null;
             try { path = GameProcessIdentity.ImagePath(process.Id); } catch (System.ComponentModel.Win32Exception) { } catch (InvalidOperationException) { }

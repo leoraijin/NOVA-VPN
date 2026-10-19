@@ -40,7 +40,13 @@ internal static class GameFlowTests
             state.Profiles.Add(basis); state.Profiles.Add(picked); state.SelectedProfileId = basis.Id;
             state.Routing = new RoutingSettings { Mode = "Direct", DnsMode = "System", EnableSniffing = false, BypassLan = false };
             state.Routing.ProxyProcessPaths.Add(otherExe);
-            await core.StartAsync(basis, state.Routing);
+            var probeProfile = new VpnProfile { Id = "probe", Protocol = "vless", PortableOutboundJson = new JavaScriptSerializer().Serialize(new { type = "direct", tag = "proxy", bind_interface = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces().First(n => n.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback).Name }) };
+            using (var cancellation = new System.Threading.CancellationTokenSource()) {
+                var scan = new GamingProbeService().ScanAsync(new GamingTarget { Host = "127.0.0.1", Port = regular.Port }, new[] { probeProfile }, corePath, Path.Combine(work, "flow-probe"), false, null, cancellation.Token, 20);
+                try { await core.StartAsync(basis, state.Routing); await scan; }
+                finally { cancellation.Cancel(); try { await scan; } catch (OperationCanceledException) { } }
+            }
+            Console.WriteLine("PASS: normal client connection can start while isolated gaming probes are active.");
             Check((await Request(otherExe)).EndsWith("REGULAR"), "Baseline app rule failed before gaming");
             var preference = (GamePreferences)typeof(MainWindow).GetMethod("GetGamePreferences", Private).Invoke(window, new object[] { game.Id }); preference.ProfileId = picked.Id;
             Set(window, "gamingAutomaticResult", new AutomaticGamingResult { ProfileId = picked.Id });
@@ -70,7 +76,6 @@ internal static class GameFlowTests
     {
         if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true") { Console.WriteLine("SKIP: real client lifecycle TUN test runs only in isolated GitHub Windows VM."); return 0; }
         int result = 1; var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        Application.ResourceAssembly = typeof(MainWindow).Assembly;
         application.Dispatcher.BeginInvoke((Action)(async () => {
             try { await Run(args[0], args[1]); result = 0; }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
