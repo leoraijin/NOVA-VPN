@@ -74,6 +74,7 @@ jobs:
           Steam/Epic/Riot manifests, temporary routing, preserved user edits and journal recovery: PASS.
           Abrupt owner-process termination killed owned host/core/descendant while unrelated process survived: PASS.
           Real Windows TUN: distinct game/ordinary outbounds and return to ordinary route after overlay removal: PASS.
+          Actual MainWindow/CoreManager lifecycle, latest ordinary rules and invalid-config rejection without stopping baseline: PASS.
           Installer orphan-core path isolation and locked-file preflight regression: PASS.
           Synthetic loopback fixtures only. Real matches, providers, anti-cheat compatibility and ping improvements are NOT verified.
           Existing sing-box 1.13.14, Reality and Zapret runtime payload reused from checksum-pinned public 2.3.36; no core rebuild.

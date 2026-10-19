@@ -78,7 +78,12 @@ fixture was corrected to consume Content-Length rather than transport EOF. A loo
 regression fails with the original reader and passes with the corrected one; truncated
 bodies are rejected. The SOCKS fixture now uses async IO and remains responsive under
 48 idle clients. Flow logs identify each phase, core state and fixture counters.
-The corrected GameFlow has NOT yet passed the required isolated Windows CI. Local
+The corrected GameFlow passed isolated Windows CI 39251652790 on 81bbf6f:
+game and ordinary routes, updated-rule restoration, and invalid-config rejection
+without stopping the baseline core all succeeded. A second defect was premature
+Connected after TUN recreation; Windows preferred-address readiness plus an exact
+process-path loopback nonce probe now gate Connected. A miss is rejected before
+any external route, and normal user traffic never uses the probe tuple. Local
 IPv6 loopback fails with AccessDenied/10013, so it is explicitly skipped locally after
 a failed control connection, but remains mandatory in CI. No local network policy is changed.
 Version/installer metadata now target 2.6.0. Publication is explicit workflow_dispatch
