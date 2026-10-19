@@ -89,6 +89,8 @@ public sealed class CoreManager : IDisposable
 			}
 			string preparedConfig = BuildConfig(profile, routing);
 			Stop();
+            using (var routeReadiness = Engine == VpnEngine.SingBox && profile.Protocol != "sing-box" ? new TunnelRoutingReadiness() : null) {
+            if (routeReadiness != null) preparedConfig = routeReadiness.Apply(preparedConfig, routing.EnableIpv6);
             gameMonitor = Engine == VpnEngine.SingBox && profile.Protocol != "sing-box" ? new GameConnectionMonitor() : null;
             if (gameMonitor != null) preparedConfig = gameMonitor.Apply(preparedConfig);
 			int generation = System.Threading.Volatile.Read(ref startGeneration);
@@ -168,7 +170,10 @@ public sealed class CoreManager : IDisposable
             // the recreated TUN address. Starting a game during address detection can
             // bypass process_path matching because the core still sees a non-local source.
             if (Engine == VpnEngine.SingBox && profile.Protocol != "sing-box") {
-                try { if (!await WaitForWindowsTunnelAsync(generation, routing.EnableIpv6)) return; }
+                try {
+                    if (!await WaitForWindowsTunnelAsync(generation, routing.EnableIpv6)) return;
+                    if (!await routeReadiness.WaitAsync(() => generation == System.Threading.Volatile.Read(ref startGeneration) && !stopping && process != null && !process.HasExited, routing.EnableIpv6)) return;
+                }
                 catch (Exception ex) {
                     Stop(); LastError = ex.Message; ChangeStatus(CoreStatus.Error, LastError); throw;
                 }
@@ -178,6 +183,7 @@ public sealed class CoreManager : IDisposable
 			connectedProfile = profile;
 			ChangeStatus(CoreStatus.Connected, "Защищено");
 			InitialVerification = VerifyConnectionAsync();
+            }
 		}
 	}
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -79,6 +79,32 @@ public static class GamingTests
         File.Delete(path);
     }
 
+
+    static void Readiness(string core, string work)
+    {
+        var type = typeof(CoreManager).Assembly.GetType("NovaVpn.TunnelRoutingReadiness", true);
+        foreach (bool ipv6 in new[] { false, true }) using (var ready = (IDisposable)Activator.CreateInstance(type, true)) {
+            string original = ConfigBuilder.Build(FakeProfile(), new RoutingSettings { EnableIpv6 = ipv6 });
+            string json = (string)type.GetMethod("Apply").Invoke(ready, new object[] { original, ipv6 });
+            var config = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
+            var route = (Dictionary<string, object>)config["route"];
+            var rules = ((System.Collections.IEnumerable)route["rules"]).Cast<Dictionary<string, object>>().ToArray();
+            var paths = ((System.Collections.IEnumerable)rules[0]["process_path"]).Cast<string>().ToArray();
+            using (var process = System.Diagnostics.Process.GetCurrentProcess())
+                Check(paths.Length == 1 && paths[0] == process.MainModule.FileName, "Readiness route broadened beyond current image");
+            Check((string)rules[0]["override_address"] == "127.0.0.1" && (string)rules[1]["action"] == "reject", "Readiness can escape to external destination");
+            Check(new JavaScriptSerializer().Serialize(rules[0]["ip_cidr"]) == new JavaScriptSerializer().Serialize(rules[1]["ip_cidr"]) &&
+                new JavaScriptSerializer().Serialize(rules[0]["port"]) == new JavaScriptSerializer().Serialize(rules[1]["port"]), "Miss rejection does not cover the exact probe tuple");
+            var direct = ((System.Collections.IEnumerable)config["outbounds"]).Cast<Dictionary<string, object>>().Single(o => Equals(o["tag"], "nova-route-readiness"));
+            Check((string)direct["type"] == "direct" && direct.ContainsKey("bind_interface") && !direct.ContainsKey("detour"), "Readiness reused user's VPN/detour");
+            string path = Path.Combine(work, "readiness-check.json"); File.WriteAllText(path, json, new UTF8Encoding(false));
+            using (var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(core, "check -c " + AppUpdateService.QuoteWindowsArgument(path)) {UseShellExecute=false,CreateNoWindow=true})) {
+                process.WaitForExit(); Check(process.ExitCode == 0, "sing-box rejected readiness routing");
+            }
+            File.Delete(path);
+        }
+    }
+
     static async Task Probes(string core, string work)
     {
         using (var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0)))
@@ -151,7 +177,7 @@ public static class GamingTests
     public static int Main(string[] args)
     {
         try {
-            Directory.CreateDirectory(args[1]); Selector(); Routing(args[0], args[1]); Probes(args[0], args[1]).GetAwaiter().GetResult();
+            Directory.CreateDirectory(args[1]); Selector(); Routing(args[0], args[1]); Readiness(args[0], args[1]); Probes(args[0], args[1]).GetAwaiter().GetResult();
             Console.WriteLine("PASS: " + assertions + " assertions; route priority, real sing-box validation, authenticated SOCKS TCP/UDP, A2S challenge, cancellation and cleanup. Synthetic loopback only; no live-game claim."); return 0;
         } catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }

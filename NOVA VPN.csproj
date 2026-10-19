@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -87,6 +87,7 @@
     <Compile Include="NovaVpn\VpnEngine.cs" />
     <Compile Include="NovaVpn\RealityConfigBuilder.cs" />
     <Compile Include="NovaVpn\CoreManager.cs" />
+    <Compile Include="NovaVpn\TunnelRoutingReadiness.cs" />
     <Compile Include="NovaVpn\CoreStatus.cs" />
     <Compile Include="NovaVpn\DiagnosticItem.cs" />
     <Compile Include="NovaVpn\DiagnosticReport.cs" />
