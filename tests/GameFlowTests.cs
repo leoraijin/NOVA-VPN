@@ -88,7 +88,7 @@ internal static class GameFlowTests
             Check(Field(window, "gamingSession") != null && core.LastConnectedRouting.Gaming.Profile == null, "Explicit direct fallback failed to activate");
             var directConfig = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText((string)Field(core, "configPath")));
             var directRoute = (Dictionary<string, object>)directConfig["route"];
-            var directRules = ((object[])directRoute["rules"]).OfType<Dictionary<string, object>>().Where(row => row.ContainsKey("process_path") && ((object[])row["process_path"]).Cast<string>().Contains(gameExe)).ToList();
+            var directRules = ((System.Collections.IEnumerable)directRoute["rules"]).Cast<object>().OfType<Dictionary<string, object>>().Where(row => row.ContainsKey("process_path") && ((System.Collections.IEnumerable)row["process_path"]).Cast<string>().Contains(gameExe)).ToList();
             Check(directRules.Count > 0 && (string)directRules[0]["outbound"] == "direct", "Ordinary game VPN rule defeated explicit direct fallback");
             Check((await Request(otherExe, "ordinary-during-direct-game", core, regular, gaming)).EndsWith("REGULAR"), "Direct fallback changed another application's route");
             await Call(window, "StopGamingAsync", "Direct fixture finished.");
