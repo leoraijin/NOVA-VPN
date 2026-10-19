@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
@@ -162,6 +164,15 @@ public sealed class CoreManager : IDisposable
 				ChangeStatus(CoreStatus.Error, LastError);
 				throw new InvalidOperationException(LastError);
 			}
+            // A live sing-box process is not proof that Windows has finished publishing
+            // the recreated TUN address. Starting a game during address detection can
+            // bypass process_path matching because the core still sees a non-local source.
+            if (Engine == VpnEngine.SingBox && profile.Protocol != "sing-box") {
+                try { if (!await WaitForWindowsTunnelAsync(generation, routing.EnableIpv6)) return; }
+                catch (Exception ex) {
+                    Stop(); LastError = ex.Message; ChangeStatus(CoreStatus.Error, LastError); throw;
+                }
+            }
 			ConnectedAtUtc = DateTime.UtcNow;
 			LastConnectedRouting = RoutingOverlayService.Clone(routing);
 			connectedProfile = profile;
@@ -169,6 +180,34 @@ public sealed class CoreManager : IDisposable
 			InitialVerification = VerifyConnectionAsync();
 		}
 	}
+
+
+    private async Task<bool> WaitForWindowsTunnelAsync(int generation, bool ipv6)
+    {
+        var clock = Stopwatch.StartNew();
+        var required = ipv6 ? new[] { IPAddress.Parse("172.19.0.1"), IPAddress.Parse("fdfe:dcba:9876::1") } : new[] { IPAddress.Parse("172.19.0.1") };
+        long stableSince = -1;
+        while (clock.Elapsed < TimeSpan.FromSeconds(15)) {
+            if (generation != System.Threading.Volatile.Read(ref startGeneration) || stopping) return false;
+            if (process == null || process.HasExited) throw new IOException(FriendlyError(LastMeaningfulLog()));
+            bool ready = false;
+            try {
+                var adapter = NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n => n.Name.Equals("NOVA", StringComparison.OrdinalIgnoreCase));
+                if (adapter != null && adapter.OperationalStatus == OperationalStatus.Up) {
+                    var addresses = adapter.GetIPProperties().UnicastAddresses;
+                    if (addresses.Any(a => required.Contains(a.Address) && a.DuplicateAddressDetectionState == DuplicateAddressDetectionState.Duplicate))
+                        throw new IOException("Windows обнаружила конфликт адреса VPN-интерфейса NOVA.");
+                    ready = required.All(ip => addresses.Any(a => a.Address.Equals(ip) && a.DuplicateAddressDetectionState == DuplicateAddressDetectionState.Preferred));
+                }
+            } catch (NetworkInformationException) { /* Interface can disappear while Windows recreates it. */ }
+            if (ready) {
+                if (stableSince < 0) stableSince = clock.ElapsedMilliseconds;
+                if (clock.ElapsedMilliseconds - stableSince >= 500) return true;
+            } else stableSince = -1;
+            await Task.Delay(100);
+        }
+        throw new IOException("Windows не завершила подготовку VPN-интерфейса за 15 секунд. Повторите подключение.");
+    }
 
 	public void Stop()
 	{
