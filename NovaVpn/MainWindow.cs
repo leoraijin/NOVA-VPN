@@ -189,6 +189,7 @@ public sealed partial class MainWindow : Window
 		ApplyVisualPalette();
 		core = new CoreManager();
         core.SelectEngine(state.EngineSelection == 1 ? VpnEngine.Reality : VpnEngine.SingBox);
+        InitializeGamingInfrastructure();
 		zapret.StrategyProgress += message => Dispatcher.BeginInvoke((Action)(() =>
 		{
 			if (!closing && currentPage == "home") RefreshCurrentPage();
@@ -346,6 +347,7 @@ public sealed partial class MainWindow : Window
 		}
 		base.Closing += delegate
 		{
+            gamingSessionTimer?.Stop();
             gamingCancellation?.Cancel();
             GamingProbeService.StopAll();
 			startupCancellation.Cancel();
@@ -361,6 +363,7 @@ public sealed partial class MainWindow : Window
 			}
 			UnregisterGlobalHotkey();
 			core.Dispose();
+            gamingSessions?.Finish();
 			if (trayIcon != null)
 			{
 				trayIcon.Visible = false;
@@ -826,6 +829,7 @@ public sealed partial class MainWindow : Window
 			Height = GridLength.Auto
 		});
 		Button pauseButton = SmallButton("Пауза 15 минут");
+        pauseButton.IsEnabled = gamingSession == null;
 		homePauseButton = pauseButton;
 		pauseButton.Visibility = core.Status == CoreStatus.Connected ? Visibility.Visible : Visibility.Collapsed;
 		pauseButton.Click += delegate
@@ -1612,6 +1616,7 @@ public sealed partial class MainWindow : Window
 
 	private async Task UpdateZapretAsync(bool notify = true)
 	{
+        if (gamingSession != null || gamingCancellation != null) { Toast("Завершите игровую сессию перед обновлением Zapret.", Warning); return; }
 		await trafficModeGate.WaitAsync();
 		bool restartVpn = core.Status == CoreStatus.Connected || core.Status == CoreStatus.Connecting;
 		try
@@ -1705,13 +1710,7 @@ public sealed partial class MainWindow : Window
 
 	private RoutingSettings EffectiveRouting()
 	{
-        var result = RoutingOverlayService.Clone(state.Routing);
-        if (gamingSession != null && core.Engine == VpnEngine.SingBox) {
-            if (gamingSession.Profile == null && state.KillSwitch)
-                throw new InvalidOperationException("Выключите игровой режим: прямой маршрут запрещён Kill Switch.");
-            result.Gaming = gamingSession;
-        }
-        return result;
+        return GamingRouting.Effective(gamingSession != null ? gamingBaseRouting ?? state.Routing : state.Routing, gamingSession, state.KillSwitch);
 	}
 
 	private async Task SetWindowsStartupAsync(bool connect)
@@ -2306,7 +2305,6 @@ public sealed partial class MainWindow : Window
 
 	private UIElement BuildRoutingPage()
 	{
-        if (gamingSession != null) return PageHeader("Маршруты закреплены", "Выключите игровой режим перед изменением правил.", null, null);
 		Grid grid = new Grid();
 		grid.RowDefinitions.Add(new RowDefinition
 		{
@@ -2743,6 +2741,7 @@ public sealed partial class MainWindow : Window
 
 	private async Task ApplyApplicationRoutingAsync()
 	{
+        if (gamingSession != null) { Toast("Обычные правила сохранены и применятся при завершении игровой сессии.", Warning); return; }
 		if (!applicationRoutingPending || core.Status != CoreStatus.Connected) return;
 		await trafficModeGate.WaitAsync();
 		bool stopped = false;
@@ -3799,6 +3798,7 @@ public sealed partial class MainWindow : Window
 
 	private async Task ToggleConnectionAsync()
 	{
+        if (gamingSession != null) { await StopGamingAsync("Игровое подключение отключено."); return; }
         if (gamingCancellation != null) { Toast("Отмените игровую проверку перед подключением.", Warning); return; }
 		startupCancellation.Cancel();
 		if (profileSwitchInProgress)
@@ -3961,6 +3961,7 @@ public sealed partial class MainWindow : Window
 	{
 		base.Dispatcher.BeginInvoke((Action)delegate
 		{
+            if (gamingSession != null && GetGamePreferences(gamingSession.GameId).EndOnDisconnect) { _ = StopGamingAsync("Игровое соединение прервано."); return; }
 			if (!closing && !startupConnecting && !manualDisconnect && connectionRequested && state.AutoReconnect && reconnectAttempt < 5)
 			{
 				VpnProfile failed = SelectedProfile();
@@ -4015,12 +4016,15 @@ public sealed partial class MainWindow : Window
 	{
 		base.Dispatcher.BeginInvoke((Action)delegate
 		{
+            if (!closing && gamingSession != null && !gamingTransitionBusy && newStatus == core.Status &&
+                (newStatus == CoreStatus.Disconnected && manualDisconnect || newStatus == CoreStatus.Error && GetGamePreferences(gamingSession.GameId).EndOnDisconnect))
+                _ = StopGamingAsync("Игровое подключение завершено.");
 			SyncSubscriptionTimer();
 			if (newStatus == CoreStatus.Connected) applicationRoutingPending = ApplicationRoutingNeedsApply();
 			if (currentPage == "routing") applicationListRefresh?.Invoke();
 			if (statusText != null)
 			{
-				statusText.Text = ((newStatus == CoreStatus.Connected) ? "Защищено" : ((newStatus == CoreStatus.Connecting) ? "Подключение…" : ((newStatus == CoreStatus.Error) ? "Ошибка" : "Не подключено")));
+				statusText.Text = ((newStatus == CoreStatus.Connected) ? gamingSession != null ? "Игровой режим" : "Защищено" : ((newStatus == CoreStatus.Connecting) ? "Подключение…" : ((newStatus == CoreStatus.Error) ? "Ошибка" : "Не подключено")));
 				statusText.Foreground = new SolidColorBrush((newStatus == CoreStatus.Connected) ? Green : ((newStatus == CoreStatus.Error) ? Danger : Muted));
 			}
 			if (statusDot != null)
@@ -4036,7 +4040,7 @@ public sealed partial class MainWindow : Window
 			if (newStatus == CoreStatus.Connected)
 			{
 				if (!snapshotMode && core.Status == CoreStatus.Connected && core.ActiveProfileId != null) { state.LastConnectedProfileId = core.ActiveProfileId; StateStore.Save(state); }
-				ShowNotification("VPN подключён: " + (SelectedProfile()?.Name ?? "сервер"));
+				ShowNotification(gamingSession != null ? "Игровой маршрут включён: " + gamingSession.Game : "VPN подключён: " + (SelectedProfile()?.Name ?? "сервер"));
 			}
 			else if (newStatus == CoreStatus.Error)
 			{
@@ -4184,12 +4188,13 @@ public sealed partial class MainWindow : Window
 	{
 		if (trafficModeStatusText != null) trafficModeStatusText.Text = ZapretStatusCaption();
 		connectionControl?.Apply(state.Visual, core.Status, MotionAllowed);
+        if (gamingSession != null && connectionControl != null && core.Status == CoreStatus.Connected) connectionControl.Label.Text = "Завершить режим";
         UpdatePausedConnectionLabel();
 		UpdateVerificationDisplay();
 		if (homePauseButton != null)
 		{
 			homePauseButton.Content = "Пауза 15 минут";
-			homePauseButton.Visibility = core.Status == CoreStatus.Connected ? Visibility.Visible : Visibility.Collapsed;
+			homePauseButton.Visibility = core.Status == CoreStatus.Connected && gamingSession == null ? Visibility.Visible : Visibility.Collapsed;
 		}
 		if (homeBestButton != null) homeBestButton.IsEnabled = state.Profiles.Count > 0 && core.Status != CoreStatus.Connecting && !profileSwitchInProgress;
 		if (liveSessionText != null) liveSessionText.Text = SessionLabel();
@@ -4204,6 +4209,7 @@ public sealed partial class MainWindow : Window
 
 	private void CopyState(AppState source)
 	{
+        if (gamingSession != null || gamingCancellation != null) throw new InvalidOperationException("Завершите игровую сессию перед импортом настроек.");
 		if (source == null)
 		{
 			throw new InvalidOperationException("Резервная копия пуста.");
@@ -4214,6 +4220,9 @@ public sealed partial class MainWindow : Window
 		}
 		core.SelectEngine(source.EngineSelection == 1 ? VpnEngine.Reality : VpnEngine.SingBox);
         state.SubscriptionIdentities = source.SubscriptionIdentities ?? new IdentityState();
+        state.ManualGames = source.ManualGames ?? new List<InstalledGame>();
+        state.GamePreferences = source.GamePreferences ?? new List<GamePreferences>();
+        gamingLibraryLoaded = false; gamingSelected = null;
         state.EngineSelection = (int)core.Engine;
         state.Profiles = source.Profiles ?? new List<VpnProfile>();
 		state.SelectedProfileId = source.SelectedProfileId;
@@ -4302,6 +4311,7 @@ public sealed partial class MainWindow : Window
 
 	private string StatusHeadline()
 	{
+        if (gamingSession != null && core.Status == CoreStatus.Connected) return "Игровой режим · " + gamingSession.Game;
 		if (core.Status == CoreStatus.Connected)
 		{
 			return !core.Verification.Completed ? "Проверяем соединение" : !core.Verification.InternetOk ? "Нет доступа в интернет" :
@@ -4321,6 +4331,7 @@ public sealed partial class MainWindow : Window
 
 	private string StatusCaption()
 	{
+        if (gamingSession != null && core.Status == CoreStatus.Connected) return gamingSession.GameOnly ? "Отдельный конфиг используется только для игровых EXE. Остальные приложения выходят напрямую." : "Игра использует отдельный выход. Остальные приложения работают по обычным правилам NOVA.";
 		if (core.Status == CoreStatus.Connected)
 		{
 			return !core.Verification.Completed ? "Туннель включён. Проверяем доступ в интернет через выбранный профиль." :

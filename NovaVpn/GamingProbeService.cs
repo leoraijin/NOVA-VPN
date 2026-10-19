@@ -108,6 +108,7 @@ internal sealed class GamingProbeChannel : IDisposable
         File.WriteAllText(configFile, ConfigBuilder.BuildProbe(profile, port, user, password), new UTF8Encoding(false));
         process = new Process { StartInfo = new ProcessStartInfo(corePath, "run -c " + AppUpdateService.QuoteWindowsArgument(configFile)) {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } };
+        process.StartInfo = OwnedCoreProcess.Wrap(process.StartInfo, configFile);
         process.OutputDataReceived += (s, e) => { }; process.ErrorDataReceived += (s, e) => { };
         process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
         for (int i = 0; i < 40 && !process.HasExited; i++) {

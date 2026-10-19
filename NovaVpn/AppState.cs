@@ -8,6 +8,8 @@ namespace NovaVpn;
 public sealed class AppState
 {
     [DataMember] public List<GamingHistoryEntry> GamingHistory = new List<GamingHistoryEntry>();
+    [DataMember] public List<InstalledGame> ManualGames = new List<InstalledGame>();
+    [DataMember] public List<GamePreferences> GamePreferences = new List<GamePreferences>();
 	[DataMember]
 	public int SchemaVersion = 11;
     [DataMember] public IdentityState SubscriptionIdentities = new IdentityState();

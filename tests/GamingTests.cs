@@ -71,7 +71,8 @@ public static class GamingTests
         }
         game.Profile = null; game.ExecutablePath = "C:\\Games\\RustClient.exe";
         json = ConfigBuilder.Build(baseProfile, routing);
-        Check(json.Contains("process_path") && !json.Contains("nova-game"), "Direct/full path route invalid");
+        var directConfig = (Dictionary<string, object>)serializer.DeserializeObject(json);
+        Check(json.Contains("process_path") && !((object[])directConfig["outbounds"]).Cast<Dictionary<string, object>>().Any(o => Equals(o["tag"], "nova-game")), "Direct/full path route invalid");
         bool rawRejected = false;
         try { ConfigBuilder.Build(new VpnProfile { Protocol = "sing-box", RawJson = "{}" }, routing); } catch (NotSupportedException) { rawRejected = true; }
         Check(rawRejected, "Raw config must not silently ignore gaming overlay");

@@ -48,6 +48,7 @@ $compilerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Не удалось собрать компонент удаления.' }
 
 Copy-Item -LiteralPath $AppOutput -Destination (Join-Path $payload 'NOVA VPN.exe')
+Copy-Item -LiteralPath (Join-Path (Split-Path $AppOutput) 'NOVA Core Host.exe') -Destination (Join-Path $payload 'NOVA Core Host.exe')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $payload 'LICENSE')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY.md') -Destination (Join-Path $payload 'THIRD_PARTY.md')
 foreach ($dependency in @('zxing.dll','LICENSE-ZXing.txt')) {
@@ -73,6 +74,11 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ASSET-NOTICES.txt') -Destination $payload
 $releaseNotes = @'
+NOVA VPN 2.5.0 — библиотека игр и возврат маршрутов
+- Автоматическое обнаружение Steam/Epic/GOG/Riot, карточки и конфиг только для игровых EXE.
+- Временный слой маршрутизации, завершение по выходу из игры, журнал аварийного восстановления.
+- Контролируемое дерево ядра завершается при падении владельца; обычные настройки сохраняются.
+
 NOVA VPN 2.4.1 — исправление обновления
 - Завершение оставшихся процессов ядра из папки установки и ожидание их выхода.
 - Проверка блокировок до замены файлов. Чужие ядра и личные профили сохраняются.
@@ -348,7 +354,7 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.4.1.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.5.0.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

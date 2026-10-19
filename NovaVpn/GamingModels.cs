@@ -24,6 +24,12 @@ public static class GameCatalog
         new GameDefinition { Name = "Rust", Processes = new[] { "RustClient.exe", "Rust.exe" } },
         new GameDefinition { Name = "Counter-Strike 2", Processes = new[] { "cs2.exe" } },
         new GameDefinition { Name = "Dota 2", Processes = new[] { "dota2.exe" } },
+        new GameDefinition { Name = "VALORANT", Processes = new[] { "VALORANT-Win64-Shipping.exe" } },
+        new GameDefinition { Name = "League of Legends", Processes = new[] { "League of Legends.exe" } },
+        new GameDefinition { Name = "Apex Legends", Processes = new[] { "r5apex.exe", "r5apex_dx12.exe" } },
+        new GameDefinition { Name = "World of Warcraft", Processes = new[] { "Wow.exe", "WowClassic.exe" } },
+        new GameDefinition { Name = "Overwatch", Processes = new[] { "Overwatch.exe" } },
+        new GameDefinition { Name = "Minecraft", Processes = new[] { "Minecraft.Windows.exe" } },
         new GameDefinition { Name = "Другая игра / EXE", Processes = new string[0] }
     };
 
@@ -104,9 +110,12 @@ public static class GamingRouteSelector
 
 public sealed class GamingRoute
 {
+    public string GameId;
     public string Game;
     public string[] Processes;
     public string ExecutablePath;
+    public string[] ExecutablePaths;
+    public bool GameOnly;
     public VpnProfile Profile; // null means explicitly permitted direct route
 }
 
@@ -121,6 +130,14 @@ public sealed class GamingHistoryEntry
 
 public static class GamingRouting
 {
+    public static RoutingSettings Effective(RoutingSettings basis, GamingRoute game, bool killSwitch)
+    {
+        if (game != null && killSwitch && (game.Profile == null || game.GameOnly))
+            throw new InvalidOperationException("Kill Switch запрещает прямой выход. Для игрового режима сначала подключите обычный VPN.");
+        var result = RoutingOverlayService.Clone(basis); result.Gaming = game;
+        if (game?.GameOnly == true) { result.Mode = "Direct"; result.DnsMode = "System"; }
+        return result;
+    }
     public static string Apply(string json, GamingRoute game)
     {
         if (game == null) return json;
@@ -136,12 +153,30 @@ public static class GamingRouting
             config["outbounds"] = ((System.Collections.IEnumerable)config["outbounds"]).Cast<object>().Concat(new object[] { outbound }).ToArray();
         }
         var rule = new Dictionary<string, object> { ["action"] = "route", ["outbound"] = tag };
-        if (!string.IsNullOrEmpty(game.ExecutablePath)) rule["process_path"] = new[] { game.ExecutablePath };
+        if (game.ExecutablePaths?.Length > 0) rule["process_path"] = game.ExecutablePaths;
+        else if (!string.IsNullOrEmpty(game.ExecutablePath)) rule["process_path"] = new[] { game.ExecutablePath };
         else rule["process_name"] = game.Processes;
-        // Preserve DNS, blocking, LAN, site and advanced policies. Override only app-level routes.
-        int index = rules.FindIndex(r => r is Dictionary<string, object> d && (d.ContainsKey("process_name") || d.ContainsKey("process_path")));
-        rules.Insert(index < 0 ? rules.Count : index, rule);
+        bool IsPrefix(object item) => item is Dictionary<string, object> d && d.TryGetValue("action", out object a) && new[] { "sniff", "hijack-dns", "reject" }.Contains(a as string);
+        // Blocks and DNS interception retain priority; all permitted game traffic uses its own exit.
+        var prefix = rules.Where(IsPrefix).ToList();
+        var remainder = rules.Where(r => !IsPrefix(r)).ToList();
+        if (game.GameOnly) { remainder.Clear(); route["final"] = "direct"; }
+        rules = prefix.Concat(new object[] { rule }).Concat(remainder).ToList();
         route["rules"] = rules.ToArray();
+        if (config.TryGetValue("dns", out object dnsValue) && dnsValue is Dictionary<string, object> dns) {
+            var servers = ((System.Collections.IEnumerable)dns["servers"]).Cast<object>().ToList();
+            var template = servers.OfType<Dictionary<string, object>>().FirstOrDefault(s => s.TryGetValue("type", out object t) && Equals(t, "https"));
+            var gameDns = game.Profile == null ? new Dictionary<string, object> { ["type"] = "local" } :
+                template == null ? new Dictionary<string, object> { ["type"] = "https", ["server"] = "1.1.1.1", ["server_port"] = 443, ["path"] = "/dns-query" } : new Dictionary<string, object>(template);
+            gameDns["tag"] = "nova-game-dns";
+            if (game.Profile != null) gameDns["detour"] = tag;
+            servers.Add(gameDns); dns["servers"] = servers.ToArray();
+            var dnsRules = dns.TryGetValue("rules", out object existingRules) ? ((System.Collections.IEnumerable)existingRules).Cast<object>().ToList() : new List<object>();
+            var dnsRule = new Dictionary<string, object> { ["action"] = "route", ["server"] = "nova-game-dns" };
+            if (rule.TryGetValue("process_path", out object paths)) dnsRule["process_path"] = paths;
+            else dnsRule["process_name"] = game.Processes;
+            dnsRules.Insert(0, dnsRule); dns["rules"] = dnsRules.ToArray();
+        }
         return serializer.Serialize(config);
     }
 }

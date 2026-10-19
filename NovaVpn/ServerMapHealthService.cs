@@ -57,6 +57,7 @@ public static class ServerMapHealthService
 			process = new Process { StartInfo = new ProcessStartInfo(corePath, "run -c \"" + file + "\"") {
 				UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true } };
 			process.OutputDataReceived += (s, e) => { };
+            process.StartInfo = OwnedCoreProcess.Wrap(process.StartInfo, file);
 			process.ErrorDataReceived += (s, e) => { };
 			process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
 			using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(token))

@@ -16,13 +16,13 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NOVA VPN Setup")]
 [assembly: AssemblyProduct("NOVA VPN")]
-[assembly: AssemblyVersion("2.4.1.0")]
-[assembly: AssemblyFileVersion("2.4.1.0")]
+[assembly: AssemblyVersion("2.5.0.0")]
+[assembly: AssemblyFileVersion("2.5.0.0")]
 
 internal sealed class NovaInstaller : Form
 {
     private new const string ProductName = "NOVA VPN";
-    private const string DisplayVersion = "2.4.1";
+    private const string DisplayVersion = "2.5.0";
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NOVA VPN";
     private readonly Color background = Color.FromArgb(233, 239, 246);
     private readonly Color panel = Color.FromArgb(248, 250, 253);
@@ -434,7 +434,7 @@ internal sealed class NovaInstaller : Form
 
     private static void StopInstalledComponents(string target)
     {
-        foreach (string relative in new[] { "core\\sing-box.exe", "core\\reality-client.exe", "zapret\\current\\bin\\winws.exe" })
+        foreach (string relative in new[] { "NOVA Core Host.exe", "core\\sing-box.exe", "core\\reality-client.exe", "zapret\\current\\bin\\winws.exe" })
         {
             string expected = Path.GetFullPath(Path.Combine(target, relative));
             foreach (Process candidate in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(relative)))

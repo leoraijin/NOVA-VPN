@@ -64,6 +64,10 @@
     <Compile Include="NovaVpn\ReleaseNotesService.cs" />
     <Compile Include="NovaVpn\ConfigBuilder.cs" />
     <Compile Include="NovaVpn\GamingModels.cs" />
+    <Compile Include="NovaVpn\GameDiscoveryService.cs" />
+    <Compile Include="NovaVpn\GameConnectionMonitor.cs" />
+    <Compile Include="NovaVpn\GamingSessionManager.cs" />
+    <Compile Include="NovaVpn\OwnedCoreProcess.cs" />
     <Compile Include="NovaVpn\GamingProbeService.cs" />
     <Compile Include="NovaVpn\GamingPage.cs" />
 	<Compile Include="NovaVpn\ServerMapHealthService.cs" />
@@ -143,6 +147,9 @@
     <None Include="app-test.manifest" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Target Name="BuildOwnedCoreHost" AfterTargets="Build">
+    <Csc Sources="packaging\CoreHostEntry.cs" References="$(TargetPath)" OutputAssembly="$(TargetDir)NOVA Core Host.exe" TargetType="Exe" ToolPath="$(CscToolPath)" />
+  </Target>
 <ItemGroup><Reference Include="zxing"><HintPath>libs\zxing.dll</HintPath><Private>True</Private></Reference></ItemGroup>
 </Project>
 

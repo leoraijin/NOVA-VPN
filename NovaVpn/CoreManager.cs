@@ -22,6 +22,12 @@ public sealed class CoreManager : IDisposable
 	private int startGeneration;
 	private VpnProfile connectedProfile;
 	private bool verificationBusy;
+    private GameConnectionMonitor gameMonitor;
+    public Task<System.Collections.Generic.List<GameEndpoint>> GameEndpointsAsync(InstalledGame game, System.Threading.CancellationToken token)
+    {
+        if (Status != CoreStatus.Connected || gameMonitor == null) throw new InvalidOperationException("Для определения соединений подключите обычный профиль sing-box в NOVA.");
+        return gameMonitor.ReadAsync(game, token);
+    }
 
 	public DateTime ConnectedAtUtc { get; private set; }
 
@@ -80,6 +86,8 @@ public sealed class CoreManager : IDisposable
 			}
 			string preparedConfig = BuildConfig(profile, routing);
 			Stop();
+            gameMonitor = Engine == VpnEngine.SingBox && profile.Protocol != "sing-box" ? new GameConnectionMonitor() : null;
+            if (gameMonitor != null) preparedConfig = gameMonitor.Apply(preparedConfig);
 			int generation = System.Threading.Volatile.Read(ref startGeneration);
 			stopping = false;
 			LastError = "";
@@ -124,7 +132,7 @@ public sealed class CoreManager : IDisposable
 				return;
 			}
 			process = new Process();
-			process.StartInfo = start;
+			process.StartInfo = OwnedCoreProcess.Wrap(start, configPath);
 			process.EnableRaisingEvents = true;
 			process.OutputDataReceived += OnData;
 			process.ErrorDataReceived += OnData;
@@ -165,6 +173,7 @@ public sealed class CoreManager : IDisposable
 	{
 		System.Threading.Interlocked.Increment(ref startGeneration);
 		stopping = true;
+        gameMonitor = null;
         Process process = this.process;
         if (process != null)
         {
