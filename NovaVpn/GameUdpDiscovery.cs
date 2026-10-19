@@ -105,9 +105,12 @@ public sealed class GameUdpDiscovery : IDisposable
         foreach (string marker in Directory.EnumerateFiles(runtime, "udp-observer-*.json").Take(64)) try {
             if (new FileInfo(marker).Length > 4096) continue;
             var data = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(marker));
+            if (data == null || !data.ContainsKey("name") || !data.ContainsKey("pid") || !data.ContainsKey("started")) continue;
             string name = data["name"] as string;
             if (!System.Text.RegularExpressions.Regex.IsMatch(name ?? "", "^NOVA-GameUdp-[a-f0-9]{32}$")) continue;
+            if (!Path.GetFileName(marker).Equals("udp-observer-" + name.Substring(13) + ".json", StringComparison.OrdinalIgnoreCase)) continue;
             int pid = Convert.ToInt32(data["pid"]); long started = Convert.ToInt64(data["started"]);
+            if (pid <= 0 || started <= 0) continue;
             bool alive = false;
             try { using (var owner = Process.GetProcessById(pid)) alive = !owner.HasExited && owner.StartTime.ToUniversalTime().Ticks == started; }
             catch (ArgumentException) { } catch (InvalidOperationException) { }

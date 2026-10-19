@@ -23,6 +23,13 @@ internal static class GameUdpDiscoveryTests
             }
             Console.WriteLine("PASS: Windows ETW native structure layouts.");
             if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") != "true") { Console.WriteLine("SKIP: native UDP session test is restricted to the isolated GitHub Windows VM."); return 0; }
+            if (args[0] == "--orphan") {
+                using (var observer = new GameUdpDiscovery(new InstalledGame(), args[1])) {
+                    Check(observer.Active, "Orphan fixture could not start: " + observer.Error);
+                    File.WriteAllText(Path.Combine(args[1], "observer-ready.txt"), "ready"); Thread.Sleep(30000);
+                }
+                return 0;
+            }
             string work = args[0], fixture = Path.Combine(work, "UdpTrafficFixture.exe"), other = Path.Combine(work, "OtherUdpFixture.exe");
             File.Copy(fixture, other, true);
             var address = NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up)
@@ -34,6 +41,8 @@ internal static class GameUdpDiscoveryTests
                 var game = new InstalledGame { Executables = new System.Collections.Generic.List<string> { fixture } };
                 using (var observer = new GameUdpDiscovery(game, work)) {
                     Check(observer.Active, "ETW session failed: " + observer.Error);
+                    GameUdpDiscovery.Recover(work);
+                    Check(Directory.EnumerateFiles(work, "udp-observer-*.json").Any(), "Recovery removed live owner's marker");
                     using (var owned = Process.Start(new ProcessStartInfo(fixture, address + " " + port) { UseShellExecute = false, CreateNoWindow = true }))
                     using (var foreign = Process.Start(new ProcessStartInfo(other, address + " " + foreignPort) { UseShellExecute = false, CreateNoWindow = true })) {
                         try {
@@ -49,7 +58,19 @@ internal static class GameUdpDiscoveryTests
                 }
                 Check(!Directory.EnumerateFiles(work, "udp-observer-*.json").Any(), "ETW cleanup marker left after normal stop");
             }
+            string ready = Path.Combine(work, "observer-ready.txt"); if (File.Exists(ready)) File.Delete(ready);
+            using (var owner = Process.Start(new ProcessStartInfo(Assembly.GetExecutingAssembly().Location, "--orphan " + AppUpdateService.QuoteWindowsArgument(work)) { UseShellExecute = false, CreateNoWindow = true })) {
+                try {
+                    for (int i = 0; i < 30 && !File.Exists(ready) && !owner.HasExited; i++) Thread.Sleep(100);
+                    Check(File.Exists(ready), "Orphan observer did not become ready");
+                    owner.Kill(); owner.WaitForExit(3000);
+                    Check(Directory.EnumerateFiles(work, "udp-observer-*.json").Any(), "Crash fixture did not leave owned marker");
+                    GameUdpDiscovery.Recover(work);
+                    Check(!Directory.EnumerateFiles(work, "udp-observer-*.json").Any(), "Orphan ETW session not recovered");
+                } finally { if (!owner.HasExited) { owner.Kill(); owner.WaitForExit(3000); } GameUdpDiscovery.Recover(work); }
+            }
             Console.WriteLine("PASS: real Windows UDP peer discovery, exact process-path isolation and owned ETW session cleanup. No TUN or VPN started.");
+            Console.WriteLine("PASS: UDP observer recovery preserved live owner and cleaned orphan session after abrupt owner termination.");
             return 0;
         } catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
     }

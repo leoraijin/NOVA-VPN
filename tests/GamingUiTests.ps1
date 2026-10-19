@@ -32,6 +32,23 @@ try {
     if(-not @($nodes | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Подобрать конфиг'}).Count) {throw 'Automatic pick action missing'}
   }
   $state=$type.GetField('state',$flags).GetValue($window)
+  $core=$type.GetField('core',$flags).GetValue($window)
+  $network=$assembly.GetType('NovaVpn.GameCatalog').GetMethod('NetworkKey').Invoke($null,@())
+  $stampType=$assembly.GetType('NovaVpn.GamingRecommendationStamp')
+  $stamp=[Activator]::CreateInstance($stampType,[object[]]@($library[0],$state.Profiles,$network,$core.ActiveProfileId,$false,$core.Engine,$core.Status,[DateTime]::UtcNow))
+  $result=[Activator]::CreateInstance($assembly.GetType('NovaVpn.AutomaticGamingResult'))
+  $result.ProfileId=$state.Profiles[0].Id;$result.Message='Fixture recommendation'
+  $type.GetField('gamingAutomaticResult',$flags).SetValue($window,$result)
+  $type.GetField('gamingRecommendation',$flags).SetValue($window,$stamp)
+  $window.ShowPageForSnapshot('gaming');$window.UpdateLayout()
+  $nodes=@(Nodes ($type.GetField('contentHost',$flags).GetValue($window)))
+  if(@($nodes | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Играть'}).Count -ne 1){throw 'Valid automatic result did not produce one Play action'}
+  $oldServer=$state.Profiles[0].Server;$state.Profiles[0].Server='changed-fixture.invalid'
+  $window.ShowPageForSnapshot('gaming');$window.UpdateLayout()
+  if(@(Nodes ($type.GetField('contentHost',$flags).GetValue($window)) | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Играть'}).Count){throw 'Changed server retained Play action'}
+  $state.Profiles[0].Server=$oldServer
+  $type.GetField('gamingAutomaticResult',$flags).SetValue($window,$null)
+  $type.GetField('gamingRecommendation',$flags).SetValue($window,$null)
   $state.KillSwitch=$true
   $session=[Activator]::CreateInstance($assembly.GetType('NovaVpn.GamingRoute'))
   $session.Game='Fixture';$session.Processes=@('fixture-game.exe')
@@ -52,5 +69,5 @@ try {
     $stream=[IO.File]::Create([IO.Path]::GetFullPath($ScreenshotPath))
     try {$encoder.Save($stream)} finally {$stream.Dispose()}
   }
-  Write-Output 'PASS: game cards at 3 widths, selected game details, no manual route controls, automatic-result gate, Kill Switch and session lock. Snapshot state only.'
+  Write-Output 'PASS: game cards at 3 widths, no manual route controls, one Play action only for a valid automatic result, changed-server invalidation, Kill Switch and session lock. Snapshot state only.'
 } finally {$window.Close();$app.Shutdown()}

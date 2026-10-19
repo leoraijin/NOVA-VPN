@@ -19,6 +19,13 @@ public sealed class AutomaticGamingResult
     public bool KeptCurrent;
     public List<GamingProbeResult> Measurements = new List<GamingProbeResult>();
     public string Message;
+    public string ResponseLabel {
+        get {
+            if (!GameProtocol || Measurements.Count == 0) return "Предварительная оценка маршрута; игровой пинг пока не подтверждён";
+            double low = Measurements.Min(r => r.Median), high = Measurements.Max(r => r.Median);
+            return Math.Round(low) == Math.Round(high) ? string.Format("Отклик сервера: {0:F0} мс", high) : string.Format("Отклик серверов: {0:F0}–{1:F0} мс", low, high);
+        }
+    }
 }
 
 // Uses only the supplied user's profiles and observed connections. No external VPN catalogue.
@@ -33,13 +40,7 @@ public sealed class AutomaticGamingService
 
     public static List<AutomaticGameTarget> Targets(InstalledGame game, IEnumerable<GameEndpoint> observed)
     {
-        bool sourceQuery = game.Name.IndexOf("Rust", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            game.Name.IndexOf("Counter-Strike", StringComparison.OrdinalIgnoreCase) >= 0;
-        return observed.Where(e => e.Port > 0 && e.Port <= 65535 && (e.Network == "tcp" || sourceQuery && e.Network == "udp"))
-            .OrderByDescending(e => e.Network == "udp").ThenByDescending(e => e.Bytes)
-            .GroupBy(e => e.Network + ":" + e.Address + ":" + e.Port).Select(g => g.First())
-            .GroupBy(e => e.Network).SelectMany(g => g.Take(2))
-            .Select(e => new AutomaticGameTarget { Target = GamingTarget.Parse(e.Address, e.Port.ToString(), e.Network == "udp"), GameProtocol = e.Network == "udp" }).ToList();
+        return GameAdapter.Targets(game, observed);
     }
 
     public async Task<AutomaticGamingResult> SelectAsync(InstalledGame game, IEnumerable<GameEndpoint> observed,

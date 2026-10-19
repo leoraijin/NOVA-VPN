@@ -65,6 +65,8 @@
     <Compile Include="NovaVpn\ConfigBuilder.cs" />
     <Compile Include="NovaVpn\GamingModels.cs" />
     <Compile Include="NovaVpn\AutomaticGamingService.cs" />
+    <Compile Include="NovaVpn\GamingRecommendationStamp.cs" />
+    <Compile Include="NovaVpn\GameAdapter.cs" />
     <Compile Include="NovaVpn\GameSocketDiscovery.cs" />
     <Compile Include="NovaVpn\GameUdpDiscovery.cs" />
     <Compile Include="NovaVpn\GameLaunchService.cs" />

@@ -48,17 +48,17 @@ public sealed class GamingProbeService
                 }
             }
             // Warm-up is never included. Interleave candidates to reduce temporal bias.
-            foreach (var channel in channels) { try { await channel.MeasureAsync(token); } catch (OperationCanceledException) { throw; } catch { } }
+            await Task.WhenAll(channels.Select(async channel => { try { await channel.MeasureAsync(token); } catch (OperationCanceledException) { throw; } catch { } }));
             for (int round = 0; round < rounds; round++) {
-                foreach (var channel in (round % 2 == 0 ? channels : channels.AsEnumerable().Reverse()).ToList()) {
+                await Task.WhenAll((round % 2 == 0 ? channels : channels.AsEnumerable().Reverse()).Select(async channel => {
                     token.ThrowIfCancellationRequested();
                     progress?.Report("Серия " + (round + 1) + "/" + rounds + " · " + channel.Result.Name);
                     channel.Result.Attempts++;
                     try { channel.Result.Samples.Add(await channel.MeasureAsync(token)); }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex) { channel.Result.Error = "Нет подтверждённого ответа цели (" + ex.GetType().Name + ")"; }
-                    await Task.Delay(120, token);
-                }
+                }));
+                await Task.Delay(120, token);
             }
             return channels.Select(c => c.Result).Concat(skipped).ToList();
         } finally {

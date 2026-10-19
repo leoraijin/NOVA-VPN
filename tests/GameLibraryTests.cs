@@ -26,6 +26,8 @@ internal static class GameLibraryTests
         Write(Path.Combine(a, "steamapps", "appmanifest_missing.acf"), "\"AppState\" {\"appid\" \"3\" \"name\" \"Removed\" \"installdir\" \"Removed\"}");
         Write(Path.Combine(a, "steamapps", "common", "Downloading", "Game.exe"), "fixture");
         Write(Path.Combine(a, "steamapps", "appmanifest_downloading.acf"), "\"AppState\" {\"appid\" \"4\" \"name\" \"Downloading\" \"installdir\" \"Downloading\" \"StateFlags\" \"2\"}");
+        Write(Path.Combine(a, "steamapps", "common", "Soundpad", "soundpad.exe"), "fixture");
+        Write(Path.Combine(a, "steamapps", "appmanifest_629520.acf"), "\"AppState\" {\"appid\" \"629520\" \"name\" \"Soundpad\" \"installdir\" \"Soundpad\" \"StateFlags\" \"4\"}");
         var games = GameDiscoveryService.DiscoverSteam(a);
         Check(games.Count == 2, "Steam secondary library, malformed/deleted/downloading manifests");
         Check(games.First(g => g.Name == "Rust").Executables.SequenceEqual(new[] { rust }), "Uninstaller routed as game");
@@ -38,6 +40,9 @@ internal static class GameLibraryTests
         Write(Path.Combine(epic, "Fortnite.item"), serializer.Serialize(new { AppName = "Fortnite", DisplayName = "Fortnite", InstallLocation = install, LaunchExecutable = "FortniteGame/Binaries/Win64/FortniteClient-Win64-Shipping.exe" }));
         Write(Path.Combine(epic, "Incomplete.item"), serializer.Serialize(new { AppName = "Other", DisplayName = "Incomplete", InstallLocation = install, bIsIncompleteInstall = true }));
         Check(GameDiscoveryService.DiscoverEpic(epic).Single().Executables.SequenceEqual(new[] { executable }), "Epic executable identity/incomplete state");
+        Write(Path.Combine(install, "FortniteLauncher.exe"), "launcher");
+        Write(Path.Combine(epic, "Fortnite.item"), serializer.Serialize(new { AppName = "Fortnite", DisplayName = "Fortnite", InstallLocation = install, LaunchExecutable = "FortniteLauncher.exe" }));
+        Check(GameDiscoveryService.DiscoverEpic(epic).Single().Executables.SequenceEqual(new[] { executable }), "Epic bootstrap launcher became game routing identity");
         string riot = Path.Combine(work, "Riot", "VALORANT"); Write(Path.Combine(riot, "VALORANT.exe"), "launcher");
         string riotGame = Path.Combine(riot, "ShooterGame", "Binaries", "Win64", "VALORANT-Win64-Shipping.exe"); Write(riotGame, "game");
         string riotManifest = Path.Combine(work, "RiotClientInstalls.json");

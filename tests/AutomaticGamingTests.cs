@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.IO;
 using NovaVpn;
 
 internal static class AutomaticGamingTests
@@ -15,7 +16,7 @@ internal static class AutomaticGamingTests
         return result;
     }
     static List<GamingProbeResult> Rows(params GamingProbeResult[] rows) => rows.ToList();
-    static int Main() {
+    static int Main(string[] args) {
         try {
             Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 50), Row("b", 47)) }, "a") == "a", "Tiny gain changed current exit");
             Check(AutomaticGamingService.Choose(new[] { Rows(Row("a", 50), Row("b", 35)) }, "a") == "b", "Material stable improvement ignored");
@@ -28,8 +29,13 @@ internal static class AutomaticGamingTests
             for (int i = 1; i <= 5; i++) endpoints.Add(new GameEndpoint { Address = "203.0.113." + i, Port = 27015, Network = "udp", Bytes = i * 100 });
             endpoints.Add(new GameEndpoint { Address = "203.0.113.10", Port = 443, Network = "tcp", Bytes = 100 });
             var rust = AutomaticGamingService.Targets(new InstalledGame { Name = "Rust" }, endpoints);
-            Check(rust.Count == 3 && rust.Count(t => t.GameProtocol) == 2 && rust.Any(t => !t.GameProtocol), "UDP candidates hid TCP fallback");
+            Check(rust.Count == 7 && rust.Count(t => t.GameProtocol) == 6 && rust.Any(t => !t.GameProtocol), "Rust query candidates hid TCP fallback");
             Check(rust.First().Target.Host == "203.0.113.5", "Traffic ranking ignored");
+            Check(rust.Take(3).Select(t => t.Target.Port).SequenceEqual(new[] { 27016, 27017, 27015 }), "Rust separate query-port candidates missing");
+            Check(!GameAdapter.Targets(new InstalledGame { Name = "Rusty Tool" }, endpoints).Any(t => t.GameProtocol), "Unrelated product inherited Rust query protocol");
+            Check(GameAdapter.ParseRegionHint("LastSelectedRegionId=EU\n") == "Европа", "Fortnite region hint not read");
+            Check(GameAdapter.ParseRegionHint("selectedClusters:t=\"EU;US\"\n") == "Европа, Северная Америка", "Multiple War Thunder cluster hints lost");
+            Check(GameAdapter.ParseRegionHint("LastSelectedRegionId=AUTO\n") == null, "Auto region presented as a measured location");
             var fortnite = AutomaticGamingService.Targets(new InstalledGame { Name = "Fortnite" }, endpoints);
             Check(fortnite.Count == 1 && !fortnite[0].GameProtocol, "Fortnite UDP was falsely labelled query-compatible");
             endpoints.Add(endpoints.Last());
@@ -67,6 +73,22 @@ internal static class AutomaticGamingTests
             rejected = false;
             try { GameLaunchService.Build(new InstalledGame { Source = "Riot Games", Executables = new List<string> { @"C:\Game.exe" } }); } catch (System.IO.IOException) { rejected = true; }
             Check(rejected, "Riot game bypassed required launcher");
+            string file = Path.Combine(args[0], "stamp-fixture.exe"); File.WriteAllText(file, "initial fixture");
+            var identity = new InstalledGame { Id = "fixture", Executables = new List<string> { file } };
+            var profileSet = new[] { new VpnProfile { Id = "vpn", Protocol = "vless", Server = "example.com", Password = "private-fixture" } };
+            DateTime now = DateTime.UtcNow;
+            var stamp = new GamingRecommendationStamp(identity, profileSet, "network-a", "vpn", false, VpnEngine.SingBox, CoreStatus.Connected, now);
+            Func<bool> current = () => stamp.IsCurrent(identity, profileSet, "network-a", "vpn", false, VpnEngine.SingBox, CoreStatus.Connected, now.AddSeconds(1));
+            Check(current(), "Unchanged recommendation invalid");
+            profileSet[0].LastLatency = 20; Check(current(), "Background health stats invalidated measured server");
+            profileSet[0].Password = "changed-fixture"; Check(!current(), "Changed transport credential retained recommendation");
+            profileSet[0].Password = "private-fixture";
+            Check(!stamp.IsCurrent(identity, profileSet, "network-b", "vpn", false, VpnEngine.SingBox, CoreStatus.Connected, now), "Changed network retained recommendation");
+            Check(!stamp.IsCurrent(identity, profileSet, "network-a", "vpn", true, VpnEngine.SingBox, CoreStatus.Connected, now), "Changed Kill Switch retained recommendation");
+            Check(!stamp.IsCurrent(identity, profileSet, "network-a", "vpn", false, VpnEngine.SingBox, CoreStatus.Connected, now.AddMinutes(6)), "Expired recommendation accepted");
+            Check(!stamp.IsCurrent(identity, new VpnProfile[0], "network-a", "vpn", false, VpnEngine.SingBox, CoreStatus.Connected, now), "Deleted profile retained recommendation");
+            File.WriteAllText(file, "new game version with a different size"); Check(!current(), "Game update retained recommendation");
+            File.Delete(file);
             Console.WriteLine("PASS: " + checks + " automatic selection checks: comparable targets, stable current route, unreliable probes and protocol confidence.");
             return 0;
         } catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }

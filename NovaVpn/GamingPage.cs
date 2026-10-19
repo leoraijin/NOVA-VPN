@@ -18,22 +18,18 @@ public sealed partial class MainWindow
 {
     private GamingRoute gamingSession;
     private AutomaticGamingResult gamingAutomaticResult;
+    private GamingRecommendationStamp gamingRecommendation;
     private GamingSessionManager gamingSessions;
     private RoutingSettings gamingBaseRouting;
     private DispatcherTimer gamingSessionTimer;
-    private DateTime gamingLastRunningUtc, gamingMeasuredUtc;
+    private DateTime gamingLastRunningUtc;
     private bool gamingTransitionBusy, gamingLibraryBusy, gamingLibraryLoaded;
     private List<InstalledGame> gamingLibrary = new List<InstalledGame>();
     private InstalledGame gamingSelected;
-    private List<GameEndpoint> gamingEndpoints = new List<GameEndpoint>();
     private CancellationTokenSource gamingCancellation;
-    private List<GamingProbeResult> gamingResults = new List<GamingProbeResult>();
-    private GamingProbeResult gamingRecommended;
-    private string gamingNetwork, gamingMeasuredKey, gamingSearch = "";
-    private readonly Dictionary<string, VpnProfile> gamingCandidates = new Dictionary<string, VpnProfile>();
+    private string gamingNetwork, gamingSearch = "";
     private string gamingMessage = "Нажмите «Подобрать конфиг». При первом подборе NOVA запустит игру для определения сервера.";
     private GamePreferences GamingOptions => GetGamePreferences(gamingSelected?.Id);
-    private string GamingSelectionKey => gamingSelected?.Id + "|" + GamingOptions.Host + "|" + GamingOptions.Port + "|" + GamingOptions.A2S + "|" + GamingOptions.AllowDirect;
     private bool GamingEditable => gamingCancellation == null && gamingSession == null && !gamingTransitionBusy;
 
     private void InitializeGamingInfrastructure()
@@ -58,10 +54,10 @@ public sealed partial class MainWindow
         return option;
     }
     private void SaveGameOptions() { if (!snapshotMode) StateStore.Save(state); }
-    private void InvalidateGamingResults() { gamingRecommended = null; gamingResults.Clear(); gamingAutomaticResult = null; }
+    private void InvalidateGamingResults() { gamingAutomaticResult = null; gamingRecommendation = null; }
     private void SelectGamingGame(InstalledGame game) {
         if (gamingCancellation != null || gamingTransitionBusy) return;
-        gamingSelected = game; gamingEndpoints.Clear(); InvalidateGamingResults(); scrollPositions["gaming"] = 0; Navigate("gaming");
+        gamingSelected = game; InvalidateGamingResults(); scrollPositions["gaming"] = 0; Navigate("gaming");
     }
     private TextBlock GameText(string text, double size, Color color) => new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = size * state.Visual.TextScale, Foreground = new SolidColorBrush(color), Margin = new Thickness(0, 0, 0, 9) };
     private Border GameCard(UIElement child) {
@@ -81,7 +77,7 @@ public sealed partial class MainWindow
             banner.Children.Add(GameText(gamingSessions.GameWasSeen ? "Игра запущена, маршрут закреплён." : "Можно запускать игру. Ожидаем игровой процесс.", 12, Muted));
             var end = SmallButton("Завершить игровой режим"); end.IsEnabled = !gamingTransitionBusy; end.Click += async delegate { await StopGamingAsync(); }; banner.Children.Add(end); body.Children.Add(GameCard(banner));
         }
-        body.Children.Add(GameText(gamingMessage, 12, gamingRecommended != null ? Green : Muted));
+        body.Children.Add(GameText(gamingMessage, 12, gamingAutomaticResult?.ProfileId != null ? Green : Muted));
 
         body.Children.Add(GameText("МОИ ИГРЫ · " + gamingLibrary.Count, 12, TextColor));
         var tools = new DockPanel { Margin = new Thickness(0, 10, 0, 12) };
@@ -111,14 +107,15 @@ public sealed partial class MainWindow
         if (image != null) panel.Children.Add(new Image { Source = image, Height = 72, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 12) });
         else panel.Children.Add(GameText(game.Name.Substring(0, Math.Min(2, game.Name.Length)).ToUpperInvariant(), 28, Accent));
         panel.Children.Add(GameText(game.Name, 17, TextColor)); panel.Children.Add(GameText(game.Source, 11, Muted));
+        if (game.RegionHint != null) panel.Children.Add(GameText("Регион в игре: " + game.RegionHint, 11, Muted));
         var pref = GetGamePreferences(game.Id); bool active = gamingSession?.GameId == game.Id;
         string assigned = pref.ProfileId == "direct" ? "Напрямую" : state.Profiles.FirstOrDefault(p => p.Id == pref.ProfileId)?.Name;
         panel.Children.Add(GameText(active ? "Игровой маршрут включён" : assigned == null ? "Конфиг не выбран" : "Сохранён: " + assigned, 11, active ? Green : Muted));
         bool ready = gamingSelected?.Id == game.Id && gamingAutomaticResult?.ProfileId != null;
-        bool fresh = ready && DateTime.UtcNow - gamingMeasuredUtc <= TimeSpan.FromMinutes(5) && gamingNetwork == GameCatalog.NetworkKey();
+        bool fresh = ready && IsGamingRecommendationCurrent(game);
         if (ready) {
             panel.Children.Add(GameText(gamingAutomaticResult.Message, 12, Green));
-            panel.Children.Add(GameText(gamingAutomaticResult.GameProtocol ? "Проверен ответ query-сервера" : "Предварительная оценка; игровой пинг не подтверждён", 11, Muted));
+            panel.Children.Add(GameText(gamingAutomaticResult.ResponseLabel, 11, Muted));
         }
         var pick = SmallButton(active ? "Открыть сессию" : fresh ? "Играть" : "Подобрать конфиг");
         pick.IsEnabled = gamingCancellation == null && !gamingTransitionBusy && (gamingSession == null || active);
@@ -137,7 +134,8 @@ public sealed partial class MainWindow
     {
         if (gamingLibraryBusy || snapshotMode) return; gamingLibraryBusy = true;
         try {
-            var manual = state.ManualGames.ToArray();
+            var manual = state.ManualGames.Select(g => new InstalledGame { Id = g.Id, Name = g.Name, Source = g.Source, InstallDirectory = g.InstallDirectory,
+                ImagePath = g.ImagePath, LaunchUri = g.LaunchUri, LauncherPath = g.LauncherPath, LauncherProduct = g.LauncherProduct, Executables = g.Executables.ToList() }).ToArray();
             var library = await Task.Run(() => GameDiscoveryService.Discover(manual));
             var icons = await Task.Run(() => library.Where(g => g.Executables.Count > 0).Take(200).Select(g => g.Executables[0]).Distinct(StringComparer.OrdinalIgnoreCase).ToDictionary(p => p, ExtractApplicationIcon, StringComparer.OrdinalIgnoreCase));
             if (closing) return;
@@ -161,13 +159,14 @@ public sealed partial class MainWindow
             var profiles = state.Profiles.Where(p => p.Protocol != "sing-box").Select(p => serializer.Deserialize<VpnProfile>(serializer.Serialize(p))).ToArray();
             if (profiles.Length == 0) throw new InvalidOperationException("Добавьте ваши серверы в NOVA — подбор будет использовать их.");
             gamingNetwork = GameCatalog.NetworkKey();
+            var stamp = new GamingRecommendationStamp(game, profiles, gamingNetwork, core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
             var endpoints = new Dictionary<string, GameEndpoint>();
             var preference = GamingOptions;
             string networkHash;
             using (var sha = System.Security.Cryptography.SHA256.Create()) networkHash = BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(gamingNetwork))).Replace("-", "");
             if (preference.ObservedNetwork == networkHash && DateTime.TryParse(preference.ObservedUtc, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.RoundtripKind, out DateTime observedUtc) && observedUtc <= DateTime.UtcNow && DateTime.UtcNow - observedUtc < TimeSpan.FromMinutes(30)) {
-                foreach (var endpoint in preference.LastEndpoints ?? new List<SavedGameEndpoint>()) {
+                foreach (var endpoint in (preference.LastEndpoints ?? new List<SavedGameEndpoint>()).Where(e => e != null).Take(12)) {
                     if (System.Net.IPAddress.TryParse(endpoint.Address, out var ip) && !System.Net.IPAddress.IsLoopback(ip) && endpoint.Port > 0 && endpoint.Port <= 65535 && (endpoint.Network == "tcp" || endpoint.Network == "udp"))
                         endpoints[endpoint.Network + endpoint.Address + ":" + endpoint.Port] = endpoint.ToEndpoint();
                 }
@@ -189,7 +188,10 @@ public sealed partial class MainWindow
                 observed.AddRange(await Task.Run(() => GameSocketDiscovery.Read(game), token));
                 if (udpObserver != null) observed.AddRange(udpObserver.Snapshot());
                 if (observed.Count > 0 && usingHistory) { endpoints.Clear(); usingHistory = false; }
-                foreach (var endpoint in observed) endpoints[endpoint.Network + endpoint.Address + ":" + endpoint.Port] = endpoint;
+                foreach (var endpoint in observed) {
+                    string key = endpoint.Network + endpoint.Address + ":" + endpoint.Port;
+                    if (!endpoints.TryGetValue(key, out var previous) || endpoint.Bytes >= previous.Bytes) endpoints[key] = endpoint;
+                }
                 gamingMessage = endpoints.Count == 0 ? "Запустите «" + game.Name + "» и войдите на сервер. NOVA продолжит подбор автоматически…" : "Соединения игры найдены. Подбираем маршрут на ваших серверах…";
                 if (!closing && currentPage == "gaming") Navigate("gaming");
                 if (endpoints.Count > 0 && (usingHistory || attempt >= 2)) break;
@@ -204,14 +206,13 @@ public sealed partial class MainWindow
             var result = await new AutomaticGamingService().SelectAsync(game, endpoints.Values, profiles, core.Status == CoreStatus.Connected ? core.ActiveProfileId : null,
                 core.ProbeCorePath, Path.Combine(StateStore.DirectoryPath, "runtime"), progress, token, core.Status == CoreStatus.Disconnected && !state.KillSwitch);
             token.ThrowIfCancellationRequested();
-            if (gamingNetwork != GameCatalog.NetworkKey()) throw new InvalidOperationException("Сеть изменилась во время подбора. Нажмите «Подобрать конфиг» ещё раз.");
+            if (!stamp.Matches(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status)) throw new InvalidOperationException("Сеть, игра или конфиги изменились во время подбора. Повторите подбор.");
+            gamingRecommendation = new GamingRecommendationStamp(game, state.Profiles, gamingNetwork, core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
             gamingAutomaticResult = result; gamingMessage = result.Message;
             if (usingHistory && result.ProfileId != null) gamingMessage += " Проверен предыдущий сервер игры; новый матч может использовать другой сервер.";
             if (result.ProfileId != null) {
                 GamingOptions.ProfileId = result.ProfileId; GamingOptions.AllowDirect = result.ProfileId == "direct";
-                gamingMeasuredUtc = DateTime.UtcNow;
-                gamingRecommended = result.Measurements.FirstOrDefault();
-                gamingMeasuredKey = GamingSelectionKey;
+
             }
             state.GamingHistory = state.GamingHistory ?? new List<GamingHistoryEntry>();
             state.GamingHistory.Insert(0, new GamingHistoryEntry { Game = game.Name, Method = result.GameProtocol ? "Ответ игрового query-сервера" : "Предварительная проверка соединений игры", Result = result.Message, Utc = DateTime.UtcNow });
@@ -220,10 +221,12 @@ public sealed partial class MainWindow
         catch (Exception ex) { InvalidateGamingResults(); gamingMessage = LogSanitizer.Sanitize(ex.Message); }
         finally { udpObserver?.Dispose(); gamingCancellation?.Dispose(); gamingCancellation = null; if (!closing && currentPage == "gaming") Navigate("gaming"); }
     }
+    private bool IsGamingRecommendationCurrent(InstalledGame game) => gamingRecommendation != null && game != null &&
+        gamingRecommendation.IsCurrent(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
     private async Task PlayGamingAsync()
     {
         if (gamingAutomaticResult?.ProfileId == null || !GamingEditable) return;
-        if (DateTime.UtcNow - gamingMeasuredUtc > TimeSpan.FromMinutes(5) || gamingNetwork != GameCatalog.NetworkKey()) { await PickGamingAutomaticallyAsync(); return; }
+        if (!IsGamingRecommendationCurrent(gamingSelected)) { await PickGamingAutomaticallyAsync(); return; }
         var game = gamingSelected;
         if (game.IsRunning) { gamingMessage = "Маршрут готов. Завершите текущий сеанс игры и нажмите «Играть»: NOVA не меняет выход во время матча."; Navigate("gaming"); return; }
         bool unchanged = gamingAutomaticResult.ProfileId == "direct" && core.Status == CoreStatus.Disconnected && !state.KillSwitch;
@@ -233,7 +236,11 @@ public sealed partial class MainWindow
         }
         try {
             GameLaunchService.Start(game);
-        } catch (Exception ex) { await StopGamingAsync("Не удалось запустить игру. " + LogSanitizer.Sanitize(ex.Message)); }
+        } catch (Exception ex) {
+            string message = "Не удалось запустить игру. " + LogSanitizer.Sanitize(ex.Message);
+            if (gamingSession != null) await StopGamingAsync(message);
+            else { gamingMessage = message; if (!closing && currentPage == "gaming") Navigate("gaming"); }
+        }
     }
     private async Task ApplyGamingAsync()
     {
@@ -246,13 +253,15 @@ public sealed partial class MainWindow
             var pref = GamingOptions; var chosen = pref.ProfileId == "direct" ? null : state.Profiles.FirstOrDefault(p => p.Id == pref.ProfileId && p.Protocol != "sing-box");
             if (pref.ProfileId == null || (pref.ProfileId != "direct" && chosen == null)) throw new InvalidOperationException("Выберите конфиг для игры.");
             if (chosen == null && (!pref.AllowDirect || state.KillSwitch)) throw new InvalidOperationException("Прямой игровой выход запрещён.");
-            if (gamingRecommended != null && (gamingMeasuredKey != GamingSelectionKey || DateTime.UtcNow - gamingMeasuredUtc > TimeSpan.FromMinutes(5) || gamingNetwork != GameCatalog.NetworkKey())) throw new InvalidOperationException("Результат устарел. Нажмите «Подобрать конфиг» ещё раз.");
+            if (!IsGamingRecommendationCurrent(gamingSelected)) throw new InvalidOperationException("Результат устарел. Нажмите «Подобрать конфиг» ещё раз.");
             bool connected = core.Status == CoreStatus.Connected; var basis = state.Profiles.FirstOrDefault(p => p.Id == core.ActiveProfileId) ?? SelectedProfile() ?? chosen;
             if (basis == null || basis.Protocol == "sing-box") throw new InvalidOperationException("Выберите обычный профиль NOVA.");
             var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
             var route = new GamingRoute { GameId = gamingSelected.Id, Game = gamingSelected.Name, ExecutablePaths = paths, Processes = paths.Select(Path.GetFileName).ToArray(), GameOnly = !connected, Profile = chosen == null ? null : serializer.Deserialize<VpnProfile>(serializer.Serialize(chosen)) };
             var frozen = RoutingOverlayService.Clone(connected ? core.LastConnectedRouting ?? state.Routing : state.Routing); frozen.Gaming = null; var effective = GamingRouting.Effective(frozen, route, state.KillSwitch);
             string error = await core.ValidateAsync(basis, effective); if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException(error);
+            if (!IsGamingRecommendationCurrent(gamingSelected)) throw new InvalidOperationException("Конфиги или сеть изменились. Повторите подбор.");
+            if (gamingSelected.IsRunning) throw new InvalidOperationException("Игра уже запустилась. Маршрут сохранён для следующего запуска.");
             gamingSessions.Prepare(route.GameId, connected, basis.Id); gamingBaseRouting = frozen; gamingSession = route;
             try { manualDisconnect = true; reconnectTimer.Stop(); core.Stop(); manualDisconnect = false; connectionRequested = true; await core.StartAsync(basis, effective); gamingSessions.Activate(); gamingLastRunningUtc = DateTime.UtcNow; gamingSessionTimer.Start(); }
             catch { gamingSession = null; gamingBaseRouting = null; core.Stop(); if (connected) { manualDisconnect = false; connectionRequested = true; await core.StartAsync(basis, GamingRouting.Effective(state.Routing, null, state.KillSwitch)); } else { manualDisconnect = true; connectionRequested = false; } gamingSessions.Finish(); throw; }

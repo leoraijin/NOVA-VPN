@@ -24,6 +24,7 @@ public sealed class InstalledGame
     [DataMember] public string LaunchUri;
     [DataMember] public string LauncherPath;
     [DataMember] public string LauncherProduct;
+    public string RegionHint;
     public string Confidence => Executables.Count > 0 ? "Игровые файлы найдены" : "Выберите игровой EXE в подробностях";
     public bool IsRunning => RunningPaths().Any();
     public IEnumerable<string> RunningPaths()
@@ -95,11 +96,20 @@ public static class GameDiscoveryService
             }
         }
         foreach (var item in (manual ?? Enumerable.Empty<InstalledGame>()).Where(g => g != null && g.Executables != null && g.Executables.Any(File.Exists))) {
-            result.RemoveAll(g => g.Id == item.Id || (item.Id.StartsWith("manual:") && string.Equals(g.InstallDirectory, item.InstallDirectory, StringComparison.OrdinalIgnoreCase)));
+            var detected = result.FirstOrDefault(g => g.Id == item.Id || g.Executables.Intersect(item.Executables, StringComparer.OrdinalIgnoreCase).Any());
+            if (detected != null) {
+                item.LaunchUri = item.LaunchUri ?? detected.LaunchUri;
+                item.LauncherPath = item.LauncherPath ?? detected.LauncherPath;
+                item.LauncherProduct = item.LauncherProduct ?? detected.LauncherProduct;
+                if (item.Source == "Добавлено вручную") { item.Source = detected.Source; item.InstallDirectory = detected.InstallDirectory; }
+            }
+            result.RemoveAll(g => g.Id == item.Id || g == detected || (item.Id.StartsWith("manual:") && string.Equals(g.InstallDirectory, item.InstallDirectory, StringComparison.OrdinalIgnoreCase)));
             result.Add(item);
         }
-        return result.GroupBy(g => g.InstallDirectory.TrimEnd('\\'), StringComparer.OrdinalIgnoreCase)
+        var library = result.GroupBy(g => g.InstallDirectory.TrimEnd('\\'), StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderByDescending(x => x.Executables.Count).First()).OrderBy(g => g.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        foreach (var game in library) game.RegionHint = GameAdapter.ReadRegionHint(game, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        return library;
     }
 
     public static List<InstalledGame> DiscoverSteam(string steamRoot)
@@ -123,6 +133,8 @@ public static class GameDiscoveryService
                     var app = Child(ParseVdf(ReadSmallFile(manifest)), "AppState");
                     string id = Value(app, "appid"), name = Value(app, "name"), directory = Value(app, "installdir");
                     if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(directory)) continue;
+                    // Steam's installation manifests include software and shared runtimes as well as games.
+                    if (new[] { "228980", "431960", "629520" }.Contains(id) || Regex.IsMatch(name, "^(Steamworks Common Redistributables|Wallpaper Engine|Soundpad)$", RegexOptions.IgnoreCase)) continue;
                     if (long.TryParse(Value(app, "StateFlags"), out long flags) && (flags & 4) == 0) continue;
                     // Ignore download-only manifests until an installation directory exists.
                     string root = Path.GetFullPath(Path.Combine(apps, "common"));
@@ -157,7 +169,9 @@ public static class GameDiscoveryService
                 game.Executables = FindGameExecutables(game);
                 if (!string.IsNullOrEmpty(launch)) {
                     string executable = Path.GetFullPath(Path.Combine(install, launch.Replace('/', Path.DirectorySeparatorChar)));
-                    if (IsInside(executable, install) && File.Exists(executable) && executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) game.Executables.Insert(0, executable);
+                    var definition = GameCatalog.Games.FirstOrDefault(g => name.Equals(g.Name, StringComparison.OrdinalIgnoreCase));
+                    bool gameBinary = definition == null || definition.Processes.Contains(Path.GetFileName(executable), StringComparer.OrdinalIgnoreCase);
+                    if (gameBinary && IsInside(executable, install) && File.Exists(executable) && executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) game.Executables.Insert(0, executable);
                 }
                 game.Executables = game.Executables.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 result.Add(game);
