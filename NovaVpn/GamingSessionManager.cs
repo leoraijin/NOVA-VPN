@@ -19,6 +19,18 @@ public sealed class GamePreferences
     [DataMember] public bool AllowDirect;
     [DataMember] public bool StopWhenGameExits = true;
     [DataMember] public bool EndOnDisconnect = true;
+    [DataMember] public System.Collections.Generic.List<SavedGameEndpoint> LastEndpoints;
+    [DataMember] public string ObservedUtc;
+    [DataMember] public string ObservedNetwork;
+}
+
+[DataContract]
+public sealed class SavedGameEndpoint
+{
+    [DataMember] public string Address;
+    [DataMember] public int Port;
+    [DataMember] public string Network;
+    public GameEndpoint ToEndpoint() => new GameEndpoint { Address = Address, Port = Port, Network = Network };
 }
 
 public sealed class GamingSessionManager

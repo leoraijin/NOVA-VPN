@@ -434,7 +434,8 @@ internal sealed class NovaInstaller : Form
 
     private static void StopInstalledComponents(string target)
     {
-        foreach (string relative in new[] { "NOVA Core Host.exe", "core\\sing-box.exe", "core\\reality-client.exe", "zapret\\current\\bin\\winws.exe" })
+        // Stop the owner first: an older client can immediately respawn a killed core.
+        foreach (string relative in new[] { "NOVA VPN.exe", "NOVA Core Host.exe", "core\\sing-box.exe", "core\\reality-client.exe", "zapret\\current\\bin\\winws.exe" })
         {
             string expected = Path.GetFullPath(Path.Combine(target, relative));
             foreach (Process candidate in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(relative)))
@@ -445,6 +446,10 @@ internal sealed class NovaInstaller : Form
                 if (actual == null || !String.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)) continue;
                 try
                 {
+                    if (!candidate.HasExited && relative == "NOVA VPN.exe")
+                    {
+                        if (candidate.CloseMainWindow()) candidate.WaitForExit(5000);
+                    }
                     if (!candidate.HasExited) candidate.Kill();
                     if (!candidate.WaitForExit(5000))
                         throw new IOException("Компонент NOVA ещё завершает работу: " + Path.GetFileName(relative));

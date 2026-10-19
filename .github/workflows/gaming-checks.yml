@@ -1,0 +1,38 @@
+name: Automatic gaming checks
+on:
+  push:
+    branches: [main]
+    paths: ['NovaVpn/**', 'tests/**', 'packaging/**', 'NOVA VPN.csproj', '.github/workflows/gaming-checks.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: automatic-gaming-checks
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore verified runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory work -Force | Out-Null
+          Invoke-WebRequest 'https://github.com/leoraijin/NOVA-VPN/releases/download/v2.3.36/NOVA-VPN-Windows-2.3.36-Portable.zip' -OutFile work/runtime.zip
+          if ((Get-FileHash work/runtime.zip -Algorithm SHA256).Hash -ne 'F6A4A388EEB00127EBAE7AE68D68584C091BEB332EFB150F581BDA0598BE4FDE') { throw 'Runtime checksum mismatch' }
+          Expand-Archive work/runtime.zip work/payload
+      - name: Build and check automatic gaming
+        shell: pwsh
+        run: |
+          $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if (!$msbuild) { throw 'MSBuild not found' }
+          & $msbuild 'NOVA VPN.csproj' /t:Rebuild /p:Configuration=Release /v:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          $csc = Join-Path (Split-Path $msbuild) 'Roslyn\csc.exe'
+          ./tests/Run-GamingTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/gaming-tests) -CscPath $csc
+          ./tests/Run-GameLibraryTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/library-tests) -CscPath $csc
+          powershell -NoProfile -STA -File tests/GamingUiTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Gaming UI failed' }
+          powershell -NoProfile -STA -File tests/SmoothScrollIntegrationTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Existing page regression' }

@@ -41,6 +41,24 @@ try {
   } finally {$lock.Dispose()}
   $type.GetMethod('PreflightInstallFiles',$flags).Invoke($null,[object[]]@([IO.Compression.ZipArchive]$zip,[string]$target))
   $zip.Dispose();$memory.Dispose()
+  $ownerSource=Join-Path $WorkPath 'RespawnOwner.cs'
+  [IO.File]::WriteAllText($ownerSource,'using System; using System.Diagnostics; using System.IO; using System.Threading; class Owner { static void Main() { string core=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"core","sing-box.exe"); Process child=null; while(true) { if(child==null || child.HasExited) child=Process.Start(new ProcessStartInfo(core){UseShellExecute=false,CreateNoWindow=true}); Thread.Sleep(40); } } }')
+  $ownerExe=Join-Path $target 'NOVA VPN.exe'
+  & $csc /nologo /target:exe "/out:$ownerExe" $ownerSource
+  if($LASTEXITCODE -ne 0){throw 'Respawn owner fixture compilation failed'}
+  $ownerProcess=Start-Process -FilePath $ownerExe -WindowStyle Hidden -PassThru
+  try {
+    Start-Sleep -Milliseconds 700
+    $type.GetMethod('StopInstalledComponents',$flags).Invoke($null,[object[]]@([string]$target))
+    if(-not $ownerProcess.WaitForExit(3000)){throw 'Installed owner was left alive to respawn core'}
+    Start-Sleep -Milliseconds 700
+    $file=[IO.File]::Open($ownedExe,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None);$file.Dispose()
+    if($otherProcess.HasExited){throw 'Foreign same-name core was stopped during owner shutdown'}
+  } finally {
+    if(-not $ownerProcess.HasExited){$ownerProcess.Kill();$ownerProcess.WaitForExit(3000)|Out-Null};$ownerProcess.Dispose()
+    $type.GetMethod('StopInstalledComponents',$flags).Invoke($null,[object[]]@([string]$target))
+  }
+  Write-Output 'PASS: installed auto-reconnect owner stopped before core; no respawn and unrelated core survived.'
   Write-Output 'PASS: orphan core at exact installation path stopped, foreign same-name core preserved, executable unlocked, payload locks detected before replacement, retry succeeds.'
 } finally {
   foreach($process in @($ownedProcess,$otherProcess)){if($process){try{if(-not $process.HasExited){$process.Kill();$process.WaitForExit(3000)|Out-Null}}finally{$process.Dispose()}}}

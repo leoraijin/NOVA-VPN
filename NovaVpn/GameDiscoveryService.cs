@@ -21,6 +21,9 @@ public sealed class InstalledGame
     [DataMember] public string InstallDirectory;
     [DataMember] public List<string> Executables = new List<string>();
     [DataMember] public string ImagePath;
+    [DataMember] public string LaunchUri;
+    [DataMember] public string LauncherPath;
+    [DataMember] public string LauncherProduct;
     public string Confidence => Executables.Count > 0 ? "Игровые файлы найдены" : "Выберите игровой EXE в подробностях";
     public bool IsRunning => RunningPaths().Any();
     public IEnumerable<string> RunningPaths()
@@ -126,6 +129,7 @@ public static class GameDiscoveryService
                     string install = Path.GetFullPath(Path.Combine(root, directory));
                     if (!IsInside(install, root) || !Directory.Exists(install)) continue;
                     var game = new InstalledGame { Id = StableId("steam", id, install), Name = name, Source = "Steam", InstallDirectory = install };
+                    if (ulong.TryParse(id, out _)) game.LaunchUri = "steam://rungameid/" + id;
                     game.Executables = FindGameExecutables(game);
                     string cache = Path.Combine(steamRoot, "appcache", "librarycache");
                     game.ImagePath = new[] { id + "_library_600x900.jpg", id + "_library_600x900_2x.jpg", id + "_header.jpg", id + "_library_header.jpg", Path.Combine(id,"library_600x900.jpg"), Path.Combine(id,"library_600x900_2x.jpg"), Path.Combine(id,"header.jpg") }.Select(p => Path.Combine(cache, p)).FirstOrDefault(File.Exists);
@@ -148,6 +152,8 @@ public static class GameDiscoveryService
                 if (data.TryGetValue("bIsIncompleteInstall", out object incomplete) && Equals(incomplete, true)) continue;
                 install = Path.GetFullPath(install);
                 var game = new InstalledGame { Id = StableId("epic", Value(data, "AppName"), install), Name = name, Source = "Epic Games", InstallDirectory = install };
+                string appName = Value(data, "AppName");
+                if (!string.IsNullOrWhiteSpace(appName)) game.LaunchUri = "com.epicgames.launcher://apps/" + Uri.EscapeDataString(appName) + "?action=launch&silent=true";
                 game.Executables = FindGameExecutables(game);
                 if (!string.IsNullOrEmpty(launch)) {
                     string executable = Path.GetFullPath(Path.Combine(install, launch.Replace('/', Path.DirectorySeparatorChar)));
@@ -190,6 +196,8 @@ public static class GameDiscoveryService
                 if (name.IndexOf("valorant", StringComparison.OrdinalIgnoreCase) >= 0) name = "VALORANT";
                 else if (name.IndexOf("league", StringComparison.OrdinalIgnoreCase) >= 0) name = "League of Legends";
                 var game = new InstalledGame { Id = StableId("riot", "", executable), Name = name, Source = "Riot Games", InstallDirectory = root };
+                game.LauncherPath = entry.Value as string;
+                game.LauncherProduct = name == "VALORANT" ? "valorant" : name == "League of Legends" ? "league_of_legends" : null;
                 game.Executables = FindGameExecutables(game); if (game.Executables.Count == 0) game.Executables.Add(executable); result.Add(game);
             }
         } catch (IOException) { } catch (UnauthorizedAccessException) { } catch (ArgumentException) { } catch (InvalidOperationException) { }

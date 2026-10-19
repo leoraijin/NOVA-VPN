@@ -27,15 +27,12 @@ try {
     $type.GetMethod('SelectGamingGame',$flags).Invoke($window,[object[]]@($library[0]))
     $window.UpdateLayout()
     $nodes=@(Nodes ($type.GetField('contentHost',$flags).GetValue($window)))
-    $check=@($nodes | Where-Object {$_ -is [Windows.Controls.CheckBox] -and $_.Content -like 'Разрешить*'})
-    if($check.Count -ne 1 -or $check[0].IsChecked) {throw 'Direct probes must default to opt-out'}
-    if(@($nodes | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Включить только для игры' -and $_.IsEnabled}).Count) {throw 'Apply enabled without assigned profile'}
+    if(@($nodes | Where-Object {$_ -is [Windows.Controls.ComboBox] -or $_ -is [Windows.Controls.CheckBox]}).Count) {throw 'Automatic gaming UI exposes route choices'}
+    if(@($nodes | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Играть' -and $_.IsEnabled}).Count) {throw 'Play enabled without automatic result'}
+    if(-not @($nodes | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Подобрать конфиг'}).Count) {throw 'Automatic pick action missing'}
   }
   $state=$type.GetField('state',$flags).GetValue($window)
   $state.KillSwitch=$true
-  $window.ShowPageForSnapshot('gaming');$window.UpdateLayout()
-  $nodes=@(Nodes ($type.GetField('contentHost',$flags).GetValue($window)))
-  if(@($nodes | Where-Object {$_ -is [Windows.Controls.CheckBox] -and $_.Content -like 'Разрешить*' -and $_.IsEnabled}).Count) {throw 'Kill Switch allows direct probing'}
   $session=[Activator]::CreateInstance($assembly.GetType('NovaVpn.GamingRoute'))
   $session.Game='Fixture';$session.Processes=@('fixture-game.exe')
   $type.GetField('gamingSession',$flags).SetValue($window,$session)
@@ -55,5 +52,5 @@ try {
     $stream=[IO.File]::Create([IO.Path]::GetFullPath($ScreenshotPath))
     try {$encoder.Save($stream)} finally {$stream.Dispose()}
   }
-  Write-Output 'PASS: game cards at 3 widths, selected game details, default direct opt-out, assignment gate, Kill Switch and session lock. Snapshot state only.'
+  Write-Output 'PASS: game cards at 3 widths, selected game details, no manual route controls, automatic-result gate, Kill Switch and session lock. Snapshot state only.'
 } finally {$window.Close();$app.Shutdown()}

@@ -125,6 +125,16 @@ public static class GamingTests
                 new[] { FakeProfile() }, core, work, true, null, CancellationToken.None);
             Check(results.Count == 2 && results.All(r => r.Reliable), "TCP direct and authenticated SOCKS CONNECT failed");
         } finally { stop = true; listener.Stop(); await accept; }
+        if (Socket.OSSupportsIPv6) {
+            var ipv6 = new TcpListener(IPAddress.IPv6Loopback, 0); ipv6.Start();
+            bool done = false;
+            var accepting = Task.Run(async () => { try { while (!done) { using (var client = await ipv6.AcceptTcpClientAsync()) { } } } catch (ObjectDisposedException) { } catch (SocketException) { } });
+            try {
+                var results = await new GamingProbeService().ScanAsync(new GamingTarget { Host = "::1", Port = ((IPEndPoint)ipv6.LocalEndpoint).Port },
+                    new[] { FakeProfile() }, core, work, true, null, CancellationToken.None);
+                Check(results.Count == 2 && results.All(r => r.Reliable), "IPv6 direct and authenticated SOCKS CONNECT failed");
+            } finally { done = true; ipv6.Stop(); await accepting; }
+        }
     }
     [STAThread]
     public static int Main(string[] args)

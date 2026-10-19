@@ -20,19 +20,20 @@ public sealed class GamingProbeService
     public static bool IsScanning => Volatile.Read(ref scanning) != 0;
 
     public async Task<List<GamingProbeResult>> ScanAsync(GamingTarget target, IEnumerable<VpnProfile> profiles,
-        string corePath, string runtime, bool includeDirect, IProgress<string> progress, CancellationToken token)
+        string corePath, string runtime, bool includeDirect, IProgress<string> progress, CancellationToken token, int rounds = 10)
     {
         if (Interlocked.CompareExchange(ref scanning, 1, 0) != 0) throw new InvalidOperationException("Проверка уже выполняется.");
         var channels = new List<GamingProbeChannel>();
         try {
             // Resolve once so every candidate reaches the same server, not different DNS-balanced addresses.
             var addresses = await WithTimeout(Dns.GetHostAddressesAsync(target.Host), token);
-            var ip = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
-            if (ip == null) throw new IOException("Для этой проверки нужен IPv4-адрес сервера.");
+            var ip = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ?? addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetworkV6);
+            if (ip == null) throw new IOException("Адрес сервера не удалось определить.");
             var endpoint = new IPEndPoint(ip, target.Port);
             if (includeDirect) channels.Add(new GamingProbeChannel(null, endpoint, target.A2S));
             var skipped = new List<GamingProbeResult>();
-            foreach (var profile in profiles.Take(8)) {
+            if (rounds < 1 || rounds > 20) throw new ArgumentOutOfRangeException(nameof(rounds));
+            foreach (var profile in profiles) {
                 token.ThrowIfCancellationRequested();
                 progress?.Report("Подготовка: " + profile.Name);
                 try {
@@ -48,10 +49,10 @@ public sealed class GamingProbeService
             }
             // Warm-up is never included. Interleave candidates to reduce temporal bias.
             foreach (var channel in channels) { try { await channel.MeasureAsync(token); } catch (OperationCanceledException) { throw; } catch { } }
-            for (int round = 0; round < 10; round++) {
+            for (int round = 0; round < rounds; round++) {
                 foreach (var channel in (round % 2 == 0 ? channels : channels.AsEnumerable().Reverse()).ToList()) {
                     token.ThrowIfCancellationRequested();
-                    progress?.Report("Серия " + (round + 1) + "/10 · " + channel.Result.Name);
+                    progress?.Report("Серия " + (round + 1) + "/" + rounds + " · " + channel.Result.Name);
                     channel.Result.Attempts++;
                     try { channel.Result.Samples.Add(await channel.MeasureAsync(token)); }
                     catch (OperationCanceledException) { throw; }
@@ -129,7 +130,7 @@ internal sealed class GamingProbeChannel : IDisposable
 
     private async Task<double> MeasureTcpAsync(CancellationToken token)
     {
-        using (var client = new TcpClient()) {
+        using (var client = new TcpClient(profile == null ? target.AddressFamily : AddressFamily.InterNetwork)) {
             client.NoDelay = true;
             if (profile == null) {
                 var clock = Stopwatch.StartNew();
@@ -148,7 +149,7 @@ internal sealed class GamingProbeChannel : IDisposable
     private async Task<double> MeasureUdpAsync(CancellationToken token)
     {
         using (var control = new TcpClient())
-        using (var udp = new UdpClient(new IPEndPoint(profile == null ? IPAddress.Any : IPAddress.Loopback, 0))) {
+        using (var udp = new UdpClient(new IPEndPoint(profile == null ? target.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any : IPAddress.Loopback, 0))) {
             IPEndPoint relay = target;
             if (profile != null) {
                 await ConnectAsync(control, new IPEndPoint(IPAddress.Loopback, port), token);
@@ -178,10 +179,12 @@ internal sealed class GamingProbeChannel : IDisposable
         var result = await GamingProbeService.WithTimeout(udp.ReceiveAsync(), token);
         if (profile == null) return result.Buffer;
         var data = result.Buffer;
-        if (data.Length < 10 || data[0] != 0 || data[1] != 0 || data[2] != 0 || data[3] != 1) throw new IOException("Invalid SOCKS UDP reply");
-        if (!data.Skip(4).Take(4).SequenceEqual(target.Address.GetAddressBytes()) || ((data[8] << 8) | data[9]) != target.Port)
+        if (data.Length < 4 || data[0] != 0 || data[1] != 0 || data[2] != 0) throw new IOException("Invalid SOCKS UDP reply");
+        int addressSize = data[3] == 1 ? 4 : data[3] == 4 ? 16 : throw new IOException("Invalid SOCKS UDP address");
+        int headerSize = 4 + addressSize + 2;
+        if (data.Length < headerSize || !data.Skip(4).Take(addressSize).SequenceEqual(target.Address.GetAddressBytes()) || ((data[4 + addressSize] << 8) | data[5 + addressSize]) != target.Port)
             throw new IOException("Unexpected UDP source");
-        return data.Skip(10).ToArray();
+        return data.Skip(headerSize).ToArray();
     }
 
     internal static void ValidateA2S(byte[] bytes)
@@ -207,7 +210,7 @@ internal sealed class GamingProbeChannel : IDisposable
         var auth = await ReadAsync(stream, 2, token);
         if (auth[0] != 1 || auth[1] != 0) throw new IOException("SOCKS authentication failed");
     }
-    private static byte[] Address(IPEndPoint endpoint) => new byte[] { 1 }.Concat(endpoint.Address.GetAddressBytes()).Concat(new byte[] { (byte)(endpoint.Port >> 8),(byte)endpoint.Port }).ToArray();
+    private static byte[] Address(IPEndPoint endpoint) => new byte[] { endpoint.AddressFamily == AddressFamily.InterNetworkV6 ? (byte)4 : (byte)1 }.Concat(endpoint.Address.GetAddressBytes()).Concat(new byte[] { (byte)(endpoint.Port >> 8),(byte)endpoint.Port }).ToArray();
     private static byte[] Request(byte command, IPEndPoint endpoint) => new byte[] { 5,command,0 }.Concat(Address(endpoint)).ToArray();
     private static async Task<IPEndPoint> ReadReplyAsync(NetworkStream stream, CancellationToken token) {
         var header = await ReadAsync(stream, 4, token);
