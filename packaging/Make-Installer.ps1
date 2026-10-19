@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$ZapretArchive = (Join-Path $PSScriptRoot '..\..\zapret-1.10.3.zip'),
     [string]$AppOutput = (Join-Path $PSScriptRoot '..\bin\Release\NOVA VPN.exe'),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\..\outputs'),
@@ -73,7 +73,7 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ASSET-NOTICES.txt') -Destination $payload
 $releaseNotes = @'
-NOVA VPN 2.4.0 beta 1 — 19 октября 2026
+NOVA VPN 2.4.0 — 19 октября 2026
 - Игровой режим: отдельный выход для игры, подбор среди профилей, сравнение с прямым маршрутом по разрешению.
 - TCP CONNECT — оценка; A2S UDP — ответ query-порта. 10 серий, медиана, p95 и доля неотвеченных проб.
 - Маршрут закреплён. Адрес цели вводится вручную. Реальные игры и улучшение пинга не подтверждены.

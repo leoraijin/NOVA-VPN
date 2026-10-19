@@ -22,7 +22,7 @@ public static class ReleaseNotesService
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
         new ReleaseNoteEntry(new Version(2, 4, 0),
-            "Тестовый игровой режим: отдельный выход для игры, сравнение ваших профилей и прямого маршрута по разрешению.",
+            "Игровой режим: отдельный выход для игры, сравнение ваших профилей и прямого маршрута по разрешению.",
             "TCP — предварительная оценка; A2S UDP — ответ query-порта. Цель вводится вручную. Пинг реальных матчей и снижение задержки не подтверждены.",
             "Маршрут закреплён на время игры. Перед подбором завершите игру и отключите VPN/Zapret."),
 		new ReleaseNoteEntry(new Version(2, 3, 36),
