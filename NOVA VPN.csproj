@@ -61,6 +61,7 @@
     <Compile Include="NovaVpn\SmoothScrollBehavior.cs" />
     <Compile Include="NovaVpn\PixelScrollSurface.cs" />
     <Compile Include="NovaVpn\DragRouteSwitch.cs" />
+    <Compile Include="NovaVpn\RoutingListEditor.cs" />
     <Compile Include="NovaVpn\ReleaseNotesService.cs" />
     <Compile Include="NovaVpn\ConfigBuilder.cs" />
     <Compile Include="NovaVpn\GamingModels.cs" />

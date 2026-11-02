@@ -2462,7 +2462,7 @@ public sealed partial class MainWindow : Window
 			warning.TextWrapping = TextWrapping.Wrap;
 			stackPanel.Children.Add(warning);
 		}
-		stackPanel.Children.Add(T("Подсказка: домен *.example.com включает все его поддомены. Одно правило — одна строка.", 10.5, Muted));
+		stackPanel.Children.Add(T("Подсказка: домен *.example.com включает все его поддомены. Каждое правило — отдельная ячейка. Новые ячейки добавляются кнопкой «Добавить».", 10.5, Muted));
 		ScrollViewer scrollViewer = TouchScrollViewer(new ScrollViewer());
 		scrollViewer.Content = stackPanel;
 		scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
@@ -2916,7 +2916,7 @@ public sealed partial class MainWindow : Window
 		});
 		grid.RowDefinitions.Add(new RowDefinition
 		{
-			Height = new GridLength(76.0)
+			Height = GridLength.Auto
 		});
 		Grid grid2 = new Grid();
 		grid2.ColumnDefinitions.Add(new ColumnDefinition
@@ -2934,59 +2934,52 @@ public sealed partial class MainWindow : Window
 		});
 		StackPanel stackPanel = new StackPanel();
 		stackPanel.Children.Add(T(title, 11.5, TextColor, FontWeights.SemiBold));
-		stackPanel.Children.Add(T(caption, 9.0, Muted));
+		var captionText = T(caption, 9.0, Muted);
+		captionText.TextWrapping = TextWrapping.Wrap;
+		stackPanel.Children.Add(captionText);
 		Grid.SetColumn(stackPanel, 1);
 		grid2.Children.Add(stackPanel);
 		grid.Children.Add(grid2);
-		Border border3 = new Border();
-		border3.Background = new SolidColorBrush(C("#0F1219"));
-		border3.BorderBrush = new SolidColorBrush(C("#242A37"));
-		border3.BorderThickness = new Thickness(1.0);
-		border3.CornerRadius = Radius(10.0);
-		border3.Padding = new Thickness(10.0, 7.0, 8.0, 7.0);
-		Border border4 = border3;
-		TextBox editor = new TextBox
-		{
-			Text = string.Join(Environment.NewLine, values),
-			Background = Brushes.Transparent,
-			BorderThickness = new Thickness(0.0),
-			Foreground = new SolidColorBrush(C("#CBD1DC")),
-			CaretBrush = new SolidColorBrush(AccentLight),
-			FontFamily = new FontFamily("Consolas"),
-			FontSize = 13 * state.Visual.TextScale,
-			AcceptsReturn = true,
-			TextWrapping = TextWrapping.NoWrap,
-			VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-			Padding = new Thickness(0.0)
-		};
 		bool zapretTransitionActive = state.Zapret?.RoutingChangesApplied == true;
 		bool routingListLocked = zapretTransitionActive && (key == "proxy-domains" || key == "direct-domains"
 			|| key == "proxy-apps" || key == "direct-apps" || key == "proxy-paths" || key == "direct-paths");
+		string itemLabel = key.EndsWith("domains", StringComparison.Ordinal) ? "домен"
+			: key.EndsWith("apps", StringComparison.Ordinal) ? "приложение"
+			: key.EndsWith("paths", StringComparison.Ordinal) ? "путь" : "правило";
+		var editor = new RoutingListEditor(values, () =>
+		{
+			if (!snapshotMode) StateStore.Save(state);
+		}, () => new TextBox
+		{
+			Background = new SolidColorBrush(palette.Input),
+			Foreground = new SolidColorBrush(TextColor),
+			CaretBrush = new SolidColorBrush(AccentLight),
+			BorderBrush = new SolidColorBrush(BorderColor),
+			BorderThickness = new Thickness(1),
+			FontFamily = new FontFamily("Consolas"),
+			FontSize = 13 * state.Visual.TextScale,
+			MinHeight = Math.Max(36, 36 * state.Visual.TextScale),
+			VerticalContentAlignment = VerticalAlignment.Center,
+			Padding = new Thickness(8, 6, 8, 6),
+			ToolTip = caption
+		}, text =>
+		{
+			Button button = SmallButton(text);
+			button.Foreground = new SolidColorBrush(TextColor);
+			return button;
+		}, itemLabel, routingListLocked);
 		if (routingListLocked)
-		{
-			editor.IsReadOnly = true;
 			editor.ToolTip = "Выключите Zapret, чтобы редактировать списки маршрутов. Исходные VPN-маршруты временно сохранены и вернутся автоматически.";
-		}
-		editor.TextChanged += delegate
-		{
-			if (routingListLocked) return;
-			values.Clear();
-			values.AddRange(from x in editor.Text.Replace("\r", "").Split(new char[1] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
-				select x.Trim() into x
-				where x.Length > 0
-				select x);
-			StateStore.Save(state);
-		};
-		border4.Child = editor;
-		Grid.SetRow(border4, 2);
-		grid.Children.Add(border4);
+		AutomationProperties.SetName(editor, title);
+		Grid.SetRow(editor, 2);
+		grid.Children.Add(editor);
 		border2.Child = grid;
 		VisualDesign.ApplyGlassSurface(border2, state.Visual);
 		EnableCardMotion(border2);
 		return border2;
 	}
 
-    private UIElement BuildConnectionJournal()
+	    private UIElement BuildConnectionJournal()
     {
         var panel = new StackPanel();
         var header = new DockPanel { Margin = new Thickness(0,0,0,12) };
