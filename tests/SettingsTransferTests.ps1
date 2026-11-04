@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$AssemblyPath)
 $ErrorActionPreference = 'Stop'
-Add-Type -Path ([IO.Path]::GetFullPath($AssemblyPath))
+[void][Reflection.Assembly]::LoadFrom([IO.Path]::GetFullPath($AssemblyPath))
 $folder = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 New-Item -ItemType Directory $folder | Out-Null
 try {
