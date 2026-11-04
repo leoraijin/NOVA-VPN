@@ -1,0 +1,99 @@
+name: Complete Windows download
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/windows-complete.yml']
+  release:
+    types: [published]
+  workflow_run:
+    workflows: ['Windows build and release']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: windows-complete-download
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Assemble and verify complete download
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = gh release view --json tagName,assets | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'Cannot read latest release' }
+          $tag = $release.tagName
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Unexpected release tag' }
+          $version = $tag.Substring(1)
+          $name = "NOVA-VPN-Windows-$version-Complete.zip"
+          if ($release.assets.name -contains $name) { Write-Output "$name already published"; exit 0 }
+          New-Item -ItemType Directory downloads,bundle,outputs | Out-Null
+          gh release download $tag --dir downloads
+          if ($LASTEXITCODE) { throw 'Release download failed' }
+          $checksums = @{}
+          foreach ($line in Get-Content downloads/SHA256SUMS.txt) {
+            if ($line -match '^([a-fA-F0-9]{64})\s+(.+)$') { $checksums[$Matches[2]] = $Matches[1] }
+          }
+          foreach ($file in Get-ChildItem downloads -File | Where-Object Name -ne SHA256SUMS.txt) {
+            if (!$checksums.ContainsKey($file.Name)) { throw "Missing checksum for $($file.Name)" }
+            if ((Get-FileHash $file.FullName).Hash -ne $checksums[$file.Name]) { throw "Checksum mismatch for $($file.Name)" }
+          }
+          $installer = "NOVA.VPN.Setup.$version.exe"
+          $portable = "NOVA-VPN-Windows-$version-Portable.zip"
+          foreach ($required in @($installer,$portable)) {
+            if (!(Test-Path (Join-Path downloads $required))) { throw "Missing $required" }
+          }
+          Expand-Archive (Join-Path downloads $portable) bundle
+          if (!(Test-Path 'bundle/NOVA VPN.exe') -or !(Test-Path 'bundle/core/sing-box.exe')) { throw 'Incomplete portable payload' }
+          Copy-Item (Join-Path downloads $installer) bundle
+          New-Item -ItemType Directory bundle/Release-files | Out-Null
+          Get-ChildItem downloads -File | Where-Object Name -NotIn @($installer,$portable) | Copy-Item -Destination bundle/Release-files
+          @"
+          NOVA VPN $version
+          
+          Extract the entire ZIP into a folder before launching.
+          Launch NOVA VPN.exe to use the included portable client.
+          Launch $installer to install NOVA VPN.
+          The installer contains the runtime payload.
+          Release-files contains the release documentation, checksums and third-party source archives.
+          "@ | Set-Content bundle/START-HERE.txt -Encoding utf8
+          $root = (Resolve-Path bundle).Path
+          $files = @(Get-ChildItem bundle -File -Recurse)
+          Compress-Archive -Path bundle/* -DestinationPath "outputs/$name" -CompressionLevel Optimal
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path "outputs/$name"))
+          try {
+            $entries = @($zip.Entries | Where-Object { $_.Name })
+            if ($entries.Count -ne $files.Count) { throw 'Archive file count mismatch' }
+            foreach ($file in $files) {
+              $relative = [IO.Path]::GetRelativePath($root,$file.FullName).Replace('\','/')
+              $entry = $zip.GetEntry($relative)
+              if (!$entry -or $entry.Length -ne $file.Length) { throw "Archive entry mismatch $relative" }
+              $stream = $entry.Open()
+              try {
+                $sha = [Security.Cryptography.SHA256]::Create()
+                try { $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
+                finally { $sha.Dispose() }
+              } finally { $stream.Dispose() }
+              if ($hash -ne (Get-FileHash $file.FullName).Hash) { throw "Archive checksum mismatch $relative" }
+            }
+          } finally { $zip.Dispose() }
+          $hash = (Get-FileHash "outputs/$name").Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content "outputs/$name.sha256" -Encoding ascii
+          gh release upload $tag "outputs/$name" "outputs/$name.sha256"
+          if ($LASTEXITCODE) { throw 'Complete archive upload failed' }
+          gh release view $tag --json body --jq .body | Set-Content release-body.txt -Encoding utf8
+          if ($LASTEXITCODE) { throw 'Cannot read release notes' }
+          $intro = "Download [$name](https://github.com/$env:GH_REPO/releases/download/$tag/$name) for the complete package with the installer and portable client. Extract the entire archive before launching."
+          $body = Get-Content release-body.txt -Raw
+          ($intro + [Environment]::NewLine + [Environment]::NewLine + $body) | Set-Content release-body.txt -Encoding utf8
+          gh release edit $tag --notes-file release-body.txt
+          if ($LASTEXITCODE) { throw 'Release notes update failed' }
