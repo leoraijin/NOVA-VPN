@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 3),
+            "Кнопки импорта и экспорта настроек расположены рядом на странице маршрутизации.",
+            "Перенос настроек сохраняет полные пути приложений. Исправлен импорт старых файлов с отсутствующими полями."),
         new ReleaseNoteEntry(new Version(2, 6, 2),
             "Домены и приложения в маршрутизации редактируются в отдельных ячейках с кнопками добавления и удаления.",
             "Вставка списка распределяет правила по ячейкам. Существующие списки и ограничения Zapret сохранены."),
