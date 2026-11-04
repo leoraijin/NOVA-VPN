@@ -75,7 +75,7 @@ jobs:
           try { $stream.CopyTo($portable) } finally { $portable.Dispose(); $stream.Dispose() }
           git archive --format=zip --output=outputs/NOVA-VPN-Windows-2.6.3-source.zip HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
-          Copy-Item docs/ROUTING-RELEASE-NOTES.md outputs/RELEASE-NOTES.md
+          Copy-Item docs/SETTINGS-RELEASE-NOTES.md outputs/RELEASE-NOTES.md
           @"
           Build commit: $env:GITHUB_SHA
           Routing entry UI: eight lists, independent edits, add/delete, multiline paste, Zapret locks, light/dark and narrow layout checks: PASS.
@@ -107,7 +107,7 @@ jobs:
           gh release view v2.6.3 --repo leoraijin/NOVA-VPN --json id 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; existing assets must never be overwritten' }
           if ($LASTEXITCODE -ne 0) {
-            gh release create v2.6.3 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft --prerelease=false --title 'NOVA VPN 2.6.3 — отдельные ячейки маршрутизации' --notes-file docs/ROUTING-RELEASE-NOTES.md
+            gh release create v2.6.3 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft --prerelease=false --title 'NOVA VPN 2.6.3 — импорт и экспорт настроек' --notes-file docs/SETTINGS-RELEASE-NOTES.md
             if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }
           }
           foreach ($asset in Get-ChildItem outputs -File) {
@@ -119,5 +119,5 @@ jobs:
             }
             if (!$uploaded) { throw "Asset upload failed: $($asset.Name)" }
           }
-          gh release edit v2.6.3 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft=false --prerelease=false --latest --title 'NOVA VPN 2.6.3 — отдельные ячейки маршрутизации' --notes-file docs/ROUTING-RELEASE-NOTES.md
+          gh release edit v2.6.3 --repo leoraijin/NOVA-VPN --target "$env:GITHUB_SHA" --draft=false --prerelease=false --latest --title 'NOVA VPN 2.6.3 — импорт и экспорт настроек' --notes-file docs/SETTINGS-RELEASE-NOTES.md
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
