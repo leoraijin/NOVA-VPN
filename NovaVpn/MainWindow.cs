@@ -2339,7 +2339,12 @@ public sealed partial class MainWindow : Window
 			Toast("Импортировано доменов: " + imported.Count, Green);
 			Navigate("routing");
 		};
-		grid.Children.Add(PageHeader("Маршрутизация", "Что направлять через VPN", importRules, null));
+        var routingTransfers = new WrapPanel { Orientation = Orientation.Horizontal };
+        routingTransfers.Children.Add(SettingsImportButton("routing"));
+        routingTransfers.Children.Add(SettingsExportButton());
+        importRules.Margin = new Thickness(8, 0, 0, 0);
+        routingTransfers.Children.Add(importRules);
+        grid.Children.Add(PageHeader("Маршрутизация", "Что направлять через VPN", routingTransfers, null));
 		StackPanel stackPanel = new StackPanel();
 		stackPanel.Children.Add(SectionTitle("РЕЖИМ"));
 		Grid grid2 = new Grid();
@@ -3543,37 +3548,8 @@ public sealed partial class MainWindow : Window
 		};
 
 
-		Button settingsExport = SmallButton("Экспорт настроек без ключей");
-		settingsExport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
-		settingsExport.Click += delegate
-		{
-			SaveFileDialog dialog = new SaveFileDialog { Filter = "NOVA Settings (*.nova-settings)|*.nova-settings", FileName = "NOVA-Settings-" + DateTime.Now.ToString("yyyyMMdd-HHmm") + ".nova-settings" };
-			if (dialog.ShowDialog(this) == true)
-			{
-				try { PortableConfigService.ExportSettingsOnly(state, dialog.FileName); Toast("Настройки сохранены без VPN-профилей и ключей.", Green); }
-				catch (Exception ex) { Toast("Не удалось сохранить настройки: " + LogSanitizer.Sanitize(ex.Message), Danger); }
-			}
-		};
-		Button settingsImport = SmallButton("Импорт настроек без ключей");
-		settingsImport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
-		settingsImport.Click += delegate
-		{
-			if (core.Status == CoreStatus.Connected || core.Status == CoreStatus.Connecting) { Toast("Сначала отключите VPN.", Warning); return; }
-			OpenFileDialog dialog = new OpenFileDialog { Filter = "NOVA Settings (*.nova-settings)|*.nova-settings" };
-			if (dialog.ShowDialog(this) == true && MessageBox.Show(this, "Заменить маршрутизацию и оформление настройками из файла? VPN-профили не переносятся.", "NOVA VPN", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-			{
-				try
-				{
-					PortableConfigService.ApplySettingsOnly(state, PortableConfigService.ImportSettingsOnly(dialog.FileName));
-                    BuildShell();
-					StateStore.Save(state);
-					Toast("Настройки импортированы без VPN-профилей.", Green);
-					Navigate("settings");
-				}
-				catch (Exception ex) { Toast("Не удалось импортировать настройки: " + LogSanitizer.Sanitize(ex.Message), Danger); }
-			}
-		};
-
+        Button settingsExport = SettingsExportButton();
+        Button settingsImport = SettingsImportButton("settings");
 
         var exportMenu = SmallButton("Экспорт ▾");
         var importMenu = SmallButton("Восстановление ▾");
@@ -3604,6 +3580,50 @@ public sealed partial class MainWindow : Window
 		grid.Children.Add(element2);
 		return grid;
 	}
+
+    private Button SettingsExportButton()
+    {
+        Button settingsExport = SmallButton("Экспорт настроек");
+		settingsExport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
+		settingsExport.Click += delegate
+		{
+			SaveFileDialog dialog = new SaveFileDialog { Filter = "NOVA Settings (*.nova-settings)|*.nova-settings", FileName = "NOVA-Settings-" + DateTime.Now.ToString("yyyyMMdd-HHmm") + ".nova-settings" };
+			if (dialog.ShowDialog(this) == true)
+			{
+				try { PortableConfigService.ExportSettingsOnly(state, dialog.FileName); Toast("Настройки сохранены без VPN-профилей и ключей.", Green); }
+				catch (Exception ex) { Toast("Не удалось сохранить настройки: " + LogSanitizer.Sanitize(ex.Message), Danger); }
+			}
+		};
+
+        return settingsExport;
+    }
+
+    private Button SettingsImportButton(string destination)
+    {
+        Button settingsImport = SmallButton("Импорт настроек");
+		settingsImport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
+		settingsImport.Click += delegate
+		{
+			if (core.Status == CoreStatus.Connected || core.Status == CoreStatus.Connecting) { Toast("Сначала отключите VPN.", Warning); return; }
+			OpenFileDialog dialog = new OpenFileDialog { Filter = "NOVA Settings (*.nova-settings)|*.nova-settings" };
+			if (dialog.ShowDialog(this) == true && MessageBox.Show(this, "Заменить маршрутизацию и оформление настройками из файла? VPN-профили не переносятся.", "NOVA VPN", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+			{
+				try
+				{
+					PortableConfigService.ApplySettingsOnly(state, PortableConfigService.ImportSettingsOnly(dialog.FileName));
+                    BuildShell();
+					StateStore.Save(state);
+					Toast("Настройки импортированы без VPN-профилей.", Green);
+					Navigate(destination);
+				}
+				catch (Exception ex) { Toast("Не удалось импортировать настройки: " + LogSanitizer.Sanitize(ex.Message), Danger); }
+			}
+		};
+
+
+
+        return settingsImport;
+    }
 
     private void AttachActionMenu(Button owner, string[] labels, Button[] actions)
     {

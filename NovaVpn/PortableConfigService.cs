@@ -44,11 +44,6 @@ public static class PortableConfigService
         safeState.AutoConnect = false;
         safeState.StartWithWindows = false;
         if (safeState.Visual != null) safeState.Visual.CustomBackgroundPath = "";
-        if (safeState.Routing != null)
-        {
-            safeState.Routing.DirectProcessPaths = new System.Collections.Generic.List<string>();
-            safeState.Routing.ProxyProcessPaths = new System.Collections.Generic.List<string>();
-        }
 
         WritePackage(new PortableConfigPackage { Format = SettingsOnlyFormat, State = safeState }, path);
     }
@@ -86,11 +81,6 @@ public static class PortableConfigService
         state.AutoConnect = false;
         state.StartWithWindows = false;
         if (state.Visual != null) state.Visual.CustomBackgroundPath = "";
-        if (state.Routing != null)
-        {
-            state.Routing.DirectProcessPaths = new System.Collections.Generic.List<string>();
-            state.Routing.ProxyProcessPaths = new System.Collections.Generic.List<string>();
-        }
         return state;
     }
 
@@ -115,6 +105,9 @@ public static class PortableConfigService
         }
         if (package == null || !string.Equals(package.Format, expectedFormat, StringComparison.OrdinalIgnoreCase) || package.State == null)
             throw new InvalidDataException("Файл не является переносимым конфигом NOVA VPN.");
+        package.State.Routing = package.State.Routing ?? new RoutingSettings();
+        package.State.Visual = package.State.Visual ?? new VisualPreferences();
+        StateStore.NormalizeForSerialization(package.State);
         return package.State;
     }
 
