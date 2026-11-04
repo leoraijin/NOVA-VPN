@@ -101,6 +101,11 @@ public static class PortableConfigService
         PortableConfigPackage package;
         using (FileStream stream = File.OpenRead(path))
         {
+            if (stream.Length >= 3)
+            {
+                bool hasUtf8Bom = stream.ReadByte() == 0xEF && stream.ReadByte() == 0xBB && stream.ReadByte() == 0xBF;
+                stream.Position = hasUtf8Bom ? 3 : 0;
+            }
             package = new DataContractJsonSerializer(typeof(PortableConfigPackage)).ReadObject(stream) as PortableConfigPackage;
         }
         if (package == null || !string.Equals(package.Format, expectedFormat, StringComparison.OrdinalIgnoreCase) || package.State == null)
