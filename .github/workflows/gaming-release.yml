@@ -2,7 +2,7 @@
 on:
   push:
     branches: [main]
-    paths: ['Properties/AssemblyInfo.cs', '.github/workflows/gaming-release.yml', 'tests/SettingsTransferTests.ps1', 'NovaVpn/ReleaseNotesService.cs', 'NovaVpn/PortableConfigService.cs']
+    paths: ['Properties/AssemblyInfo.cs', '.github/workflows/gaming-release.yml', 'tests/SettingsTransferTests.ps1', 'NovaVpn/ReleaseNotesService.cs', 'NovaVpn/PortableConfigService.cs', 'packaging/InstallerUI.cs']
   workflow_dispatch:
     inputs:
       publish:
