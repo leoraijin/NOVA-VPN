@@ -46,8 +46,8 @@ jobs:
           $csc = Join-Path (Split-Path $msbuild) 'Roslyn\csc.exe'
           ./tests/Run-GamingTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/gaming-tests) -CscPath $csc
           ./tests/Run-GameLibraryTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath (Join-Path $PWD work/game-library-tests) -CscPath $csc
-          powershell -NoProfile -STA -File tests/GamingUiTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
-          if ($LASTEXITCODE -ne 0) { throw 'Gaming UI tests failed' }
+          powershell -NoProfile -STA -File tests/DesktopControlsUiTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -WorkPath 'work/desktop-ui'
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop UI tests failed' }
           powershell -NoProfile -STA -File tests/SmoothScrollIntegrationTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Page regression tests failed' }
       - name: Verify routing entry cells
@@ -82,7 +82,7 @@ jobs:
           @"
           Build commit: $env:GITHUB_SHA
           Routing entry UI: eight lists, independent edits, add/delete, multiline paste, Zapret locks, light/dark and narrow layout checks: PASS.
-          Gaming, library, scroll and installer regressions above: PASS.
+          Desktop UI, legacy recovery, scroll and installer regressions above: PASS.
           Runtime payload reused from checksum-pinned public 2.3.36; no core rebuild.
           Real provider connectivity was not tested for this UI update.
           "@ | Set-Content outputs/VERIFICATION.txt -Encoding utf8

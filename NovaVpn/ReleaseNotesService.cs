@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 5),
+            "На главной появилась заметная карточка «Два VPN-конфига»: переключатель, выбор серверов и быстрый доступ к маршрутам.",
+            "Убраны игровой режим и старый блок со списком приложений. Кнопки на странице серверов выровнены в сетку."),
         new ReleaseNoteEntry(new Version(2, 6, 4),
             "Сайтам и приложениям можно назначать разные VPN-серверы. Правило сайта имеет приоритет.",
             "Исправлено преждевременное завершение подключения на Windows с медленным запуском VPN-интерфейса."),

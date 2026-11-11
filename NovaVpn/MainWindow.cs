@@ -450,7 +450,6 @@ public sealed partial class MainWindow : Window
         links.Children.Add(Nav("home", "home", "Главная"));
         links.Children.Add(Nav("servers", "servers", "Серверы"));
         links.Children.Add(Nav("routing", "routing", "Маршруты"));
-        links.Children.Add(Nav("gaming", "servers", "Игровой режим"));
         links.Children.Add(Nav("diagnostics", "diagnostics", "Диагностика"));
         links.Children.Add(Nav("engine", "shield", "VPN-ядро"));
         links.Children.Add(Nav("workloads", "routing", "Локальные прокси"));
@@ -755,6 +754,7 @@ public sealed partial class MainWindow : Window
 
 	private void Navigate(string page, bool animate = true)
 	{
+		if (page == "gaming") page = "home";
 		if (page == "learning") { StartGuidedTour(); return; }
 		tourAnchors.Clear();
 		bool pageChanged = page != currentPage;
@@ -779,7 +779,6 @@ public sealed partial class MainWindow : Window
 		{
 			"servers" => BuildServersPage(),
 			"routing" => BuildRoutingPage(),
-            "gaming" => BuildGamingPage(),
 			"diagnostics" => BuildDiagnosticsPage(),
 			"settings" => BuildSettingsPage(),
             "engine" => BuildEnginePage(),
@@ -1058,36 +1057,78 @@ public sealed partial class MainWindow : Window
     private UIElement BuildDualVpnControl()
     {
         var assignments = state.Routing?.MultiServer;
-        var panel = new WrapPanel { Margin = new Thickness(0, 0, 0, 16) };
-        var toggle = new CheckBox
-        {
-            Content = "Два VPN-конфига",
-            IsChecked = assignments != null,
-            IsEnabled = CanEditServerAssignments(),
-            Foreground = new SolidColorBrush(TextColor),
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 4, 16, 4)
-        };
-        toggle.Click += async delegate
-        {
-            toggle.IsEnabled = false;
-            try
-            {
-                if (assignments != null) await ApplyServerAssignmentsAsync(state, null, true);
-                else await EditMultiServerRoutingAsync(state.MultiServerRoutingHistory != null);
-            }
-            catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
-            finally { if (!closing && currentPage == "home") RefreshCurrentPage(); }
-        };
-        panel.Children.Add(toggle);
-        if (assignments != null)
+        bool enabled = assignments != null;
+        bool editable = CanEditServerAssignments();
+        var content = new StackPanel();
+        var heading = new Grid();
+        heading.ColumnDefinitions.Add(new ColumnDefinition());
+        heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0) };
+        var title = T("Два VPN-конфига", 18, TextColor, FontWeights.SemiBold);
+        title.TextWrapping = TextWrapping.Wrap;
+        labels.Children.Add(title);
+        var description = T(enabled ? "Включено · отдельные серверы для приложений и сайтов" :
+            "Основной VPN для всего, VPN-2 — для выбранных приложений и сайтов", 12, Muted);
+        description.TextWrapping = TextWrapping.Wrap;
+        description.TextTrimming = TextTrimming.None;
+        description.Margin = new Thickness(0, 5, 0, 0);
+        labels.Children.Add(description);
+        heading.Children.Add(labels);
+        var toggle = ToggleButton(enabled);
+        toggle.Name = "DualVpnToggle";
+        toggle.IsEnabled = editable;
+        System.Windows.Automation.AutomationProperties.SetName(toggle, "Два VPN-конфига: " + (enabled ? "включено" : "выключено"));
+        toggle.ToolTip = enabled ? "Выключить два конфига и вернуть прежнюю маршрутизацию" : "Включить и выбрать основной VPN и VPN-2";
+        Grid.SetColumn(toggle, 1);
+        heading.Children.Add(toggle);
+        content.Children.Add(heading);
+        if (enabled)
         {
             string ProfileName(string id) => id == null ? "не выбран" :
                 state.Profiles.FirstOrDefault(p => p.Id == id && !p.RetiredFromSubscription)?.Name ?? "недоступен";
-            panel.Children.Add(T("Основной VPN · " + ProfileName(assignments.DefaultProfileId) +
-                "     VPN-2 · " + ProfileName(assignments.SecondaryProfileId), 12, Muted));
+            var names = T("Основной VPN: " + ProfileName(assignments.DefaultProfileId) +
+                "\nVPN-2: " + ProfileName(assignments.SecondaryProfileId), 12, TextColor);
+            names.Name = "DualVpnProfiles";
+            names.TextWrapping = TextWrapping.Wrap;
+            names.TextTrimming = TextTrimming.None;
+            names.Margin = new Thickness(0, 12, 0, 0);
+            content.Children.Add(names);
         }
-        return panel;
+        var configure = SmallButton(enabled ? "Конфиги и маршруты" : "Выбрать два конфига");
+        configure.Name = "ConfigureDualVpn";
+        configure.IsEnabled = editable;
+        configure.HorizontalAlignment = HorizontalAlignment.Left;
+        configure.Margin = new Thickness(0, 12, 0, 0);
+        configure.Foreground = new SolidColorBrush(TextColor);
+        content.Children.Add(configure);
+        if (core.Engine != VpnEngine.SingBox)
+        {
+            var hint = T("Для двух конфигов выберите sing-box во вкладке «VPN-ядро».", 12, Muted);
+            hint.TextWrapping = TextWrapping.Wrap;
+            hint.Margin = new Thickness(0, 8, 0, 0);
+            content.Children.Add(hint);
+        }
+        async Task ChangeAsync(bool turnOff)
+        {
+            toggle.IsEnabled = configure.IsEnabled = false;
+            try
+            {
+                if (turnOff) await ApplyServerAssignmentsAsync(state, null, true);
+                else await EditMultiServerRoutingAsync(!enabled && state.MultiServerRoutingHistory != null);
+            }
+            catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
+            finally { if (!closing && currentPage == "home") RefreshCurrentPage(); }
+        }
+        toggle.Click += async delegate { await ChangeAsync(enabled); };
+        configure.Click += async delegate { await ChangeAsync(false); };
+        var card = new Border
+        {
+            Name = "DualVpnCard", Background = new SolidColorBrush(palette.SoftSelection),
+            BorderBrush = new SolidColorBrush(enabled ? Accent : BorderColor), BorderThickness = new Thickness(1),
+            CornerRadius = Radius(16), Padding = new Thickness(responsiveMode == "Compact" ? 16 : 20),
+            Margin = new Thickness(0, 0, 0, 18), Child = content
+        };
+        return TourAnchor("home.dual-vpn", card);
     }
 
     private void AddVpnRoleMenuItems(ContextMenu menu, VpnProfile profile)
@@ -2202,7 +2243,12 @@ public sealed partial class MainWindow : Window
 			await ReviewSubscriptionsAsync();
 			Navigate("servers");
 		};
-		WrapPanel actions = new WrapPanel { VerticalAlignment = VerticalAlignment.Center, MaxWidth = 620 };
+		var actions = new System.Windows.Controls.Primitives.UniformGrid
+        {
+            Name = "ServerActions", Columns = state.Visual.TextScale > 1.15 ? 2 : 3,
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left,
+            Width = responsiveMode == "Compact" ? 460 : 620
+        };
 		testAll.Margin = new Thickness(0.0, 0.0, 8.0, 0.0);
 		chooseBest.Margin = new Thickness(0.0, 0.0, 8.0, 0.0);
 		update.Margin = new Thickness(0.0, 0.0, 8.0, 0.0);
@@ -2236,6 +2282,22 @@ public sealed partial class MainWindow : Window
                 if (chosen != null) await SelectProfileAsync(chosen);
             }
         }; actions.Children.Add(services);
+        services.Name = "ServiceAvailability";
+        foreach (Button action in actions.Children)
+        {
+            string label = (string)action.Content;
+            action.MinWidth = 0;
+            action.Width = double.NaN;
+            action.Height = Math.Max(44, 44 * state.Visual.TextScale);
+            action.Margin = new Thickness(0, 0, 8, 8);
+            action.HorizontalAlignment = HorizontalAlignment.Stretch;
+            action.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            action.Padding = new Thickness(10, 4, 10, 4);
+            action.Content = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
+            System.Windows.Automation.AutomationProperties.SetName(action, label);
+        }
+        // Fit the action grid to the actual page width, including DPI and enlarged text.
+        grid.SizeChanged += delegate { actions.Width = Math.Min(620, Math.Max(1, grid.ActualWidth - (responsiveMode == "Wide" && state.Visual.TextScale <= 1.15 ? 210 : 0))); };
 		grid.Children.Add(PageHeader("Серверы", state.Profiles.Count + " профилей · " + state.Profiles.Count(p => p.IsFavorite) + " избранных", actions, null));
         var stackPanel = new StackPanel();
         Action renderServers = delegate {
@@ -2553,11 +2615,8 @@ public sealed partial class MainWindow : Window
 		grid3.Children.Add(ModeCard("Smart", "По правилам", "Гибкое разделение", "routing", 1));
 		grid3.Children.Add(ModeCard("Direct", "Напрямую", "VPN только для списка", "home", 2));
 		stackPanel.Children.Add(grid3);
-		stackPanel.Children.Add(SectionTitle("ПРИЛОЖЕНИЯ", new Thickness(0.0, 0.0, 0.0, 10.0)));
-		stackPanel.Children.Add(TourAnchor("routing.apps", BuildApplicationRoutingSection()));
 		StackPanel presets = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0.0, 0.0, 0.0, 18.0) };
 		presets.Children.Add(PresetButton("Мессенджеры через VPN", "messengers"));
-		presets.Children.Add(PresetButton("Игры напрямую", "games-direct"));
 		presets.Children.Add(PresetButton("Приватность", "privacy"));
 		presets.Children.Add(PresetButton("Совместимость", "compatibility"));
 		stackPanel.Children.Add(presets);
