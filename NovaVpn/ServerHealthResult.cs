@@ -18,5 +18,7 @@ public sealed class ServerHealthResult
 
 	public int SuccessfulSamples { get; set; }
 
-	public int PacketLossPercent { get; set; }
+	public int PacketLossPercent { get; set; } = -1;
+    public bool Supported { get; set; } = true;
+    public string Measurement { get; set; } = "";
 }

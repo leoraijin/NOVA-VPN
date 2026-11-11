@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -95,6 +95,7 @@ public sealed partial class MainWindow : Window
 
 
 	private TextBlock statusText;
+    private long coreStatusNotificationRevision;
 
 	private Border statusDot;
 
@@ -178,18 +179,26 @@ public sealed partial class MainWindow : Window
 	private bool snapshotMode;
 	public bool WindowsStartupLaunch { get; set; }
 	private readonly System.Threading.CancellationTokenSource startupCancellation = new System.Threading.CancellationTokenSource();
-	private bool startupSettingsBusy, startupConnecting;
+	private bool startupSettingsBusy, startupConnecting, startupRecoveryFailed;
+    private string startupRecoveryError;
 
 	public MainWindow(bool snapshot = false)
 	{
 		snapshotMode = snapshot;
 		state = snapshotMode ? StateStore.CreateEphemeral() : StateStore.Load();
+        if (!snapshotMode)
+        {
+            try { WindowsStartupService.Recover(Assembly.GetExecutingAssembly().Location, StartupPreferences()); }
+            catch (Exception error) { startupRecoveryFailed = true; startupRecoveryError = "Не удалось восстановить автозапуск: " + LogSanitizer.Sanitize(error.Message); }
+        }
 		state.Visual.MigrateWindowsDesign();
 		if (snapshotMode) PrepareSnapshotData();
 		ApplyVisualPalette();
-		core = new CoreManager();
+		core = new CoreManager(state.CoreEcoMode);
+        InitializeWorkloadProxies();
         core.SelectEngine(state.EngineSelection == 1 ? VpnEngine.Reality : VpnEngine.SingBox);
         InitializeGamingInfrastructure();
+        if (!snapshotMode) CleanupRetiredProfiles();
 		zapret.StrategyProgress += message => Dispatcher.BeginInvoke((Action)(() =>
 		{
 			if (!closing && currentPage == "home") RefreshCurrentPage();
@@ -203,56 +212,47 @@ public sealed partial class MainWindow : Window
 			ZapretRoutingTransitionService.SetActive(state, RoutingOverlayService.IsZapretMode(state.Zapret?.Mode));
 			StateStore.Save(state);
 		}
-		core.StatusChanged += CoreStatusChanged;
+		core.RuntimeStatusChanged += CoreStatusChanged;
 		core.VerificationChanged += delegate(ConnectionVerification verification)
 		{
 			base.Dispatcher.BeginInvoke((Action)delegate
 			{
 				if (closing || !ReferenceEquals(core.Verification, verification)) return;
-				if (!snapshotMode && verification.Completed && verification.InternetOk && verification.ProfileProbe?.Success == true && state.LastWorkingProfileId != verification.ProfileId) {
+                var currentProfile = state.Profiles.FirstOrDefault(p => p.Id == verification.ProfileId);
+				if (!snapshotMode && !multiServerApplyBusy && core.Status==CoreStatus.Connected && core.ActiveProfileId==currentProfile?.Id && verification.IsVerifiedFor(currentProfile,ProfileHealthEvidence.NetworkKey(),ProfileHealthEvidence.CoreKey(core.CorePath),DateTime.UtcNow) && state.LastWorkingProfileId != verification.ProfileId) {
 					state.LastWorkingProfileId = verification.ProfileId; StateStore.Save(state);
 				}
 				if (verification.Completed && verification.ProfileProbe?.Supported == true && !string.IsNullOrEmpty(verification.ProfileId)) {
 					var health = verification.ProfileProbe;
-					if (!verification.InternetOk) { health.Success = false; health.Message = "Туннель включён, но контрольный HTTPS-запрос не прошёл"; }
-					mapHealth[verification.ProfileId] = health;
-					liveServerMap?.RefreshStatus(); expandedServerMap?.RefreshStatus();
+                    if (currentProfile != null && health.IsFreshFor(currentProfile))
+                    {
+					    if (!verification.InternetOk) { health.Success = false; health.Message = "Туннель включён, но контрольный HTTPS-запрос не прошёл"; }
+					    mapHealth[verification.ProfileId] = health;
+					    liveServerMap?.RefreshStatus(); expandedServerMap?.RefreshStatus();
+                    }
 				}
-				if (!closing && currentPage == "home") UpdateVerificationDisplay();
+                if(verification.Completed&&verification.MultiExits!=null) {
+                    var group=verification.MultiExits;
+                    if(!string.IsNullOrEmpty(group.NetworkKey)&&!string.IsNullOrEmpty(group.CoreKey)&&group.NetworkKey==ProfileHealthEvidence.NetworkKey()&&group.CoreKey==ProfileHealthEvidence.CoreKey(core.CorePath)) {
+                        foreach(var exit in group.Results) {
+                            var current=state.Profiles.FirstOrDefault(p=>p.Id==exit.Exit.ProfileId);
+                            if(current==null||current.RetiredFromSubscription||ExitProbeTarget.Fingerprint(current)!=exit.Exit.ProfileFingerprint||
+                                DateTime.UtcNow<exit.CheckedUtc||DateTime.UtcNow-exit.CheckedUtc>=TimeSpan.FromMinutes(3))continue;
+                            mapHealth[current.Id]=new ServerMapHealth{Success=exit.Phase==ExitProbePhase.Verified,
+                                Supported=exit.Phase==ExitProbePhase.Verified||exit.Phase==ExitProbePhase.Failed,LatencyMs=exit.LatencyMs,CheckedUtc=exit.CheckedUtc,
+                                ProfileKey=SubscriptionManager.ConfigKey(current),NetworkKey=group.NetworkKey,CoreKey=group.CoreKey,Target=exit.Target??"",
+                                Message=exit.Phase==ExitProbePhase.Verified?"HTTPS через назначенный выход подтверждён":"HTTPS через назначенный выход не подтверждён"};
+                        }
+                        liveServerMap?.RefreshStatus();expandedServerMap?.RefreshStatus();
+                    }
+                }
+				if (currentPage == "home") UpdateVerificationDisplay(); else UpdateSidebarConnectionStatus();
 			});
 		};
 		core.UnexpectedExit += ScheduleReconnect;
 		reconnectTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.0) };
-		reconnectTimer.Tick += async delegate
-		{
-			reconnectTimer.Stop();
-			if (!closing && !manualDisconnect && state.AutoReconnect && SelectedProfile() != null && core.Status != CoreStatus.Connected)
-			{
-				try
-				{
-					reconnectAttempt++;
-					await core.StartAsync(SelectedProfile(), EffectiveRouting());
-					currentSessionStartedUtc = DateTime.UtcNow;
-					RecordHistory("Переподключено", "Туннель восстановлен автоматически.");
-					VpnProfile connected = SelectedProfile();
-					if (connected != null)
-					{
-						connected.ConsecutiveFailures = 0;
-						connected.HealthStatus = "Подключён";
-					}
-					StateStore.Save(state);
-					reconnectAttempt = 0;
-				}
-				catch
-				{
-					if (reconnectAttempt < 5)
-					{
-						reconnectTimer.Interval = TimeSpan.FromSeconds(Math.Min(20, reconnectAttempt * 3));
-						reconnectTimer.Start();
-					}
-				}
-			}
-		};
+		reconnectTimer.Tick += async delegate { await TryAutomaticReconnectAsync(); };
+
 		subscriptionTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30.0) };
 		subscriptionTimer.Tick += async delegate
 		{
@@ -266,7 +266,8 @@ public sealed partial class MainWindow : Window
 		}
 		visualTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
 		visualTimer.Tick += delegate { UpdateLiveVisuals(); };
-		mapHealthTimer.Tick += async delegate { await RefreshMapHealthAsync(); if (!closing && IsVisible && WindowState != WindowState.Minimized && (currentPage == "home" || expandedServerMap != null) && core.Status == CoreStatus.Connected) await core.VerifyConnectionAsync(); };
+		mapHealthTimer.Tick += async delegate { await RefreshMapHealthAsync(); };
+        InitializeConnectionMonitor();
 		if (!snapshotMode) base.Loaded += async delegate { mapHealthTimer.Start(); await RefreshMapHealthAsync(); };
 		base.Title = "NOVA VPN";
 		// Explicit window icon is also used when Windows pins a running WPF window.
@@ -304,8 +305,10 @@ public sealed partial class MainWindow : Window
 			base.SourceInitialized += delegate { RegisterGlobalHotkey(); };
 		}
 		Navigate("home");
+        if (startupRecoveryError != null) Dispatcher.BeginInvoke((Action)(() => Toast(startupRecoveryError, Warning)));
 		RoutedEventHandler value = async delegate
 		{
+            ScheduleRetiredProfileCleanup();
 			await UpdateSubscriptionsIfDueAsync(false);
 			SyncSubscriptionTimer();
 			if (RoutingOverlayService.IsZapretMode(state.Zapret?.Mode) && !zapret.IsRunning)
@@ -335,7 +338,7 @@ public sealed partial class MainWindow : Window
 			}
 			if (await CheckApplicationUpdatesOnStartupAsync()) return;
 			if (core.Status != CoreStatus.Connected) { directExternalIp = await ExternalIpService.GetAsync(); if (currentPage == "home") RefreshCurrentPage(); }
-			if (!WindowsStartupLaunch && state.AutoConnect && SelectedProfile() != null && state.PauseUntilUtc <= DateTime.UtcNow)
+			if (!startupRecoveryFailed && !WindowsStartupLaunch && state.AutoConnect && HasConnectionSelection && state.PauseUntilUtc <= DateTime.UtcNow)
 			{
 				await ToggleConnectionAsync();
 			}
@@ -352,6 +355,10 @@ public sealed partial class MainWindow : Window
             GamingProbeService.StopAll();
 			startupCancellation.Cancel();
 			closing = true;
+            subscriptionRetirementTimer?.Stop();
+            try { workloadProxies?.Dispose(); } catch (Exception) { RecordHistory("Локальные прокси", "Не все собственные процессы подтвердили остановку перед закрытием."); }
+            workloadBandwidth?.Dispose();
+            StopConnectionMonitor();
 			reconnectTimer.Stop();
 			subscriptionTimer.Stop();
 			visualTimer.Stop();
@@ -446,6 +453,7 @@ public sealed partial class MainWindow : Window
         links.Children.Add(Nav("gaming", "servers", "Игровой режим"));
         links.Children.Add(Nav("diagnostics", "diagnostics", "Диагностика"));
         links.Children.Add(Nav("engine", "shield", "VPN-ядро"));
+        links.Children.Add(Nav("workloads", "routing", "Локальные прокси"));
         Grid.SetRow(links,1);root.Children.Add(links);
         var footer = new StackPanel();
         footer.Children.Add(Nav("settings", "settings", "Настройки"));
@@ -462,6 +470,7 @@ public sealed partial class MainWindow : Window
         footer.Children.Add(theme);
         statusDot = new Border { Width = 6, Height = 6, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(Muted), Margin = new Thickness(6), VerticalAlignment = VerticalAlignment.Center };
         statusText = T("Не подключено",11,Muted); statusText.VerticalAlignment = VerticalAlignment.Center;
+        UpdateSidebarConnectionStatus();
         var status = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4,4,4,4) };
         status.Children.Add(statusDot); if (!compact) status.Children.Add(statusText);
         footer.Children.Add(status);Grid.SetRow(footer,2);root.Children.Add(footer);
@@ -774,6 +783,7 @@ public sealed partial class MainWindow : Window
 			"diagnostics" => BuildDiagnosticsPage(),
 			"settings" => BuildSettingsPage(),
             "engine" => BuildEnginePage(),
+            "workloads" => BuildWorkloadsPage(),
 			_ => BuildHomePage(),
 		};
 		// Build the replacement before detaching the visible page. Background
@@ -912,8 +922,8 @@ public sealed partial class MainWindow : Window
 		StackPanel stackPanel3 = new StackPanel();
 		stackPanel3.VerticalAlignment = VerticalAlignment.Center;
 		StackPanel stackPanel4 = stackPanel3;
-		stackPanel4.Children.Add(T((vpnProfile == null) ? "Добавить сервер" : vpnProfile.Name, 13.0, TextColor, FontWeights.SemiBold));
-		stackPanel4.Children.Add(T((vpnProfile == null) ? "Вставьте ключ или подписку" : vpnProfile.Endpoint, 10.5, Muted));
+		stackPanel4.Children.Add(T(vpnProfile?.Name ?? (state.Routing?.MultiServer != null ? "Основной сервер недоступен" : "Добавить сервер"), 13.0, TextColor, FontWeights.SemiBold));
+		stackPanel4.Children.Add(T(vpnProfile?.Endpoint ?? (state.Routing?.MultiServer != null ? "Другие назначения могут работать" : "Вставьте ключ или подписку"), 10.5, Muted));
 		Grid.SetColumn(stackPanel4, 1);
 		grid3.Children.Add(stackPanel4);
 		TextBlock textBlock = T("›", 23.0, Muted);
@@ -1026,11 +1036,15 @@ public sealed partial class MainWindow : Window
 		VisualDesign.ApplyGlassSurface(border2, state.Visual, palette.IsGlass);
         if (palette.Name == ThemePalette.MaterialYou) border2.Background = new SolidColorBrush(palette.SoftSelection);
 		grid.Children.Add(border2);
-		Border zapretPanel = BuildZapretPanel(vpnProfile);
-		Grid.SetRow(zapretPanel, 4);
+        grid.RowDefinitions.Insert(4, new RowDefinition { Height = GridLength.Auto });
+        var dualVpn = BuildDualVpnControl();
+        Grid.SetRow(dualVpn, 4);
+        grid.Children.Add(dualVpn);
+        Border zapretPanel = BuildZapretPanel(vpnProfile);
+		Grid.SetRow(zapretPanel, 5);
 		grid.Children.Add(zapretPanel);
 		UIElement insights = BuildHomeInsights(vpnProfile);
-		Grid.SetRow(insights, 6);
+		Grid.SetRow(insights, 7);
 		grid.Children.Add(insights);
 		return TouchScrollViewer(new ScrollViewer
 		{
@@ -1040,6 +1054,80 @@ public sealed partial class MainWindow : Window
 			Padding = new Thickness(0, 0, 8, 0)
 		});
 	}
+
+    private UIElement BuildDualVpnControl()
+    {
+        var assignments = state.Routing?.MultiServer;
+        var panel = new WrapPanel { Margin = new Thickness(0, 0, 0, 16) };
+        var toggle = new CheckBox
+        {
+            Content = "Два VPN-конфига",
+            IsChecked = assignments != null,
+            IsEnabled = CanEditServerAssignments(),
+            Foreground = new SolidColorBrush(TextColor),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 4, 16, 4)
+        };
+        toggle.Click += async delegate
+        {
+            toggle.IsEnabled = false;
+            try
+            {
+                if (assignments != null) await ApplyServerAssignmentsAsync(state, null, true);
+                else await EditMultiServerRoutingAsync(state.MultiServerRoutingHistory != null);
+            }
+            catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
+            finally { if (!closing && currentPage == "home") RefreshCurrentPage(); }
+        };
+        panel.Children.Add(toggle);
+        if (assignments != null)
+        {
+            string ProfileName(string id) => id == null ? "не выбран" :
+                state.Profiles.FirstOrDefault(p => p.Id == id && !p.RetiredFromSubscription)?.Name ?? "недоступен";
+            panel.Children.Add(T("Основной VPN · " + ProfileName(assignments.DefaultProfileId) +
+                "     VPN-2 · " + ProfileName(assignments.SecondaryProfileId), 12, Muted));
+        }
+        return panel;
+    }
+
+    private void AddVpnRoleMenuItems(ContextMenu menu, VpnProfile profile)
+    {
+        var assignments = state.Routing?.MultiServer;
+        if (assignments == null) return;
+        foreach (bool secondary in new[] { false, true })
+        {
+            bool current = profile.Id == (secondary ? assignments.SecondaryProfileId : assignments.DefaultProfileId);
+            var item = new MenuItem
+            {
+                Header = secondary ? "Использовать как VPN-2" : "Использовать как основной VPN",
+                IsCheckable = true,
+                IsChecked = current,
+                IsEnabled = !current && !assignments.RequiresRebinding && MultiServerRoutingWindow.Compatible(profile)
+                    && profile.Id != (secondary ? assignments.DefaultProfileId : assignments.SecondaryProfileId)
+            };
+            item.Click += async delegate
+            {
+                try
+                {
+                    if (!CanEditServerAssignments()) return;
+                    var opened = state;
+                    var candidate = RoutingOverlayService.Clone(opened.Routing);
+                    var next = candidate.MultiServer;
+                    var chosen = opened.Profiles.FirstOrDefault(p => p.Id == profile.Id);
+                    if (next == null || next.RequiresRebinding || chosen == null || !MultiServerRoutingWindow.Compatible(chosen))
+                        throw new InvalidOperationException("Этот конфиг недоступен для назначения.");
+                    if (secondary) next.SetSecondaryProfile(chosen.Id);
+                    else next.DefaultProfileId = chosen.Id;
+                    next.Revision++;
+                    next.Validate();
+                    await ApplyServerAssignmentsAsync(opened, candidate);
+                }
+                catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
+                finally { if (!closing && currentPage == "servers") RefreshCurrentPage(); }
+            };
+            menu.Items.Add(item);
+        }
+    }
 
 	private Border BuildZapretPanel(VpnProfile selectedProfile)
 	{
@@ -1228,13 +1316,13 @@ public sealed partial class MainWindow : Window
 			var candidates = new List<VpnProfile>();
 			var selected = SelectedProfile();
 			if (selected != null && (!mapHealth.TryGetValue(selected.Id, out var selectedHealth) ||
-				(selectedHealth.Supported && DateTime.UtcNow - selectedHealth.CheckedUtc > TimeSpan.FromSeconds(90)))) candidates.Add(selected);
+				(selectedHealth.ProfileKey != SubscriptionManager.ConfigKey(selected) || selectedHealth.Supported && DateTime.UtcNow - selectedHealth.CheckedUtc > TimeSpan.FromSeconds(90)))) candidates.Add(selected);
 			for (int i = 0; i < profiles.Length && candidates.Count < 8; i++)
 			{
 				var profile = profiles[mapHealthCursor++ % profiles.Length];
 				if (candidates.Contains(profile)) continue;
 				if (!mapHealth.TryGetValue(profile.Id, out var checkedResult) ||
-					(checkedResult.Supported && DateTime.UtcNow - checkedResult.CheckedUtc > TimeSpan.FromSeconds(90))) candidates.Add(profile);
+					(checkedResult.ProfileKey != SubscriptionManager.ConfigKey(profile) || checkedResult.Supported && DateTime.UtcNow - checkedResult.CheckedUtc > TimeSpan.FromSeconds(90))) candidates.Add(profile);
 			}
 			using (var gate = new System.Threading.SemaphoreSlim(2))
 			{
@@ -1245,7 +1333,7 @@ public sealed partial class MainWindow : Window
 					try {
 						var value = await Task.Run(() => ServerMapHealthService.TestAsync(profile, corePath, directory, token), token);
 						if (!closing && state.Profiles.Any(p => ReferenceEquals(p, profile))) {
-							if (core.Status == CoreStatus.Connected && core.Verification.Completed && core.Verification.ProfileId == profile.Id && !core.Verification.InternetOk) {
+							if (core.Status == CoreStatus.Connected && core.Verification.Completed && core.Verification.MultiExits == null && core.Verification.ProfileId == profile.Id && !core.Verification.InternetOk) {
 								value.Success = false; value.Message = "Контрольный HTTPS-запрос активного соединения не прошёл";
 							}
 							if (!mapHealth.TryGetValue(profile.Id, out var newer) || newer.CheckedUtc <= value.CheckedUtc) mapHealth[profile.Id] = value;
@@ -1297,11 +1385,14 @@ public sealed partial class MainWindow : Window
 
 	private async Task ApplyTrafficModeAsync(string mode)
 	{
+        if (snapshotMode || closing) return;
+        if (configuredFallbackBusy) { Toast("Дождитесь резервного подключения или отключите VPN перед сменой режима.", Warning); return; }
         if (gamingSession != null || gamingCancellation != null) { Toast("Сначала выключите игровой режим или отмените подбор.", Warning); return; }
 		if (zapret.LifecycleState == ZapretLifecycleState.Starting) zapret.StopAndVerify();
 		await trafficModeGate.WaitAsync();
 		try
 		{
+            if (snapshotMode || closing || configuredFallbackBusy || profileSwitchInProgress || gamingSession != null || gamingCancellation != null) return;
 			if (mode != "VPN" && mode != "VPN+Zapret" && mode != "Zapret") throw new ArgumentException("Неизвестный режим трафика.", nameof(mode));
 			bool vpnWasActive = core.Status == CoreStatus.Connected || core.Status == CoreStatus.Connecting;
 			if (vpnWasActive)
@@ -1320,11 +1411,11 @@ public sealed partial class MainWindow : Window
 				if (!zapret.IsRunning) await zapret.StartSelectedAsync(state.Zapret);
 				if (!zapret.IsRunning) throw new InvalidOperationException("Zapret не подтвердил запуск.");
 			}
-			if (mode != "Zapret" && SelectedProfile() != null)
+			if (mode != "Zapret" && HasConnectionSelection)
 			{
 				manualDisconnect = false;
 				connectionRequested = true;
-				await core.StartAsync(SelectedProfile(), EffectiveRouting());
+				await StartWithConfiguredFallbackAsync();
 				currentSessionStartedUtc = DateTime.UtcNow;
 			}
 			else
@@ -1349,11 +1440,11 @@ public sealed partial class MainWindow : Window
 				return;
 			}
 			manualDisconnect = false;
-			connectionRequested = SelectedProfile() != null;
+			connectionRequested = HasConnectionSelection;
 			StateStore.Save(state);
-			if (SelectedProfile() != null)
+			if (HasConnectionSelection)
 			{
-				try { await core.StartAsync(SelectedProfile(), EffectiveRouting()); }
+				try { await StartWithConfiguredFallbackAsync(); }
 				catch { manualDisconnect = true; connectionRequested = false; }
 			}
 			Toast("Не удалось применить режим: " + LogSanitizer.Sanitize(ex.Message) + ". Включён безопасный режим VPN.", Danger);
@@ -1616,11 +1707,13 @@ public sealed partial class MainWindow : Window
 
 	private async Task UpdateZapretAsync(bool notify = true)
 	{
+        if (snapshotMode || closing) return;
         if (gamingSession != null || gamingCancellation != null) { Toast("Завершите игровую сессию перед обновлением Zapret.", Warning); return; }
 		await trafficModeGate.WaitAsync();
 		bool restartVpn = core.Status == CoreStatus.Connected || core.Status == CoreStatus.Connecting;
 		try
 		{
+            if (snapshotMode || closing || configuredFallbackBusy || profileSwitchInProgress || gamingSession != null || gamingCancellation != null) return;
 			if (restartVpn)
 			{
 				manualDisconnect = true;
@@ -1634,11 +1727,11 @@ public sealed partial class MainWindow : Window
 				state.Zapret.Mode = "VPN";
 				StateStore.Save(state);
 			}
-			if (restartVpn && SelectedProfile() != null)
+			if (restartVpn && HasConnectionSelection)
 			{
 				manualDisconnect = false;
 				connectionRequested = true;
-				await core.StartAsync(SelectedProfile(), EffectiveRouting());
+				await StartWithConfiguredFallbackAsync();
 				currentSessionStartedUtc = DateTime.UtcNow;
 				StateStore.Save(state);
 			}
@@ -1655,7 +1748,7 @@ public sealed partial class MainWindow : Window
 		}
 		catch (Exception ex)
 		{
-			if (restartVpn && SelectedProfile() != null && core.Status != CoreStatus.Connected && core.Status != CoreStatus.Connecting)
+			if (restartVpn && HasConnectionSelection && core.Status != CoreStatus.Connected && core.Status != CoreStatus.Connecting)
 			{
 				try
 				{
@@ -1666,7 +1759,7 @@ public sealed partial class MainWindow : Window
 					}
 					manualDisconnect = false;
 					connectionRequested = true;
-					await core.StartAsync(SelectedProfile(), EffectiveRouting());
+					await StartWithConfiguredFallbackAsync();
 				}
 				catch { }
 			}
@@ -1713,33 +1806,66 @@ public sealed partial class MainWindow : Window
         return GamingRouting.Effective(gamingSession != null ? gamingBaseRouting ?? state.Routing : state.Routing, gamingSession, state.KillSwitch);
 	}
 
+    private IWindowsStartupPreferences StartupPreferences() => new WindowsStartupPreferenceAdapter(
+        () => Dispatcher.Invoke(() => new WindowsStartupPreferences(state.StartWithWindows, state.StartConnectedWithWindows)),
+        value => Dispatcher.Invoke(() => {
+            state.StartWithWindows = value.Open; state.StartConnectedWithWindows = value.Connect;
+            StateStore.Save(state);
+            using (var stream = new System.IO.FileStream(StateStore.StatePath, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite, System.IO.FileShare.Read)) stream.Flush(true);
+        }));
+
 	private async Task SetWindowsStartupAsync(bool connect)
 	{
 		if (startupSettingsBusy || snapshotMode) return;
 		startupSettingsBusy = true;
 		try {
 			bool enabled = !(connect ? state.StartConnectedWithWindows : state.StartWithWindows);
-			await WindowsStartupService.ApplyAsync(enabled, connect, Assembly.GetExecutingAssembly().Location);
-			state.StartWithWindows = enabled && !connect; state.StartConnectedWithWindows = enabled && connect;
-			StateStore.Save(state); Navigate("settings");
-		} catch (Exception ex) { Toast("Автозапуск не изменён: " + LogSanitizer.Sanitize(ex.Message), Danger); }
+			await WindowsStartupService.ApplyAsync(enabled, connect, Assembly.GetExecutingAssembly().Location, StartupPreferences());
+            startupRecoveryFailed = false; startupRecoveryError = null; Navigate("settings");
+		} catch (Exception ex) { startupRecoveryFailed = true; Toast("Не удалось завершить изменение автозапуска: " + LogSanitizer.Sanitize(ex.Message), Danger); }
 		finally { startupSettingsBusy = false; }
 	}
 
 	public async Task RunWindowsBackgroundStartupAsync()
 	{
 		if (snapshotMode) return;
+        if (startupRecoveryFailed) { ShowInTaskbar = true; Show(); return; }
 		if (!state.StartConnectedWithWindows) { Application.Current.Shutdown(); return; }
 		ShowInTaskbar = false;
 		var token = startupCancellation.Token;
 		startupConnecting = true;
 		try {
 			for (int i = 0; i < 15 && !System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(); i++) await Task.Delay(2000, token);
-			var candidates = state.Profiles.ToList();
+            if(MultiServerRoutingHistory.MissingRestoredProfile(state)){ShowNotification("Прежний сервер недоступен. Выберите сервер вручную перед автоподключением.");return;}
+            if (state.Routing?.MultiServer is MultiServerSettings assignments) {
+                if (assignments.RequiresRebinding) { ShowNotification("Заново назначьте серверы для импортированных правил."); return; }
+                string expectedRouting = RoutingMigrationService.Fingerprint(state.Routing);
+                string expectedPrimary = assignments.DefaultProfileId;
+                token.ThrowIfCancellationRequested();manualDisconnect=false;connectionRequested=true;
+                await StartAllowedProfileAsync(null, EffectiveRouting());
+                var verified=await (core.InitialVerification??core.VerifyConnectionAsync());
+                token.ThrowIfCancellationRequested();
+                if(manualDisconnect||!connectionRequested||core.Status!=CoreStatus.Connected||core.ActiveProfileId!=expectedPrimary||
+                    RoutingMigrationService.Fingerprint(state.Routing)!=expectedRouting||!ReferenceEquals(core.Verification,verified))return;
+                if(HasVerifiedConnection(verified))RecordHistory("Автоподключение Windows","Подключены и проверены назначенные серверы.");
+                else ShowNotification("Туннель назначений включён. Проверка отдельных выходов не подтверждена; назначения сохранены.");
+                return; // Never enter legacy best-server/fallback selection for a manual multi-server policy.
+            }
+            var configured = ConfiguredFallbackService.Build(state.Profiles, state.SelectedProfileId, state.FallbackRootProfileId);
+            if (configured.IsConfigured)
+            {
+                manualDisconnect = false; connectionRequested = true;
+                try { await StartWithConfiguredFallbackAsync(token); RecordHistory("Автоподключение Windows", "Подключён профиль из заданной резервной цепочки."); return; }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception) { manualDisconnect = true; connectionRequested = false; ShowNotification("Ни один профиль из резервной цепочки не подключился. Откройте NOVA из трея."); return; }
+            }
+			var candidates = CollectionCandidates();
+            bool collectionActive = !string.IsNullOrEmpty(state.ActiveProfileCollectionId);
+            if (collectionActive) await ProbeCollectionForStartupAsync(token);
 			string preferred = state.LastConnectedProfileId ?? state.LastWorkingProfileId ?? state.SelectedProfileId;
 			while (candidates.Count > 0) {
 				token.ThrowIfCancellationRequested();
-				var target = await StartupProfileSelector.SelectAsync(candidates, preferred,
+				var target = collectionActive ? CollectionBestAvailable() : await StartupProfileSelector.SelectAsync(candidates, preferred,
 					p => ServerMapHealthService.TestAsync(p, core.ProbeCorePath, System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "startup-probes"), token), token);
 				if (target == null) break;
 				candidates.Remove(target); preferred = null;
@@ -1748,16 +1874,17 @@ public sealed partial class MainWindow : Window
 				state.SelectedProfileId = target.Id; StateStore.Save(state);
 				try {
 					manualDisconnect = false; connectionRequested = true;
-					await core.StartAsync(target, EffectiveRouting());
+					await StartAllowedProfileAsync(target, EffectiveRouting());
 					var verified = await core.InitialVerification;
 					token.ThrowIfCancellationRequested();
-					if (state.SelectedProfileId != target.Id) return;
-					if (verified.Completed && verified.ProfileId == target.Id && verified.InternetOk && (verified.ProfileProbe?.Supported == false || verified.ProfileProbe?.Success == true)) {
+					if (state.SelectedProfileId != target.Id || core.Status!=CoreStatus.Connected || core.ActiveProfileId!=target.Id || !ReferenceEquals(core.Verification,verified)) return;
+                    if (verified.IsVerifiedFor(target,ProfileHealthEvidence.NetworkKey(),ProfileHealthEvidence.CoreKey(core.CorePath),DateTime.UtcNow)) {
 						RecordHistory("Автоподключение Windows", "Подключён проверенный профиль в фоне."); return;
 					}
 				} catch (OperationCanceledException) { throw; }
 				catch (Exception ex) { Debug.WriteLine("Startup: " + LogSanitizer.Sanitize(ex.Message)); }
 				if (token.IsCancellationRequested) return;
+                target.ConsecutiveFailures = Math.Min(1000, target.ConsecutiveFailures + 1);
 				manualDisconnect = true; connectionRequested = false; core.Stop();
 			}
 			if (trayIcon != null) trayIcon.Text = "NOVA VPN — нет доступного профиля";
@@ -1823,7 +1950,7 @@ public sealed partial class MainWindow : Window
 			{
 				case "Speed": cards.Children.Add(InfoCard("СКОРОСТЬ", CurrentSpeedLabel(), "↓ входящая  ·  ↑ исходящая", i)); break;
 				case "Protocol": cards.Children.Add(InfoCard("ПРОТОКОЛ", profile == null ? "—" : profile.ProtocolLabel, "Тип подключения", i)); break;
-				case "Latency": cards.Children.Add(InfoCard("ЗАДЕРЖКА", profile == null || profile.LastLatency < 0 ? "—" : profile.LastLatency + " мс", "До VPN-сервера", i)); break;
+				case "Latency": cards.Children.Add(InfoCard("HTTPS-ОТКЛИК", profile == null || profile.LastLatency < 0 ? "—" : profile.LastLatency + " мс", "Через VPN-профиль", i)); break;
 				case "Session": cards.Children.Add(InfoCard("СЕАНС", SessionLabel(), core.Status == CoreStatus.Connected ? "Защищённое время" : "Не запущен", i)); break;
 				default: cards.Children.Add(InfoCard("ВНЕШНИЙ IP", core.Status == CoreStatus.Connected ? tunnelExternalIp : directExternalIp, core.Status == CoreStatus.Connected ? "После туннеля" : "До подключения", i)); break;
 			}
@@ -1878,10 +2005,10 @@ public sealed partial class MainWindow : Window
 			Navigate("servers");
 			return;
 		}
-		ShowBusySkeleton("Ищем сервер с минимальным пингом", Math.Max(3, Math.Min(7, state.Profiles.Count)));
+		ShowBusySkeleton("Проверяем HTTPS через профили", Math.Max(3, Math.Min(7, state.Profiles.Count)));
 		await Dispatcher.Yield(DispatcherPriority.Background);
-		await HealthCheckService.TestAllAsync(state.Profiles);
-		VpnProfile best = HealthCheckService.BestAvailable(state.Profiles);
+		await HealthCheckService.TestAllAsync(CollectionCandidates());
+		VpnProfile best = CollectionBestAvailable();
 		if (best == null) Toast("Доступные серверы не найдены.", Warning);
 		else await SelectProfileAsync(best);
 		Navigate("servers");
@@ -1889,9 +2016,13 @@ public sealed partial class MainWindow : Window
 
 	private async Task SelectProfileAsync(VpnProfile profile)
 	{
+        if (snapshotMode || closing) return;
+        if (configuredFallbackBusy) { Toast("Дождитесь резервного подключения или отключите VPN.", Warning); return; }
         if (gamingSession != null || gamingCancellation != null) { Toast("Сначала выключите игровой режим или отмените подбор.", Warning); return; }
 		startupCancellation.Cancel();
 		if (profile == null || closing) return;
+        string collectionError = ProfileCollectionService.Exclusion(state, profile);
+        if (collectionError != null) { Toast(collectionError, Warning); return; }
 		if (profileSwitchInProgress)
 		{
 			Toast("Переключение конфига уже выполняется.", Warning);
@@ -1925,6 +2056,7 @@ public sealed partial class MainWindow : Window
 			bool reconnect = core.Status == CoreStatus.Connected;
 			if (!reconnect)
 			{
+                state.FallbackRootProfileId = profile.Id; fallbackFailedProfileId = null;
 				state.SelectedProfileId = profile.Id;
 				StateStore.Save(state);
 				Toast("Выбран конфиг: " + profile.Name, Green);
@@ -1933,45 +2065,53 @@ public sealed partial class MainWindow : Window
 
 			RecordHistory("Переключение", "Автоматический перезапуск туннеля на конфиге «" + profile.Name + "».");
 			reconnectTimer.Stop();
-			manualDisconnect = true;
-			connectionRequested = false;
+			manualDisconnect = false;
+			connectionRequested = true;
 			ShowBusySkeleton("Переключаем VPN на «" + profile.Name + "»", 3);
 			await Dispatcher.Yield(DispatcherPriority.Background);
 
-			ProfileSwitchResult result = await ProfileSwitchService.SwitchAsync(
-				state,
-				profile,
-				() => core.Stop(),
-				async target =>
-				{
-					await core.StartAsync(target, EffectiveRouting());
-					if (core.Status != CoreStatus.Connected)
-						throw new InvalidOperationException(string.IsNullOrWhiteSpace(core.LastError) ? "Новое VPN-подключение не запустилось." : core.LastError);
-				},
-				() => StateStore.Save(state));
+            if (closing || manualDisconnect || !connectionRequested) return;
+            ProfileSwitchResult result = await ProfileSwitchService.SwitchConfiguredAsync(
+                state, profile, () => core.Stop(), async (target, restoring) =>
+                {
+                    fallbackFailedProfileId = null;
+                    await StartWithConfiguredFallbackPreferredAsync(restoring ? target.Id : null, default(System.Threading.CancellationToken));
+                    var connected = SelectedProfile();
+                    if (connected == null || core.Status != CoreStatus.Connected || core.ActiveProfileId != connected.Id)
+                        throw new InvalidOperationException(string.IsNullOrWhiteSpace(core.LastError) ? "Новое VPN-подключение не запустилось." : core.LastError);
+                    return connected;
+                }, () => StateStore.Save(state), () => !closing && !manualDisconnect && connectionRequested);
 			StateStore.Save(state);
 
-			if (result.TargetConnected)
+            if (result.Cancelled)
+            {
+                manualDisconnect = true; connectionRequested = false; reconnectTimer.Stop();
+                Toast("Переключение отменено. VPN отключён.", Muted);
+            }
+			else if (result.TargetConnected)
 			{
+                state.FallbackRootProfileId = profile.Id; fallbackFailedProfileId = null;
+                StateStore.Save(state);
 				manualDisconnect = false;
 				connectionRequested = true;
 				currentSessionStartedUtc = DateTime.UtcNow;
-				result.TargetProfile.ConsecutiveFailures = 0;
-				result.TargetProfile.HealthStatus = "Подключён";
-				result.TargetProfile.LastTestMessage = "Конфиг подключён автоматически после переключения.";
+				result.ConnectedProfile.ConsecutiveFailures = 0;
+				result.ConnectedProfile.HealthStatus = "Подключён";
+				result.ConnectedProfile.LastTestMessage = "Конфиг подключён автоматически после переключения.";
 				reconnectAttempt = 0;
 				RecordHistory("Переключено", "Соединение автоматически восстановлено на новом конфиге.");
-				Toast("VPN переключён на «" + result.TargetProfile.Name + "».", Green);
+				Toast("VPN переключён на «" + result.ConnectedProfile.Name + "».", Green);
 			}
 			else if (result.PreviousRestored)
 			{
 				manualDisconnect = false;
 				connectionRequested = true;
 				currentSessionStartedUtc = DateTime.UtcNow;
-				result.PreviousProfile.ConsecutiveFailures++;
-				result.PreviousProfile.HealthStatus = "Подключён";
-				result.PreviousProfile.LastTestMessage = "Сохранённое подключение восстановлено после ошибки нового конфига.";
-				Toast("Не удалось подключить «" + profile.Name + "». Возвращён прежний конфиг «" + result.PreviousProfile.Name + "»: " + LogSanitizer.Sanitize(result.TargetError?.Message), Warning);
+				profile.ConsecutiveFailures++;
+                result.ConnectedProfile.ConsecutiveFailures = 0;
+				result.ConnectedProfile.HealthStatus = "Подключён";
+				result.ConnectedProfile.LastTestMessage = "Подключение восстановлено через прежнюю резервную цепочку.";
+				Toast("Не удалось подключить «" + profile.Name + "». Подключение восстановлено через «" + result.ConnectedProfile.Name + "»: " + LogSanitizer.Sanitize(result.TargetError?.Message), Warning);
 			}
 			else
 			{
@@ -2029,9 +2169,9 @@ public sealed partial class MainWindow : Window
 			testAll.Content = "Проверяем…";
 			ShowBusySkeleton("Проверяем серверы", Math.Max(3, Math.Min(7, state.Profiles.Count)));
 			await Dispatcher.Yield(DispatcherPriority.Background);
-			await HealthCheckService.TestAllAsync(state.Profiles);
+			await HealthCheckService.TestAllAsync(CollectionCandidates());
 			StateStore.Save(state);
-			VpnProfile best = HealthCheckService.BestAvailable(state.Profiles);
+			VpnProfile best = CollectionBestAvailable();
 			if (best != null && state.AutoSelectBestServer) await SelectProfileAsync(best);
 			else Toast(best == null ? "Доступные серверы не найдены." : "Лучший сервер: " + best.Name + " · " + best.LastLatency + " мс", best == null ? Warning : Green);
 			Navigate("servers");
@@ -2043,24 +2183,23 @@ public sealed partial class MainWindow : Window
 		{
 			chooseBest.IsEnabled = false;
 			chooseBest.Content = "Выбираем…";
-			ShowBusySkeleton("Ищем сервер с минимальным пингом", Math.Max(3, Math.Min(7, state.Profiles.Count)));
+			ShowBusySkeleton("Проверяем HTTPS через профили", Math.Max(3, Math.Min(7, state.Profiles.Count)));
 			await Dispatcher.Yield(DispatcherPriority.Background);
-			await HealthCheckService.TestAllAsync(state.Profiles);
-			VpnProfile best = HealthCheckService.BestAvailable(state.Profiles);
+			await HealthCheckService.TestAllAsync(CollectionCandidates());
+			VpnProfile best = CollectionBestAvailable();
 			if (best == null) Toast("Доступные серверы не найдены.", Warning);
 			else await SelectProfileAsync(best);
 			Navigate("servers");
 		};
 		Button update = SmallButton("Обновить подписки");
-		update.IsEnabled = state.Profiles.Any(p => !string.IsNullOrWhiteSpace(p.SubscriptionUrl));
+		update.IsEnabled = state.Subscriptions.Count > 0;
 		update.Click += async delegate
 		{
 			update.IsEnabled = false;
 			update.Content = "Обновляем…";
 			ShowBusySkeleton("Обновляем подписки", 4);
 			await Dispatcher.Yield(DispatcherPriority.Background);
-			SubscriptionUpdateResult result = await SubscriptionManager.UpdateAllAsync(state);
-			Toast(result.Success ? "Подписки обновлены: " + result.UpdatedProfiles + " серверов." : string.Join(" ", result.Errors.Take(2)), result.Success ? Green : Warning);
+			await ReviewSubscriptionsAsync();
 			Navigate("servers");
 		};
 		WrapPanel actions = new WrapPanel { VerticalAlignment = VerticalAlignment.Center, MaxWidth = 620 };
@@ -2072,10 +2211,37 @@ public sealed partial class MainWindow : Window
 		if (!state.AutoSelectBestServer) actions.Children.Add(chooseBest);
 		actions.Children.Add(update);
 		actions.Children.Add(addButton);
+        var importFile = SmallButton("Из файла"); importFile.Margin = new Thickness(0, 6, 8, 0);
+        importFile.Click += async delegate { await ImportFileAsync(); }; actions.Children.Add(importFile);
+        var qr = SmallButton("QR ▾"); qr.Margin = new Thickness(0, 6, 8, 0);
+        var qrMenu = new ContextMenu(); qr.ContextMenu = qrMenu;
+        foreach (var option in new[] { new[] { "С экрана", "screen" }, new[] { "Из изображения", "file" }, new[] { "Из буфера обмена", "clipboard" } })
+        {
+            string source = option[1]; var item = new MenuItem { Header = option[0] };
+            item.Click += async delegate { await ImportQrAsync(source); }; qrMenu.Items.Add(item);
+        }
+        qr.Click += delegate { qrMenu.PlacementTarget = qr; qrMenu.IsOpen = true; }; actions.Children.Add(qr);
+        var fallback = SmallButton("Резервные профили"); fallback.Margin = new Thickness(0, 6, 8, 0);
+        fallback.Click += delegate { EditFallbackProfiles(); }; actions.Children.Add(fallback);
+        var corporate = SmallButton("Корпоративный прокси"); corporate.Margin = new Thickness(0, 6, 8, 0);
+        corporate.Click += async delegate { await EditCorporateProxyAsync(); }; actions.Children.Add(corporate);
+        var vps = SmallButton("Мой VPS"); vps.Margin = new Thickness(0, 6, 8, 0);
+        vps.Click += async delegate { await OpenVpsAsync(); }; actions.Children.Add(vps);
+        var services = SmallButton("Доступность сервисов"); services.Margin = new Thickness(0, 6, 8, 0);
+        services.Click += async delegate {
+            var dialog = new ServiceMatrixWindow(CollectionCandidates(), () => CollectionCandidates(), core.ProbeCorePath,
+                System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "service-matrix"), state.Visual, snapshotMode, mapHealthCancellation.Token) { Owner = this };
+            if (dialog.ShowDialog() == true && !snapshotMode) {
+                var chosen = CollectionCandidates().FirstOrDefault(p => p.Id == dialog.ChosenProfileId);
+                if (chosen != null) await SelectProfileAsync(chosen);
+            }
+        }; actions.Children.Add(services);
 		grid.Children.Add(PageHeader("Серверы", state.Profiles.Count + " профилей · " + state.Profiles.Count(p => p.IsFavorite) + " избранных", actions, null));
         var stackPanel = new StackPanel();
         Action renderServers = delegate {
             stackPanel.Children.Clear();
+            stackPanel.Children.Add(CollectionBar());
+            RenderSubscriptionCards(stackPanel);
 
 		if (state.Profiles.Count == 0)
 		{
@@ -2085,7 +2251,7 @@ public sealed partial class MainWindow : Window
 		}
 		else
 		{
-			var visible = state.Profiles.Where(p => p != null && (!serverFavoritesOnly || p.IsFavorite) && (string.IsNullOrWhiteSpace(serverSearch) || (p.Name ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0 || (p.Endpoint ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
+			var visible = CollectionCandidates().Where(p => (!serverFavoritesOnly || p.IsFavorite) && (string.IsNullOrWhiteSpace(serverSearch) || (p.Name ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0 || (p.Endpoint ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
             if (visible.Count == 0) stackPanel.Children.Add(EmptyState("servers", "Серверы не найдены", "Измените поисковый запрос или фильтр избранного."));
             var groups = visible.GroupBy(ServerGroupingService.CountryLabel).OrderBy(group => group.Key == "Другие" ? 1 : 0).ThenBy(group => group.Key);
 			foreach (var group in groups)
@@ -2184,7 +2350,7 @@ public sealed partial class MainWindow : Window
 		if (!compact && !string.Equals(ServerGroupingService.ProviderLabel(profile), profile.Server, StringComparison.OrdinalIgnoreCase)) stackPanel2.Children.Add(provider);
 		TextBlock health = T(profile.HealthStatus ?? "Не проверен", 9.0, profile.ConsecutiveFailures > 0 ? Danger : profile.LastLatency > 0 ? Green : Muted);
 		health.ToolTip = profile.LastTestMessage;
-		if (!compact) { stackPanel2.Children.Add(health); stackPanel2.Children.Add(T(profile.LastLatency > 0 ? "Потери " + profile.LastLossPercent + "% · средняя " + profile.AverageLatency + " мс" : "Проверка ещё не выполнялась", 8.5, profile.LastLossPercent > 0 ? Warning : Muted)); }
+		if (!compact) { stackPanel2.Children.Add(health); var measurement = T(ProfileHealthEvidence.MeasurementLabel(profile), 8.5, Muted); measurement.TextWrapping = TextWrapping.Wrap; stackPanel2.Children.Add(measurement); }
 		Grid.SetColumn(stackPanel2, 1);
 		grid.Children.Add(stackPanel2);
 		StackPanel stackPanel5 = new StackPanel();
@@ -2213,13 +2379,7 @@ public sealed partial class MainWindow : Window
 		edit.Click += delegate(object sender, RoutedEventArgs e)
 		{
 			e.Handled = true;
-			TextPromptWindow dialog = new TextPromptWindow("Название сервера", "Введите понятное название профиля", profile.Name, state.Visual) { Owner = this };
-			if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.Value))
-			{
-				profile.Name = dialog.Value;
-				StateStore.Save(state);
-				Navigate("servers");
-			}
+            RenameProfile(profile);
 		};
 		Grid.SetColumn(edit, 4);
 
@@ -2229,10 +2389,7 @@ public sealed partial class MainWindow : Window
 		favorite.Click += async delegate(object sender, RoutedEventArgs e)
 		{
 			e.Handled = true;
-			await AnimateIconPopAsync(favorite);
-			profile.IsFavorite = !profile.IsFavorite;
-			StateStore.Save(state);
-			Navigate("servers");
+            await ToggleProfileFavoriteAsync(profile,favorite);
 		};
 		Grid.SetColumn(favorite, 5);
 		grid.Children.Add(favorite);
@@ -2241,20 +2398,7 @@ public sealed partial class MainWindow : Window
 		button.Click += delegate(object sender, RoutedEventArgs e)
 		{
 			e.Handled = true;
-			if ((core.Status == CoreStatus.Connected || core.Status == CoreStatus.Connecting) && selected)
-			{
-				Toast("Сначала отключите активный сервер.", Danger);
-			}
-			else
-			{
-				state.Profiles.Remove(profile);
-				if (state.SelectedProfileId == profile.Id)
-				{
-					state.SelectedProfileId = ((state.Profiles.Count > 0) ? state.Profiles[0].Id : null);
-				}
-				StateStore.Save(state);
-				Navigate("servers");
-			}
+            DeleteProfile(profile);
 		};
 		Grid.SetColumn(button, 6);
         var more = SmallButton("⋯"); more.MinWidth = 0; more.Width = 34; more.Padding = new Thickness(0); more.FontSize = 22; more.ToolTip = "Действия сервера";
@@ -2263,6 +2407,8 @@ public sealed partial class MainWindow : Window
         more.ContextMenu = menu;
         var rename = new MenuItem { Header = "Переименовать" }; rename.Click += delegate { edit.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); };
         var remove = new MenuItem { Header = "Удалить профиль", Foreground = new SolidColorBrush(Danger) }; remove.Click += delegate { button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); };
+        AddVpnRoleMenuItems(menu, profile);
+        if (menu.Items.Count > 0) menu.Items.Add(new Separator());
         menu.Items.Add(rename);menu.Items.Add(new Separator());menu.Items.Add(remove);
         more.Click += delegate(object sender,RoutedEventArgs e) { e.Handled=true; menu.PlacementTarget=more;menu.IsOpen=true; };
         Grid.SetColumn(more,6);grid.Children.Add(more);
@@ -2296,11 +2442,29 @@ public sealed partial class MainWindow : Window
 		Grid grid = new Grid(); grid.RowDefinitions.Add(new RowDefinition()); grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 		Grid top = new Grid(); top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(50) }); top.ColumnDefinitions.Add(new ColumnDefinition()); top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 		top.Children.Add(RegionMark(profile)); StackPanel copy = new StackPanel { VerticalAlignment = VerticalAlignment.Center }; copy.Children.Add(T(profile.Name, 13.5, TextColor, FontWeights.SemiBold)); copy.Children.Add(T(ServerGroupingService.CountryLabel(profile) + " · " + profile.ProtocolLabel, 9.5, Muted)); Grid.SetColumn(copy, 1); top.Children.Add(copy);
-		Button favorite = VectorIconButton("star", "Избранное", profile.IsFavorite ? Warning : Muted, profile.IsFavorite); favorite.Click += async delegate(object sender, RoutedEventArgs e) { e.Handled = true; await AnimateIconPopAsync(favorite); profile.IsFavorite = !profile.IsFavorite; StateStore.Save(state); Navigate("servers"); }; Grid.SetColumn(favorite, 2); top.Children.Add(favorite); grid.Children.Add(top);
+		Button favorite = VectorIconButton("star", "Избранное", profile.IsFavorite ? Warning : Muted, profile.IsFavorite); favorite.Click += async delegate(object sender, RoutedEventArgs e) { e.Handled = true; await ToggleProfileFavoriteAsync(profile,favorite); }; Grid.SetColumn(favorite, 2); top.Children.Add(favorite); grid.Children.Add(top);
 		Grid metrics = new Grid { Margin = new Thickness(0, 14, 0, 0) }; metrics.ColumnDefinitions.Add(new ColumnDefinition()); metrics.ColumnDefinitions.Add(new ColumnDefinition()); metrics.ColumnDefinitions.Add(new ColumnDefinition());
-		metrics.Children.Add(Metric("ЗАДЕРЖКА", profile.LastLatency > 0 ? profile.LastLatency + " мс" : "—", LatencyColor(profile.LastLatency), 0)); metrics.Children.Add(Metric("ПОТЕРИ", profile.LastLatency > 0 ? profile.LastLossPercent + "%" : "—", profile.LastLossPercent > 0 ? Warning : Green, 1)); metrics.Children.Add(Metric("СТАТУС", profile.HealthStatus ?? "Не проверен", profile.ConsecutiveFailures > 0 ? Danger : profile.LastLatency > 0 ? Green : Muted, 2)); Grid.SetRow(metrics, 1); grid.Children.Add(metrics); card.Child = grid;
-		VisualDesign.ApplyGlassSurface(card, state.Visual);
-		card.MouseLeftButtonUp += async delegate { await SelectProfileAsync(profile); }; EnableCardMotion(card); return card;
+		metrics.Children.Add(Metric("ЗАДЕРЖКА", profile.LastLatency > 0 ? profile.LastLatency + " мс" : "—", LatencyColor(profile.LastLatency), 0)); metrics.Children.Add(Metric("ПРОВЕРКА", profile.HealthMeasurement == "https-profile" ? profile.LastCheckedUtc.ToLocalTime().ToString("t") : "—", Muted, 1)); metrics.Children.Add(Metric("СТАТУС", profile.HealthStatus ?? "Не проверен", profile.ConsecutiveFailures > 0 ? Danger : profile.LastLatency > 0 ? Green : Muted, 2)); Grid.SetRow(metrics, 1); grid.Children.Add(metrics); card.Child = grid;
+        if (state.Routing?.MultiServer != null)
+        {
+            var roles = SmallButton("Роль VPN");
+            var menu = new ContextMenu();
+            AddVpnRoleMenuItems(menu, profile);
+            roles.ContextMenu = menu;
+            roles.Click += (sender, args) => { args.Handled = true; menu.PlacementTarget = roles; menu.IsOpen = true; };
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(roles, 2);
+            grid.Children.Add(roles);
+        }
+        VisualDesign.ApplyGlassSurface(card, state.Visual);
+        card.MouseLeftButtonUp += async delegate(object sender, MouseButtonEventArgs args)
+        {
+            if (args.Handled) return;
+            for (var source = args.OriginalSource as DependencyObject; source != null && source != card;
+                source = VisualTreeHelper.GetParent(source))
+                if (source is System.Windows.Controls.Primitives.ButtonBase) return;
+            await SelectProfileAsync(profile);
+        }; EnableCardMotion(card); return card;
 	}
 
 	private UIElement BuildRoutingPage()
@@ -2339,13 +2503,45 @@ public sealed partial class MainWindow : Window
 			Toast("Импортировано доменов: " + imported.Count, Green);
 			Navigate("routing");
 		};
-        var routingTransfers = new WrapPanel { Orientation = Orientation.Horizontal };
+		var routingTransfers = new WrapPanel { Orientation = Orientation.Horizontal };
         routingTransfers.Children.Add(SettingsImportButton("routing"));
         routingTransfers.Children.Add(SettingsExportButton());
+        var assignments=SmallButton("Серверы для приложений и сайтов");assignments.Name="EditMultiServerRouting";
+        assignments.IsEnabled=CanEditServerAssignments();
+        assignments.ToolTip="Настройка конкретных серверов с проверкой и переподключением.";
+        assignments.Click+=async delegate{await EditMultiServerRoutingAsync();};routingTransfers.Children.Add(assignments);
+        if(state.MultiServerRoutingHistory!=null) {
+            var resume=SmallButton("Включить сохранённые назначения");resume.Name="ResumeMultiServerRouting";resume.IsEnabled=CanEditServerAssignments();
+            resume.Click+=async delegate{await EditMultiServerRoutingAsync(true);};routingTransfers.Children.Add(resume);
+            var forget=SmallButton("Удалить сохранённые назначения");forget.Name="ForgetMultiServerRouting";forget.IsEnabled=CanEditServerAssignments();
+            forget.Click+=delegate{try{MultiServerRoutingCommitPlan.PrepareForgetHistory(state).Apply(()=>CanEditServerAssignments(),StateStore.Save);RefreshCurrentPage();}
+                catch(Exception error){Toast(LogSanitizer.Sanitize(error.Message),Warning);}};routingTransfers.Children.Add(forget);
+        }
         importRules.Margin = new Thickness(8, 0, 0, 0);
         routingTransfers.Children.Add(importRules);
         grid.Children.Add(PageHeader("Маршрутизация", "Что направлять через VPN", routingTransfers, null));
 		StackPanel stackPanel = new StackPanel();
+        if(MultiServerRoutingHistory.MissingRestoredProfile(state)) {
+            var missing=T("Прежний сервер недоступен. Правила восстановлены; выберите сервер вручную перед подключением.",12,Warning);
+            missing.Name="RestoredServerUnavailable";missing.TextWrapping=TextWrapping.Wrap;stackPanel.Children.Add(missing);
+        }
+        bool migratedRouting = state.Routing.MigratedPolicy != null;
+        if (migratedRouting || state.RoutingMigrationBackup != null)
+        {
+            var migration = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+            var info = T(migratedRouting ? "Применяются перенесённые правила в исходном порядке. Обычные списки ниже временно не используются." : "Доступна предыдущая маршрутизация для отмены последнего переноса.", 12, palette.Text);
+            info.Name = "MigratedRoutingNotice"; info.TextWrapping = TextWrapping.Wrap; migration.Children.Add(info);
+            var undo = SmallButton(state.RoutingMigrationBackup != null ? "Отменить перенос правил" : "Вернуться к обычным правилам"); undo.Name = "UndoRoutingMigration"; undo.IsEnabled = !snapshotMode;
+            undo.Click += delegate {
+                try {
+                    string expected = RoutingMigrationService.Fingerprint(state.Routing);
+                    if (state.RoutingMigrationBackup != null) RoutingMigrationService.Undo(state, expected, CanChangeMigratedRouting, StateStore.Save);
+                    else RoutingMigrationService.UseLocalRules(state, expected, CanChangeMigratedRouting, StateStore.Save);
+                    Navigate("routing"); Toast("Маршрутизация восстановлена. Подключение не запускалось.", Green);
+                } catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
+            }; migration.Children.Add(undo); stackPanel.Children.Add(migration);
+        }
+        if (migratedRouting) importRules.IsEnabled = false;
 		stackPanel.Children.Add(SectionTitle("РЕЖИМ"));
 		Grid grid2 = new Grid();
 		grid2.Margin = new Thickness(0.0, 10.0, 0.0, 22.0);
@@ -2467,7 +2663,10 @@ public sealed partial class MainWindow : Window
 			warning.TextWrapping = TextWrapping.Wrap;
 			stackPanel.Children.Add(warning);
 		}
-		stackPanel.Children.Add(T("Подсказка: домен *.example.com включает все его поддомены. Каждое правило — отдельная ячейка. Новые ячейки добавляются кнопкой «Добавить».", 10.5, Muted));
+		var entryHint = T("Подсказка: домен *.example.com включает все его поддомены. Для каждого правила — отдельная ячейка; новые ячейки добавляются кнопкой «Добавить».", 10.5, Muted);
+		entryHint.TextWrapping = TextWrapping.Wrap;
+		stackPanel.Children.Add(entryHint);
+        if (migratedRouting) foreach (UIElement child in stackPanel.Children.Cast<UIElement>().Skip(1)) child.IsEnabled = false;
 		ScrollViewer scrollViewer = TouchScrollViewer(new ScrollViewer());
 		scrollViewer.Content = stackPanel;
 		scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
@@ -2730,6 +2929,183 @@ public sealed partial class MainWindow : Window
 		return source;
 	}
 
+    private UIElement BuildMultiServerRoutingPage()
+    {
+        var layout=new DockPanel();var actions=new WrapPanel();
+        actions.Children.Add(SettingsImportButton("routing"));actions.Children.Add(SettingsExportButton());
+        var edit=SmallButton("Назначения серверов");edit.Name="EditMultiServerRouting";edit.IsEnabled=CanEditServerAssignments();
+        edit.ToolTip="Применение проверит конфигурацию и переподключит VPN.";edit.Click+=async delegate{await EditMultiServerRoutingAsync();};actions.Children.Add(edit);
+        var disable=SmallButton(state.MultiServerRoutingHistory?.SingleServerRouting!=null?"Вернуть прежнюю маршрутизацию":"Отключить назначения");
+        disable.Name="DisableMultiServerRouting";disable.IsEnabled=CanEditServerAssignments();
+        disable.ToolTip="Назначения сохранятся для повторного включения. Активное подключение будет переподключено после проверки.";
+        disable.Click+=async delegate{try{await ApplyServerAssignmentsAsync(state,null,true);}catch(Exception error){Toast(LogSanitizer.Sanitize(error.Message),Warning);}};actions.Children.Add(disable);
+        var inspect=SmallButton("Проверить маршрут");inspect.Click+=delegate{Navigate("diagnostics");};actions.Children.Add(inspect);
+        var header=PageHeader("Маршрутизация","Сайты → приложения → основной сервер",actions,null);DockPanel.SetDock(header,Dock.Top);layout.Children.Add(header);
+        var content=new StackPanel{Margin=new Thickness(0,18,0,0)};var settings=state.Routing.MultiServer;
+        var primary=state.Profiles.FirstOrDefault(p=>p.Id==settings.DefaultProfileId);
+        content.Children.Add(T("Основной сервер: "+(primary==null?"Недоступен — назначьте другой":primary.Name+(primary.RetiredFromSubscription?" · удалён из подписки — трафик блокируется":"")),16,TextColor));
+        var explanation=T("Остальной трафик использует основной сервер. Недоступное назначение блокируется, автоматической замены нет. При применении нового набора VPN переподключается.",12,Muted);explanation.TextWrapping=TextWrapping.Wrap;content.Children.Add(explanation);
+        if (state.Routing.ZapretDirectDomains.Count > 0)
+        {
+            var zapretHint = T("Сайты Zapret идут напрямую, если для них нет явного назначения или блокировки.", 12, Muted);
+            zapretHint.TextWrapping = TextWrapping.Wrap;
+            content.Children.Add(zapretHint);
+        }
+        if (state.Routing.AdvancedRules.Count > 0)
+        {
+            var advancedHint = T("Блокировки по портам сохранены. Остальные правила портов действуют для трафика без назначения.", 12, Muted);
+            advancedHint.TextWrapping = TextWrapping.Wrap;
+            content.Children.Add(advancedHint);
+        }
+        if (state.Routing.DirectProcesses.Count > 0 || state.Routing.ProxyProcesses.Count > 0)
+        {
+            var nameHint = T("Прежние правила по имени .exe действуют после назначений по полному пути и правил портов.", 12, Muted);
+            nameHint.TextWrapping = TextWrapping.Wrap;
+            content.Children.Add(nameHint);
+        }
+        multiExitHealthPanel=new StackPanel{Margin=new Thickness(0,12,0,8)};content.Children.Add(multiExitHealthPanel);UpdateMultiExitHealthPanel();
+        if(state.MultiServerRoutingHistory?.SingleServerRouting==null)content.Children.Add(T("Прежняя схема не сохранена: отключение использует обычную маршрутизацию с текущими настройками. Назначения останутся для повторного включения.",12,Warning));
+        if(settings.RequiresRebinding)content.Children.Add(T("Импортированные назначения требуют привязки к серверам этого компьютера.",12,Warning));
+        foreach(var rule in settings.Rules){string destination=rule.Domain==null?System.IO.Path.GetFileName(rule.ApplicationPath):rule.DomainLabel;
+            string target=rule.Target=="Profile"?state.Profiles.FirstOrDefault(p=>p.Id==rule.ProfileId)?.Name??"Сервер недоступен":rule.Target=="Direct"?"Напрямую":rule.Target=="Block"?"Блокировать":"Основной сервер";
+            var row=T(destination+" → "+target,13,TextColor);row.Margin=new Thickness(0,8,0,0);row.TextWrapping=TextWrapping.Wrap;row.ToolTip=rule.ApplicationPath;content.Children.Add(row);
+        }
+        layout.Children.Add(TouchScrollViewer(new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}));return layout;
+    }
+    private StackPanel multiExitHealthPanel;
+    private void UpdateMultiExitHealthPanel()
+    {
+        if(multiExitHealthPanel==null)return;
+        multiExitHealthPanel.Children.Clear();
+        if(core.Status!=CoreStatus.Connected||core.LastConnectedRouting?.MultiServer==null)return;
+        multiExitHealthPanel.Children.Add(T("Проверка активного подключения",14,TextColor));
+        if (core.HasMultiServerCatalogChanges(state.Profiles))
+        {
+            var notice = T("Параметры назначенных серверов изменились. VPN использует прежний снимок до переподключения.", 12, Warning);
+            notice.Name = "MultiServerCatalogChanged";
+            notice.TextWrapping = TextWrapping.Wrap;
+            multiExitHealthPanel.Children.Add(notice);
+            var apply = SmallButton("Применить изменения серверов");
+            apply.Name = "ApplyMultiServerCatalog";
+            apply.IsEnabled = CanEditServerAssignments() && state.Routing?.MultiServer != null;
+            apply.Click += async delegate
+            {
+                if (!CanEditServerAssignments() || state.Routing?.MultiServer == null || !core.HasMultiServerCatalogChanges(state.Profiles)) return;
+                try { await ApplyServerAssignmentsAsync(state, state.Routing); }
+                catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
+            };
+            multiExitHealthPanel.Children.Add(apply);
+        }
+        var group=core.Verification.MultiExits;
+        if(group==null){multiExitHealthPanel.Children.Add(T("Проверяем каждый назначенный сервер…",12,Muted));return;}
+        foreach(var exit in group.Results) {
+            string status=exit.Label(DateTime.UtcNow);
+            var current=state.Profiles.FirstOrDefault(p=>p.Id==exit.Exit.ProfileId);
+            string currentFingerprint = current == null || current.RetiredFromSubscription ? null : ExitProbeTarget.Fingerprint(current);
+            bool changed = currentFingerprint != exit.Exit.ProfileFingerprint;
+            var row=T(exit.Exit.Name+" → "+status+(changed?" · снимок до изменения конфига":""),12,!changed&&exit.HasRecentSuccess(DateTime.UtcNow)?Green:Warning);
+            row.TextWrapping=TextWrapping.Wrap;row.Margin=new Thickness(0,6,0,0);multiExitHealthPanel.Children.Add(row);
+        }
+    }
+    private bool multiServerApplyBusy;
+    private bool CanEditServerAssignments(bool owner=false) => !snapshotMode&&!closing&&(owner||!profileAliasEditorBusy)&&(owner||!multiServerApplyBusy)&&!subscriptionReviewBusy&&!SubscriptionManager.IsUpdating&&!configuredFallbackBusy&&!profileSwitchInProgress&&!startupConnecting&&!startupSettingsBusy&&gamingSession==null&&gamingCancellation==null&&
+        (core.CanSelectEngine||core.Status==CoreStatus.Connected)&&core.Engine==VpnEngine.SingBox;
+    private async Task ApplyServerAssignmentsAsync(AppState opened,RoutingSettings accepted,bool restorePrevious=false)
+    {
+        await trafficModeGate.WaitAsync();
+        bool previousSwitch=profileSwitchInProgress;
+        try {
+            if(!CanEditServerAssignments(true)||!ReferenceEquals(opened,state))throw new InvalidOperationException("Подключение изменилось. Откройте редактор заново.");
+            multiServerApplyBusy=true;
+            var catalog=MultiServerConfigBuilder.CaptureProfiles(opened.Profiles);
+            string routingBaseline = RoutingMigrationService.Fingerprint(opened.Routing);
+            string historyBaseline = MultiServerRoutingHistory.Fingerprint(opened.MultiServerRoutingHistory);
+            string collectionBaseline = opened.ActiveProfileCollectionId;
+            var restore=restorePrevious?MultiServerRoutingHistory.PreviewDisable(opened):null;
+            string zapretMode = opened.Zapret?.Mode;
+            string[] zapretDomains = opened.Zapret?.StandardDomains?.ToArray() ?? Array.Empty<string>();
+            bool ZapretUnchanged() => opened.Zapret?.Mode == zapretMode &&
+                zapretDomains.SequenceEqual(opened.Zapret?.StandardDomains ?? Enumerable.Empty<string>());
+            var candidate=restore==null ? ZapretRoutingTransitionService.PrepareAssignedRouting(opened,accepted).Routing
+                : ZapretRoutingTransitionService.PrepareOrdinaryRouting(opened,restore.SingleServerRouting).Routing;
+            string selectedId=restorePrevious?restore.SelectedProfileId:candidate.MultiServer?.DefaultProfileId;
+            var primary=catalog.FirstOrDefault(p=>p.Id==selectedId&&(!restorePrevious||!p.RetiredFromSubscription));
+            var savedAssignments = opened.Routing?.MultiServer;
+            if (primary == null && !restorePrevious && savedAssignments != null && !savedAssignments.RequiresRebinding &&
+                savedAssignments.DefaultProfileId == selectedId)
+                primary = MultiServerStartupSelection.ResolveCatalogIdentity(savedAssignments, catalog);
+            if(primary==null&&(!restorePrevious||core.Status==CoreStatus.Connected))throw new InvalidOperationException(restorePrevious?
+                "Прежний сервер недоступен. Текущее подключение сохранено; восстановите сервер или отключите VPN и верните правила без подключения.":"Нет доступного основного сервера.");
+            if(primary!=null&&!primary.RetiredFromSubscription){string exclusion=ProfileCollectionService.Exclusion(opened,opened.Profiles.First(p=>p.Id==primary.Id));if(exclusion!=null)throw new InvalidOperationException(exclusion);}
+            bool InputsUnchanged() => ReferenceEquals(opened, state) && ZapretUnchanged() &&
+                opened.ActiveProfileCollectionId == collectionBaseline &&
+                RoutingMigrationService.Fingerprint(opened.Routing) == routingBaseline &&
+                MultiServerRoutingHistory.Fingerprint(opened.MultiServerRoutingHistory) == historyBaseline;
+            void RequireCandidateCatalog()
+            {
+                if (candidate.MultiServer != null)
+                    MultiServerConfigBuilder.RequireCurrentCatalog(candidate.MultiServer, catalog, opened.Profiles);
+            }
+            if(core.Status!=CoreStatus.Connected){
+                if(primary!=null){string validation=await core.ValidateAsync(primary,candidate,catalog);if(!string.IsNullOrEmpty(validation))throw new InvalidOperationException(validation);}
+                if(!InputsUnchanged())throw new InvalidOperationException("Настройки маршрутизации изменились. Повторите применение.");
+                RequireCandidateCatalog();
+                var commit=restorePrevious?MultiServerRoutingCommitPlan.PrepareDisable(opened):MultiServerRoutingCommitPlan.Prepare(opened,candidate);
+                commit.Apply(()=>ReferenceEquals(opened,state)&&CanEditServerAssignments(true)&&core.CanSelectEngine,StateStore.Save);
+                Toast(restorePrevious?(primary==null?"Прежние правила восстановлены. Выберите доступный сервер перед подключением.":"Прежняя маршрутизация восстановлена. Назначения сохранены."):"Назначения проверены и сохранены. Подключите VPN.",Green);return;
+            }
+            var previousRouting=RoutingOverlayService.Clone(core.LastConnectedRouting??opened.Routing);
+            var previousCatalog=core.CaptureActiveProfiles();
+            var previousProfile = previousRouting.MultiServer == null
+                ? previousCatalog.SingleOrDefault(p => p.Id == core.ActiveProfileId)
+                : MultiServerStartupSelection.ResolveCatalogIdentity(previousRouting.MultiServer, previousCatalog);
+            if (previousProfile == null || previousProfile.Id != core.ActiveProfileId)
+                throw new InvalidOperationException("Нет снимка предыдущего подключения.");
+            bool Current()=>!closing&&!snapshotMode&&!manualDisconnect&&connectionRequested&&InputsUnchanged();
+            profileSwitchInProgress=true;multiServerApplyBusy=true;reconnectTimer.Stop();manualDisconnect=false;connectionRequested=true;
+            async Task Restart(VpnProfile selected,RoutingSettings routes,VpnProfile[] profiles){
+                if(!Current())throw new OperationCanceledException();
+                manualDisconnect=true;connectionRequested=false;
+                try{core.Stop();}finally{manualDisconnect=false;connectionRequested=true;}
+                await core.StartAsync(selected,routes,profiles);
+                if(!Current())throw new OperationCanceledException();
+                if(core.Status!=CoreStatus.Connected||core.ActiveProfileId!=selected.Id)throw new InvalidOperationException(string.IsNullOrEmpty(core.LastError)?"Не удалось запустить подключение.":core.LastError);
+            }
+            var result=await RoutingApplyTransaction.ApplyAsync(opened,Current,async()=>{
+                string validation=await core.ValidateAsync(primary,candidate,catalog);if(!string.IsNullOrEmpty(validation))throw new InvalidOperationException(validation);
+                RequireCandidateCatalog();
+            },async()=>{
+                await Restart(primary,candidate,catalog);
+                // A changed catalog rejects the candidate without revoking ownership
+                // of the previous running snapshot needed by the rollback.
+                RequireCandidateCatalog();
+            },()=>{
+                var commit=restorePrevious?MultiServerRoutingCommitPlan.PrepareDisable(opened,core.ActiveProfileId):MultiServerRoutingCommitPlan.PrepareConnected(opened,candidate,core.ActiveProfileId);
+                commit.Apply(Current,StateStore.Save);
+            },StateStore.Save,()=>Restart(previousProfile,previousRouting,previousCatalog));
+            if(result.Applied)Toast(restorePrevious?"Прежняя маршрутизация восстановлена. Назначения сохранены.":"Назначения применены. VPN переподключён.",Green);
+            else if(result.Cancelled)Toast("Применение отменено. Новые настройки не подтверждены.",Warning);
+            else if(result.PreviousRestored&&result.PersistenceRollbackError==null)Toast("Изменение не применено. Предыдущее подключение восстановлено.",Warning);
+            else Toast("Не удалось применить назначения: "+LogSanitizer.Sanitize((result.RestoreError??result.PersistenceRollbackError??result.Error)?.Message),Danger);
+        }finally{multiServerApplyBusy=false;profileSwitchInProgress=previousSwitch;trafficModeGate.Release();if(!closing&&currentPage=="routing")RefreshCurrentPage();}
+    }
+    private async Task EditMultiServerRoutingAsync(bool resume=false)
+    {
+        if(!CanEditServerAssignments())return;
+        var opened=state;string baseline=FullStateRestorePlan.Fingerprint(opened);profileAliasEditorBusy=true;
+        try {
+            var editorRoutes=resume?MultiServerRoutingHistory.PreviewResume(opened):MultiServerRoutingHistory.AssignmentEditorSource(opened);
+            var paths=(editorRoutes.MultiServer?.Rules??new List<MultiServerRuleRecord>()).Where(r=>r.ApplicationPath!=null).Select(r=>r.ApplicationPath).Concat(editorRoutes.DirectProcessPaths).Concat(editorRoutes.ProxyProcessPaths).ToArray();
+            var entries=await Task.Run(()=>ApplicationCatalog.Discover(paths));
+            if(!CanEditServerAssignments(true)||!ReferenceEquals(opened,state)||FullStateRestorePlan.Fingerprint(opened)!=baseline)throw new InvalidOperationException("Настройки изменились. Откройте редактор заново.");
+            var editor=new MultiServerRoutingWindow(editorRoutes,opened.Profiles,entries,opened.SelectedProfileId,opened.Visual,
+                RoutingOverlayService.IsZapretMode(opened.Zapret?.Mode),this);
+            if(editor.ShowDialog()!=true)return;
+            if(FullStateRestorePlan.Fingerprint(opened)!=baseline)throw new InvalidOperationException("Настройки изменились. Повторите изменение.");
+            await ApplyServerAssignmentsAsync(opened,editor.Accepted);
+        }catch(Exception error){Toast(LogSanitizer.Sanitize(error.Message),Warning);}
+        finally{profileAliasEditorBusy=false;ScheduleRetiredProfileCleanup();}
+    }
 	private bool ApplicationRoutingNeedsApply()
 	{
 		if (core.Status != CoreStatus.Connected || core.LastConnectedRouting == null) return false;
@@ -2746,6 +3122,7 @@ public sealed partial class MainWindow : Window
 
 	private async Task ApplyApplicationRoutingAsync()
 	{
+        if (configuredFallbackBusy) { Toast("Дождитесь резервного подключения перед применением маршрутов.", Warning); return; }
         if (gamingSession != null) { Toast("Обычные правила сохранены и применятся при завершении игровой сессии.", Warning); return; }
 		if (!applicationRoutingPending || core.Status != CoreStatus.Connected) return;
 		await trafficModeGate.WaitAsync();
@@ -2756,7 +3133,7 @@ public sealed partial class MainWindow : Window
 		{
 			if (profile == null) throw new InvalidOperationException("Сначала выберите VPN-конфиг.");
 			RoutingSettings updated = EffectiveRouting();
-			string error = await core.ValidateAsync(profile, updated);
+			string error = await core.ValidateAsync(profile, updated, state.Profiles);
 			if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException(error);
 			manualDisconnect = true;
 			connectionRequested = false;
@@ -2764,7 +3141,7 @@ public sealed partial class MainWindow : Window
 			stopped = true;
 			manualDisconnect = false;
 			connectionRequested = true;
-			await core.StartAsync(profile, updated);
+			await StartAllowedProfileAsync(profile, updated);
 			applicationRoutingPending = false;
 			Toast("Маршруты приложений применены.", Green);
 		}
@@ -2772,7 +3149,7 @@ public sealed partial class MainWindow : Window
 		{
 			if (stopped && previous != null)
 			{
-				try { core.Stop(); manualDisconnect = false; connectionRequested = true; await core.StartAsync(profile, previous); }
+				try { core.Stop(); manualDisconnect = false; connectionRequested = true; await StartAllowedProfileAsync(profile, previous); }
 				catch { manualDisconnect = true; connectionRequested = false; }
 			}
 			Toast("Не удалось применить маршруты: " + LogSanitizer.Sanitize(ex.Message), Danger);
@@ -2984,7 +3361,7 @@ public sealed partial class MainWindow : Window
 		return border2;
 	}
 
-	    private UIElement BuildConnectionJournal()
+    private UIElement BuildConnectionJournal()
     {
         var panel = new StackPanel();
         var header = new DockPanel { Margin = new Thickness(0,0,0,12) };
@@ -3079,7 +3456,7 @@ public sealed partial class MainWindow : Window
 			visualResults.Children.Clear();
 			try
 			{
-				DiagnosticReport report = await DiagnosticService.RunAsync(core, SelectedProfile(), EffectiveRouting());
+				DiagnosticReport report = await DiagnosticService.RunAsync(core, SelectedProfile(), EffectiveRouting(), state.Profiles);
 				reportBox.Text = report.ToString();
 				foreach (DiagnosticItem item in report.Items) visualResults.Children.Add(DiagnosticResultRow(item));
 				StateStore.Save(state);
@@ -3118,12 +3495,31 @@ public sealed partial class MainWindow : Window
 		process.ToolTip = "Имя или полный путь приложения (необязательно)";
 		Grid.SetColumn(process, 2);
 		routeGrid.Children.Add(process);
+        routeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        routeGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var networkChoice = new ComboBox { ItemsSource = new[] { "Транспорт не указан", "TCP", "UDP" }, SelectedIndex = 0, Margin = new Thickness(0, 8, 0, 0), Height = 34 };
+        networkChoice.ToolTip = "TCP или UDP конкретного соединения; HTTPS также может использовать UDP/QUIC";
+        Grid.SetRow(networkChoice, 1); routeGrid.Children.Add(networkChoice);
+        var destinationPort = EditorBox("", false); destinationPort.Height = 34; destinationPort.Margin = new Thickness(0, 8, 0, 0);
+        destinationPort.ToolTip = "Порт назначения; для URL берётся порт из адреса";
+        Grid.SetRow(destinationPort, 1); Grid.SetColumn(destinationPort, 2); routeGrid.Children.Add(destinationPort);
 		Button explain = SmallButton("Объяснить");
 		explain.Height = 38.0;
 		explain.Click += delegate
 		{
-			RoutingDecision decision = RoutingInspector.Explain(EffectiveRouting(), destination.Text, process.Text);
-			ShowRouteDecision(routeCard, decision, destination.Text, process.Text);
+            int? port = null;
+            if (!string.IsNullOrWhiteSpace(destinationPort.Text))
+            {
+                if (!int.TryParse(destinationPort.Text, out int parsedPort) || parsedPort < 1 || parsedPort > 65535) { Toast("Порт должен быть от 1 до 65535.", Warning); return; }
+                port = parsedPort;
+            }
+            string network = networkChoice.SelectedIndex == 1 ? "tcp" : networkChoice.SelectedIndex == 2 ? "udp" : "";
+            try
+            {
+                var decision = ExplainCurrentRouting(destination.Text,process.Text,network,port);
+                ShowRouteDecision(routeCard, decision, destination.Text, process.Text);
+            }
+            catch (Exception) { Toast("Для выбранного ядра или полного конфига этот набор правил не поддерживается. Проверьте совместимость настроек.", Warning); }
 		};
 		Grid.SetColumn(explain, 3);
 		routeGrid.Children.Add(explain);
@@ -3175,18 +3571,34 @@ public sealed partial class MainWindow : Window
 
 	private void ShowRouteDecision(Border routeCard, RoutingDecision decision, string destination, string process)
 	{
-		Color color = decision.Route == "proxy" ? AccentLight : decision.Route == "direct" ? Teal : Danger;
+		Color color = !decision.IsCertain ? Warning : decision.Route == "proxy" ? AccentLight : decision.Route == "direct" ? Teal : decision.Route == "block" ? Danger : Warning;
 		StackPanel flow = new StackPanel();
 		Grid nodes = new Grid(); nodes.ColumnDefinitions.Add(new ColumnDefinition()); nodes.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(45) }); nodes.ColumnDefinitions.Add(new ColumnDefinition()); nodes.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(45) }); nodes.ColumnDefinitions.Add(new ColumnDefinition());
 		nodes.Children.Add(RouteNode("globe", string.IsNullOrWhiteSpace(destination) ? "Назначение" : destination, Muted, 0)); TextBlock arrow1 = T("→", 18, Muted); arrow1.HorizontalAlignment = HorizontalAlignment.Center; arrow1.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(arrow1, 1); nodes.Children.Add(arrow1);
 		nodes.Children.Add(RouteNode("routing", string.IsNullOrWhiteSpace(process) ? "Правила" : process, AccentLight, 2)); TextBlock arrow2 = T("→", 18, color); arrow2.HorizontalAlignment = HorizontalAlignment.Center; arrow2.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(arrow2, 3); nodes.Children.Add(arrow2);
-		nodes.Children.Add(RouteNode(decision.Route == "block" ? "diagnostics" : decision.Route == "direct" ? "home" : "shield", decision.DisplayRoute.ToUpperInvariant(), color, 4)); flow.Children.Add(nodes); TextBlock reason = T(decision.Reason, 9.5, Muted); reason.TextWrapping = TextWrapping.Wrap; reason.Margin = new Thickness(0, 12, 0, 0); flow.Children.Add(reason); routeCard.Child = flow;
+		nodes.Children.Add(RouteNode(decision.Route == "block" ? "diagnostics" : decision.Route == "direct" ? "home" : "shield", decision.DisplayRoute.ToUpperInvariant(), color, 4));
+        bool? compactLayout = null;
+        Action<bool> arrangeNodes = compact => {
+            if (compactLayout == compact) return; compactLayout = compact;
+            nodes.ColumnDefinitions.Clear(); nodes.RowDefinitions.Clear();
+            if (compact) {
+                nodes.ColumnDefinitions.Add(new ColumnDefinition());
+                for (int i = 0; i < nodes.Children.Count; i++) { nodes.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); Grid.SetColumn(nodes.Children[i], 0); Grid.SetRow(nodes.Children[i], i); }
+            } else {
+                for (int i = 0; i < 5; i++) nodes.ColumnDefinitions.Add(new ColumnDefinition { Width = i % 2 == 1 ? new GridLength(45) : new GridLength(1, GridUnitType.Star) });
+                for (int i = 0; i < nodes.Children.Count; i++) { Grid.SetColumn(nodes.Children[i], i); Grid.SetRow(nodes.Children[i], 0); }
+            }
+            arrow1.Text = arrow2.Text = compact ? "↓" : "→";
+        };
+        arrangeNodes(!double.IsNaN(routeCard.Width) && routeCard.Width < 540);
+        nodes.SizeChanged += (sender, args) => arrangeNodes(args.NewSize.Width < 540);
+        flow.Children.Add(nodes); TextBlock reason = T(decision.Reason, 9.5, Muted); reason.TextWrapping = TextWrapping.Wrap; reason.Margin = new Thickness(0, 12, 0, 0); flow.Children.Add(reason); routeCard.Child = flow;
 	}
 
 	private UIElement RouteNode(string icon, string label, Color color, int column)
 	{
 		Border node = new Border { Padding = new Thickness(10), Background = new SolidColorBrush(Color.FromArgb(22, color.R, color.G, color.B)), BorderBrush = new SolidColorBrush(Color.FromArgb(90, color.R, color.G, color.B)), BorderThickness = new Thickness(1), CornerRadius = Radius(10) };
-		StackPanel content = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center }; content.Children.Add(IconFactory.Create(icon, 16, color)); TextBlock copy = T(label, 9.5, color, FontWeights.SemiBold); copy.Margin = new Thickness(7, 0, 0, 0); content.Children.Add(copy); node.Child = content; Grid.SetColumn(node, column); return node;
+		Grid content = new Grid(); content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); content.ColumnDefinitions.Add(new ColumnDefinition()); var symbol = IconFactory.Create(icon, 16, color); symbol.VerticalAlignment = VerticalAlignment.Center; content.Children.Add(symbol); TextBlock copy = T(label, 9.5, color, FontWeights.SemiBold); copy.Margin = new Thickness(7, 0, 0, 0); copy.TextWrapping = TextWrapping.Wrap; copy.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(copy, 1); content.Children.Add(copy); node.Child = content; Grid.SetColumn(node, column); return node;
 	}
 
 	private TextBox EditorBox(string text, bool readOnly)
@@ -3209,11 +3621,34 @@ public sealed partial class MainWindow : Window
 		};
 	}
 
+    private readonly System.Collections.ObjectModel.ObservableCollection<CoreUsageRecord> coreUsageRecords = new System.Collections.ObjectModel.ObservableCollection<CoreUsageRecord>();
     private UIElement BuildEnginePage()
     {
         var body = new StackPanel();
         if (gamingSession != null || gamingCancellation != null) return PageHeader("Игровой режим", "Сначала выключите игровой режим или отмените подбор.", null, null);
-        body.Children.Add(PageHeader("VPN-ядро", "Выберите движок подключения", null, null));
+        var resources = PrimaryButton("Нагрузка и EcoQoS", 190);
+        resources.Click += delegate {
+            var dialog = new CoreResourceWindow(core, coreUsageRecords, () => VpnEngines.DisplayName(core.Engine) + " · " + (state.Profiles.FirstOrDefault(p => p.Id == core.ActiveProfileId)?.Name ?? "профиль"),
+                enabled => { state.CoreEcoMode = enabled; if (!snapshotMode) StateStore.Save(state); }, state.Visual, snapshotMode, mapHealthCancellation.Token) { Owner = this };
+            dialog.ShowDialog();
+        };
+        var compare = PrimaryButton("Сравнить ядра", 170);
+        compare.Click += delegate {
+            var selected = SelectedProfile();
+            string exclusion = ProfileCollectionService.Exclusion(state, selected);
+            if (!snapshotMode && exclusion != null) { Toast(exclusion, Warning); return; }
+            string profileId = selected?.Id;
+            var dialog = new CoreBenchmarkWindow(() => {
+                var current = state.Profiles.FirstOrDefault(p => p.Id == profileId);
+                return ProfileCollectionService.Exclusion(state, current) == null ? current : null;
+            },
+                () => core.Status == CoreStatus.Disconnected && !connectionRequested && !collectionEditorBusy && gamingSession == null && gamingCancellation == null,
+                VpnEngines.ExecutablePath(VpnEngine.SingBox), VpnEngines.ExecutablePath(VpnEngine.Reality), System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "core-benchmark"),
+                state.Visual, snapshotMode, mapHealthCancellation.Token) { Owner = this };
+            dialog.ShowDialog();
+        };
+        var actions = new WrapPanel(); actions.Children.Add(resources); actions.Children.Add(compare);
+        body.Children.Add(PageHeader("VPN-ядро", "Выберите движок подключения", actions, null));
         var hint = T("Выбор сохраняется для следующих подключений. Менять ядро можно после отключения VPN.",14,Muted);
         hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(0,18,0,20); body.Children.Add(hint);
         foreach (VpnEngine engine in new[] { VpnEngine.SingBox, VpnEngine.Reality })
@@ -3279,7 +3714,14 @@ public sealed partial class MainWindow : Window
 			}
 		};
 		var identityButton = SmallButton("Идентификация и перенос");
-        identityButton.Click += delegate { var dialog = new IdentityWindow(state.SubscriptionIdentities, state.Visual, state, ()=>core.Status!=CoreStatus.Connected&&core.Status!=CoreStatus.Connecting&&state.Zapret?.RoutingChangesApplied!=true) { Owner = this }; if(dialog.ShowDialog()==true) { if(dialog.FullRestore!=null) { CopyState(dialog.FullRestore);BuildShell(); } else state.SubscriptionIdentities=dialog.Result; if(!snapshotMode)StateStore.Save(state); } };
+        identityButton.Click += delegate {
+            try{
+                var dialog=new IdentityWindow(state.SubscriptionIdentities,state.Visual,state,()=>CanRestoreFullState()){Owner=this};
+                if(dialog.ShowDialog()!=true)return;
+                if(dialog.FullRestore!=null){RestoreFullState(dialog.FullRestore);BuildShell();}
+                else{RestoreIdentitiesOnly(dialog.Result);}
+            }catch(Exception error){Toast("Не удалось восстановить данные: "+LogSanitizer.Sanitize(error.Message),Danger);}
+        };
         var settingsActions=new WrapPanel();settingsActions.Children.Add(appearance);identityButton.Margin=new Thickness(8,0,0,0);settingsActions.Children.Add(identityButton);
         grid.Children.Add(PageHeader("Настройки", "Поведение клиента и оформление", settingsActions, null));
 		Grid grid2 = new Grid();
@@ -3314,7 +3756,7 @@ public sealed partial class MainWindow : Window
 			StateStore.Save(state);
 			Navigate("settings");
 		}));
-		stackPanel.Children.Add(SettingCard("Kill Switch", "Строгая маршрутизация и восстановление туннеля при обрыве", state.KillSwitch, delegate
+		stackPanel.Children.Add(SettingCard("Строгий режим TUN", "Строгие маршруты Windows и переподключение при обрыве. Работает, пока запущено VPN-ядро.", state.KillSwitch, delegate
 		{
             if (gamingSession != null || gamingCancellation != null) { Toast("Сначала выключите игровой режим или отмените подбор.", Warning); return; }
 			state.KillSwitch = !state.KillSwitch;
@@ -3513,9 +3955,8 @@ public sealed partial class MainWindow : Window
 			{
 				try
 				{
-					CopyState(StateStore.ImportEncrypted(dialog.FileName));
+					RestoreFullState(StateStore.ImportEncrypted(dialog.FileName));
                     BuildShell();
-					StateStore.Save(state);
 					Toast("Резервная копия восстановлена.", Green);
 					Navigate("settings");
 				}
@@ -3537,9 +3978,8 @@ public sealed partial class MainWindow : Window
 			{
 				try
 				{
-                    CopyState(PortableConfigService.Import(dialog.FileName));
+                    RestoreFullState(PortableConfigService.Import(dialog.FileName));
                     BuildShell();
-                    StateStore.Save(state);
                     Toast("Переносимый конфиг импортирован.", Green);
 					Navigate("settings");
 				}
@@ -3583,7 +4023,7 @@ public sealed partial class MainWindow : Window
 
     private Button SettingsExportButton()
     {
-        Button settingsExport = SmallButton("Экспорт настроек");
+		Button settingsExport = SmallButton("Экспорт настроек");
 		settingsExport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
 		settingsExport.Click += delegate
 		{
@@ -3600,7 +4040,7 @@ public sealed partial class MainWindow : Window
 
     private Button SettingsImportButton(string destination)
     {
-        Button settingsImport = SmallButton("Импорт настроек");
+		Button settingsImport = SmallButton("Импорт настроек");
 		settingsImport.Margin = new Thickness(8.0, 0.0, 0.0, 0.0);
 		settingsImport.Click += delegate
 		{
@@ -3610,9 +4050,8 @@ public sealed partial class MainWindow : Window
 			{
 				try
 				{
-					PortableConfigService.ApplySettingsOnly(state, PortableConfigService.ImportSettingsOnly(dialog.FileName));
+					RestoreSettingsOnly(PortableConfigService.ImportSettingsOnly(dialog.FileName));
                     BuildShell();
-					StateStore.Save(state);
 					Toast("Настройки импортированы без VPN-профилей.", Green);
 					Navigate(destination);
 				}
@@ -3758,66 +4197,29 @@ public sealed partial class MainWindow : Window
 	}
 
 	private async Task ShowImportDialogAsync()
-	{
-		ImportWindow dialog = new ImportWindow(state.Visual)
-		{
-			Owner = this
-		};
-		if (dialog.ShowDialog() != true)
-		{
-			return;
-		}
-		try
-		{
-			int num = default(int);
-			_ = num;
-			_ = 0;
-			try
-			{
-				Mouse.OverrideCursor = Cursors.Wait;
-				ImportResult importResult = await LinkParser.ImportDetailedAsync(dialog.ImportText);
-				List<VpnProfile> imported = importResult.Profiles;
-				if (importResult.IsSubscription)
-				{
-					SubscriptionManager.MergeImported(state, importResult);
-				}
-				else foreach (VpnProfile profile in imported)
-				{
-					List<VpnProfile> profiles = state.Profiles;
-					Func<VpnProfile, bool> predicate = (VpnProfile x) => x.Source == profile.Source && !string.IsNullOrWhiteSpace(x.Source);
-					if (profiles.FirstOrDefault(predicate) == null)
-					{
-						state.Profiles.Add(profile);
-					}
-				}
-				if (string.IsNullOrWhiteSpace(state.SelectedProfileId) && state.Profiles.Count > 0)
-				{
-					state.SelectedProfileId = state.Profiles[0].Id;
-				}
-				StateStore.Save(state);
-				Navigate("servers");
-				Toast("Добавлено серверов: " + imported.Count, Green);
-			}
-			catch (Exception ex)
-			{
-				Toast(ex.Message, Danger);
-			}
-		}
-		finally
-		{
-			Mouse.OverrideCursor = null;
-		}
-	}
+    {
+        var dialog = new ImportWindow(state.Visual) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        try { Mouse.OverrideCursor = Cursors.Wait; await ReviewAndApplyImportAsync(dialog.ImportText); }
+        catch (Exception) { Toast("Не удалось импортировать данные. Проверьте формат и совместимость параметров.", Warning); }
+        finally { Mouse.OverrideCursor = null; }
+    }
 
-	private async Task ToggleConnectionAsync()
+    private async Task ToggleConnectionAsync()
 	{
+        if (collectionEditorBusy) { Toast("Закройте редактор коллекции перед подключением.", Warning); return; }
+        if (configuredFallbackBusy)
+        {
+            manualDisconnect = true; connectionRequested = false; reconnectTimer.Stop();
+            configuredFallbackCancellation?.Cancel(); core.Stop(); RefreshCurrentPage(); return;
+        }
         if (gamingSession != null) { await StopGamingAsync("Игровое подключение отключено."); return; }
         if (gamingCancellation != null) { Toast("Отмените игровую проверку перед подключением.", Warning); return; }
 		startupCancellation.Cancel();
 		if (profileSwitchInProgress)
 		{
-			Toast("Дождитесь завершения переключения VPN-конфига.", Warning);
-			return;
+            manualDisconnect = true; connectionRequested = false; reconnectTimer.Stop();
+            configuredFallbackCancellation?.Cancel(); core.Stop(); RefreshCurrentPage(); return;
 		}
 		if (zapret.LifecycleState == ZapretLifecycleState.Starting)
 		{
@@ -3852,8 +4254,7 @@ public sealed partial class MainWindow : Window
 			RefreshCurrentPage();
 			return;
 		}
-		VpnProfile profile = SelectedProfile();
-		if (profile == null)
+		if (!HasConnectionSelection)
 		{
 			await ShowImportDialogAsync();
 			return;
@@ -3864,12 +4265,15 @@ public sealed partial class MainWindow : Window
             StateStore.Save(state);
             manualDisconnect = false;
 			connectionRequested = true;
-			await core.StartAsync(profile, EffectiveRouting());
+			await StartWithConfiguredFallbackAsync();
+            var profile = SelectedProfile();
 			currentSessionStartedUtc = DateTime.UtcNow;
 			RecordHistory("Подключено", "Туннель запущен: " + VpnEngines.DisplayName(core.Engine) + ".");
-			profile.ConsecutiveFailures = 0;
-			profile.HealthStatus = "Подключён";
-			profile.LastTestMessage = "Туннель запущен: " + VpnEngines.DisplayName(core.Engine) + ".";
+            if(state.Routing?.MultiServer==null){
+                profile.ConsecutiveFailures = 0;
+                profile.HealthStatus = "Подключён";
+                profile.LastTestMessage = "Туннель запущен: " + VpnEngines.DisplayName(core.Engine) + ".";
+            }
 			StateStore.Save(state);
 			reconnectAttempt = 0;
 		}
@@ -3891,48 +4295,52 @@ public sealed partial class MainWindow : Window
 
 	private async Task UpdateSubscriptionsIfDueAsync(bool notify)
 	{
-		if (closing || core.Status == CoreStatus.Connecting || core.Status == CoreStatus.Connected)
+		if (!CanReviewSubscriptions() || collectionEditorBusy)
 		{
 			return;
 		}
-		bool hasSubscriptions = state.Profiles.Any(p => p != null && !string.IsNullOrWhiteSpace(p.SubscriptionUrl));
-		bool updateDue = state.LastSubscriptionUpdateUtc == default(DateTime) || DateTime.UtcNow - state.LastSubscriptionUpdateUtc >= TimeSpan.FromHours(state.SubscriptionUpdateIntervalHours);
+        NotifySubscriptionQuota();
+		bool hasSubscriptions = state.Subscriptions.Count > 0;
+		bool updateDue = SubscriptionManager.NextDueUtc(state) <= DateTime.UtcNow;
 		if (!hasSubscriptions || !updateDue)
 		{
 			return;
 		}
+        var opened=state;string active=core.ActiveProfileId;int generation=core.RuntimeGeneration;var owners=RetiredProfileOwners().ToArray();
 		try
 		{
-			SubscriptionUpdateResult result = await SubscriptionManager.UpdateAllAsync(state);
+			SubscriptionUpdateResult result = await SubscriptionManager.UpdateAllAsync(opened, true, active, mapHealthCancellation.Token,()=>CanCommitBackgroundSubscriptions(opened,active,generation)&&RetiredOwnersUnchanged(owners),owners);
+            await ReconcileWorkloadsAsync();
+            if(!CanCommitBackgroundSubscriptions(opened,active,generation))return;
+            if (currentPage == "routing") UpdateMultiExitHealthPanel();
+            NotifySubscriptionQuota();
 			if (notify)
 			{
-				Toast(result.Success ? "Подписки обновлены автоматически." : string.Join(" ", result.Errors.Take(2)), result.Success ? Green : Warning);
+				Toast(result.Success ? "Подписки обновлены автоматически." : result.Errors.Count>0 ? string.Join(" ", result.Errors.Take(2)) : "Не все записи подписки распознаны. Прежние серверы сохранены.", result.Success ? Green : Warning);
 			}
 		}
 		catch (Exception ex)
 		{
-			if (notify) Toast("Не удалось обновить подписки: " + ex.Message, Warning);
+			if (notify&&!closing&&Object.ReferenceEquals(opened,state)) Toast("Не удалось обновить подписки: " + ex.Message, Warning);
 		}
 	}
 
 	private void SyncSubscriptionTimer()
 	{
 		if (snapshotMode || closing || subscriptionTimer == null) return;
-		bool hasSubscriptions = state.Profiles.Any(p => p != null && !String.IsNullOrWhiteSpace(p.SubscriptionUrl));
-		bool connectionBusy = core.Status == CoreStatus.Connecting || core.Status == CoreStatus.Connected;
+		bool hasSubscriptions = state.Subscriptions.Count > 0;
+		bool connectionBusy = core.Status == CoreStatus.Connecting;
 		if (!hasSubscriptions || connectionBusy)
 		{
 			subscriptionTimer.Stop();
 			return;
 		}
 
-		int hours = Math.Max(1, Math.Min(168, state.SubscriptionUpdateIntervalHours));
-		DateTime dueUtc = state.LastSubscriptionUpdateUtc == default(DateTime)
-			? DateTime.UtcNow
-			: state.LastSubscriptionUpdateUtc.AddHours(hours);
+		DateTime dueUtc = SubscriptionManager.NextDueUtc(state) ?? DateTime.UtcNow;
 		TimeSpan untilDue = dueUtc - DateTime.UtcNow;
 		if (untilDue < TimeSpan.FromMinutes(1)) untilDue = TimeSpan.FromMinutes(1);
 		if (untilDue > TimeSpan.FromDays(1)) untilDue = TimeSpan.FromDays(1);
+        if (state.Subscriptions.Any(s => s.Quota != null) && untilDue > TimeSpan.FromHours(1)) untilDue = TimeSpan.FromHours(1);
 		subscriptionTimer.Interval = untilDue;
 		if (!subscriptionTimer.IsEnabled) subscriptionTimer.Start();
 	}
@@ -3975,8 +4383,10 @@ public sealed partial class MainWindow : Window
 		base.Dispatcher.BeginInvoke((Action)delegate
 		{
             if (gamingSession != null && GetGamePreferences(gamingSession.GameId).EndOnDisconnect) { _ = StopGamingAsync("Игровое соединение прервано."); return; }
-			if (!closing && !startupConnecting && !manualDisconnect && connectionRequested && state.AutoReconnect && reconnectAttempt < 5)
+			if (!closing && !profileSwitchInProgress && !configuredFallbackBusy && !startupConnecting && !manualDisconnect && connectionRequested && state.AutoReconnect && reconnectAttempt < 5 && core.Status != CoreStatus.Connected && core.Status != CoreStatus.Connecting)
 			{
+                RecordHistory("Обрыв", core.LastError);
+                if(state.Routing?.MultiServer==null){
 				VpnProfile failed = SelectedProfile();
 				if (failed != null)
 				{
@@ -3984,15 +4394,17 @@ public sealed partial class MainWindow : Window
 					failed.HealthStatus = "Сбой";
 					failed.LastTestMessage = core.LastError;
 				}
-				RecordHistory("Обрыв", core.LastError);
-				if (state.AutoSelectBestServer && gamingSession == null)
+                var fallbackPlan = ConfiguredFallbackService.Build(state.Profiles, failed?.Id, state.FallbackRootProfileId);
+                if (fallbackPlan.IsConfigured) fallbackFailedProfileId = failed?.Id;
+				if (!fallbackPlan.IsConfigured && state.AutoSelectBestServer && gamingSession == null)
 				{
-					VpnProfile alternative = HealthCheckService.BestAvailable(state.Profiles.Where(p => p != failed));
+					VpnProfile alternative = CollectionBestAvailable(failed?.Id);
 					if (alternative != null)
 					{
 						state.SelectedProfileId = alternative.Id;
 					}
 				}
+                }
 				StateStore.Save(state);
 				reconnectTimer.Interval = TimeSpan.FromSeconds(Math.Max(2, reconnectAttempt * 3));
 				reconnectTimer.Stop();
@@ -4004,46 +4416,24 @@ public sealed partial class MainWindow : Window
 
 	private void NetworkAvailabilityChanged(object sender, NetworkAvailabilityEventArgs e)
 	{
-		base.Dispatcher.BeginInvoke((Action)delegate
-		{
-			if (closing || !connectionRequested || !state.AutoReconnect)
-			{
-				return;
-			}
-			if (!e.IsAvailable)
-			{
-				RecordHistory("Обрыв", "Сеть устройства стала недоступна.");
-				core.Stop();
-				Toast("Сеть недоступна. Подключение будет восстановлено автоматически.", Warning);
-			}
-			else
-			{
-				reconnectTimer.Interval = TimeSpan.FromSeconds(1.5);
-				reconnectTimer.Stop();
-				reconnectTimer.Start();
-			}
-		});
+		base.Dispatcher.BeginInvoke((Action)(() => HandleRecoveryNetworkAvailability(e.IsAvailable)));
 	}
 
-	private void CoreStatusChanged(CoreStatus newStatus, string message)
-	{
+    private void CoreStatusChanged(CoreStatus newStatus,string message,int generation)
+    {
+        if(closing||generation!=core.RuntimeGeneration||newStatus!=core.Status)return;
+        long revision=System.Threading.Interlocked.Increment(ref coreStatusNotificationRevision);
 		base.Dispatcher.BeginInvoke((Action)delegate
 		{
+            if(!IsCurrentCoreStatusNotification(newStatus,generation,revision))return;
+            ScheduleRetiredProfileCleanup();
             if (!closing && gamingSession != null && !gamingTransitionBusy && newStatus == core.Status &&
                 (newStatus == CoreStatus.Disconnected && manualDisconnect || newStatus == CoreStatus.Error && GetGamePreferences(gamingSession.GameId).EndOnDisconnect))
                 _ = StopGamingAsync("Игровое подключение завершено.");
 			SyncSubscriptionTimer();
 			if (newStatus == CoreStatus.Connected) applicationRoutingPending = ApplicationRoutingNeedsApply();
 			if (currentPage == "routing") applicationListRefresh?.Invoke();
-			if (statusText != null)
-			{
-				statusText.Text = ((newStatus == CoreStatus.Connected) ? gamingSession != null ? "Игровой режим" : "Защищено" : ((newStatus == CoreStatus.Connecting) ? "Подключение…" : ((newStatus == CoreStatus.Error) ? "Ошибка" : "Не подключено")));
-				statusText.Foreground = new SolidColorBrush((newStatus == CoreStatus.Connected) ? Green : ((newStatus == CoreStatus.Error) ? Danger : Muted));
-			}
-			if (statusDot != null)
-			{
-				statusDot.Background = new SolidColorBrush((newStatus == CoreStatus.Connected) ? Green : ((newStatus == CoreStatus.Error) ? Danger : ((newStatus == CoreStatus.Connecting) ? Warning : Muted)));
-			}
+            UpdateSidebarConnectionStatus();
 			if (currentPage == "home")
 			{
 				UpdateHomeConnectionStatus();
@@ -4052,7 +4442,7 @@ public sealed partial class MainWindow : Window
 
 			if (newStatus == CoreStatus.Connected)
 			{
-				if (!snapshotMode && core.Status == CoreStatus.Connected && core.ActiveProfileId != null) { state.LastConnectedProfileId = core.ActiveProfileId; StateStore.Save(state); }
+				if (!snapshotMode && !multiServerApplyBusy && core.Status == CoreStatus.Connected && core.ActiveProfileId != null) { state.LastConnectedProfileId = core.ActiveProfileId; StateStore.Save(state); }
 				ShowNotification(gamingSession != null ? "Игровой маршрут включён: " + gamingSession.Game : "VPN подключён: " + (SelectedProfile()?.Name ?? "сервер"));
 			}
 			else if (newStatus == CoreStatus.Error)
@@ -4060,7 +4450,7 @@ public sealed partial class MainWindow : Window
 				ShowNotification("Ошибка VPN: " + message);
 			}
 		});
-		_ = RefreshExternalIpForStatusAsync(newStatus);
+		_ = RefreshExternalIpForStatusAsync(newStatus,generation,revision);
 	}
 
 	private void InitializeTray()
@@ -4147,44 +4537,100 @@ public sealed partial class MainWindow : Window
 		});
 	}
 
-	private async Task RefreshExternalIpForStatusAsync(CoreStatus status)
-	{
-		if (snapshotMode || (status != CoreStatus.Connected && status != CoreStatus.Disconnected)) return;
-		string value = await ExternalIpService.GetAsync();
-		if (status == CoreStatus.Connected) tunnelExternalIp = value; else directExternalIp = value;
-		await base.Dispatcher.InvokeAsync(delegate { if (currentPage == "home" && !closing && liveExternalIpText != null) liveExternalIpText.Text = core.Status == CoreStatus.Connected ? tunnelExternalIp : directExternalIp; });
-	}
-
-	private void ShowNotification(string message)
-	{
-		if (!state.ShowNotifications || trayIcon == null || string.IsNullOrWhiteSpace(message))
-		{
-			return;
-		}
-		try
-		{
-			trayIcon.BalloonTipTitle = "NOVA VPN";
-			trayIcon.BalloonTipText = message.Length > 180 ? message.Substring(0, 180) : message;
-			trayIcon.ShowBalloonTip(2500);
-		}
-		catch
-		{
-		}
-	}
-
+    private bool IsCurrentCoreStatusNotification(CoreStatus status,int generation,long revision) => !closing&&status==core.Status&&generation==core.RuntimeGeneration&&revision==System.Threading.Volatile.Read(ref coreStatusNotificationRevision);
+    private async Task RefreshExternalIpForStatusAsync(CoreStatus status,int generation,long revision)
+    {
+        if(snapshotMode||!IsCurrentCoreStatusNotification(status,generation,revision)||(status!=CoreStatus.Connected&&status!=CoreStatus.Disconnected))return;
+        await ExternalIpService.RefreshAsync(ExternalIpService.GetAsync,
+            ()=>IsCurrentCoreStatusNotification(status,generation,revision), async value=>{
+        await Dispatcher.InvokeAsync(delegate{
+            if(!IsCurrentCoreStatusNotification(status,generation,revision))return;
+            if(status==CoreStatus.Connected)tunnelExternalIp=value;else directExternalIp=value;
+            if(currentPage=="home"&&liveExternalIpText!=null)liveExternalIpText.Text=core.Status==CoreStatus.Connected?tunnelExternalIp:directExternalIp;
+        });
+        });
+    }
+    private RoutingDecision ExplainCurrentRouting(string destination,string process,string network,int? port)
+    {
+        if(core.Status==CoreStatus.Connecting)return new RoutingDecision{Route="unknown",Reason="Подключение запускается; активные правила ещё не подтверждены."};
+        if(core.Status!=CoreStatus.Connected&&!core.CanSelectEngine)return new RoutingDecision{Route="unknown",Reason="Отключение VPN ещё не подтверждено; действующие правила недоступны."};
+        if(core.Status==CoreStatus.Connected){
+            int generation=core.RuntimeGeneration;var active=core.ActiveRoutingPlan;
+            if(active==null)return new RoutingDecision{Route="unknown",Reason="Не удалось подтвердить конфигурацию действующего подключения."};
+            var result=active.Explain(destination,process,network,port);
+            if(generation!=core.RuntimeGeneration||!Object.ReferenceEquals(active,core.ActiveRoutingPlan))return new RoutingDecision{Route="unknown",Reason="Подключение изменилось во время расчёта. Повторите проверку."};
+            result.Reason="По конфигурации действующего подключения. "+result.Reason;return result;
+        }
+        var preview=CompiledRoutingPlan.CreateFor(SelectedProfile(),EffectiveRouting(),core.Engine,state.Profiles).Explain(destination,process,network,port);
+        preview.Reason="Предварительный расчёт текущих настроек. "+preview.Reason;return preview;
+    }
+    private void ShowNotification(string message) { TryShowNotification(message); }
+    private bool TryShowNotification(string message)
+    {
+        if(!state.ShowNotifications||trayIcon==null||string.IsNullOrWhiteSpace(message))return false;
+        try{
+            trayIcon.BalloonTipTitle="NOVA VPN";
+            trayIcon.BalloonTipText=message.Length>180?message.Substring(0,180):message;
+            trayIcon.ShowBalloonTip(2500);return true;
+        }catch{return false;}
+    }
 	private void RefreshCurrentPage()
 	{
 		string page = currentPage;
 		Navigate(page, false);
 	}
 
+    private bool HasVerifiedConnection(ConnectionVerification proof)
+    {
+        if(core.Status != CoreStatus.Connected || !proof.Completed) return false;
+        if(proof.MultiExits!=null)return proof.MultiExits.IsFreshFor(state.Profiles,ProfileHealthEvidence.NetworkKey(),ProfileHealthEvidence.CoreKey(core.CorePath),DateTime.UtcNow);
+        var profile = state.Profiles.FirstOrDefault(p => p.Id == core.ActiveProfileId);
+        return proof.IsVerifiedFor(profile, ProfileHealthEvidence.NetworkKey(), ProfileHealthEvidence.CoreKey(core.CorePath), DateTime.UtcNow);
+    }
+
+    private void UpdateSidebarConnectionStatus()
+    {
+        if(currentPage=="routing")UpdateMultiExitHealthPanel();
+        var status = core.Status;
+        var proof = core.Verification;
+        bool confirmed = HasVerifiedConnection(proof);
+        bool failed = proof.Completed && (!proof.InternetOk || proof.ProfileProbe?.Supported == true && !proof.ProfileProbe.Success);
+        string text = "Не подключено";
+        Color color = Muted;
+        if(status == CoreStatus.Connected)
+        {
+            if(gamingSession != null) text = "Игровой режим";
+            else if(confirmed) text = "Защищено";
+            else if(!proof.Completed) text = "Проверка…";
+            else if(proof.MultiExits!=null) text = "Проверьте выходы";
+            else if(!proof.InternetOk) text = "Нет интернета";
+            else text = "Туннель включён";
+            color = confirmed ? Green : failed ? Danger : Warning;
+        }
+        else if(status == CoreStatus.Connecting) { text = "Подключение…"; color = Warning; }
+        else if(status == CoreStatus.Error) { text = "Ошибка"; color = Danger; }
+        if(statusText != null) { statusText.Text = text; statusText.Foreground = new SolidColorBrush(color); }
+        if(statusDot != null) statusDot.Background = new SolidColorBrush(color);
+    }
 	private void UpdateVerificationDisplay()
 	{
+        UpdateSidebarConnectionStatus();
 		if (protectionIndicators == null) return;
 		bool tunnelOk = core.Status == CoreStatus.Connected;
 		if (connectHeadline != null) connectHeadline.Text = StatusHeadline();
 		if (connectCaption != null) connectCaption.Text = StatusCaption();
 		protectionIndicators.Children.Clear();
+        if(core.LastConnectedRouting?.MultiServer!=null&&tunnelOk) {
+            protectionIndicators.Children.Add(StatusPill("TUN","активен",Green));
+            if(core.Verification.MultiExits==null)protectionIndicators.Children.Add(StatusPill("ВЫХОДЫ","проверяются",Warning));
+            else foreach(var exit in core.Verification.MultiExits.Results) {
+                var pill=StatusPill(exit.Exit.Name,exit.Label(DateTime.UtcNow),exit.HasRecentSuccess(DateTime.UtcNow)?Green:Warning);
+                pill.ToolTip="Проверка активного снимка подключения. Изменённые конфиги требуют повторного подключения.";
+                protectionIndicators.Children.Add(pill);
+            }
+            return;
+        }
+
 		protectionIndicators.Children.Add(StatusPill("TUN", tunnelOk ? "активен" : core.Status == CoreStatus.Connecting ? "запускается" : "выключен", tunnelOk ? Green : core.Status == CoreStatus.Connecting ? Warning : Muted));
 		protectionIndicators.Children.Add(StatusPill("DNS", core.Verification.DnsOk ? "проверен" : tunnelOk ? "проверяется" : "не проверен", core.Verification.DnsOk ? Green : tunnelOk ? Warning : Muted));
 		protectionIndicators.Children.Add(StatusPill("ИНТЕРНЕТ", core.Verification.InternetOk ? core.Verification.InternetLatencyMs + " мс" : tunnelOk ? core.Verification.Completed ? "проверка не прошла" : "проверяется" : "не проверен", core.Verification.InternetOk ? Green : tunnelOk ? core.Verification.Completed ? Danger : Warning : Muted));
@@ -4215,55 +4661,35 @@ public sealed partial class MainWindow : Window
 		SyncVisualTimerState();
 	}
 
+    private bool HasConnectionSelection => state.Routing?.MultiServer != null || SelectedProfile() != null;
+
 	private VpnProfile SelectedProfile()
 	{
+        if (state.Routing?.MultiServer is MultiServerSettings assignments)
+            return state.Profiles.FirstOrDefault(p => p.Id == assignments.DefaultProfileId);
+        if(MultiServerRoutingHistory.MissingRestoredProfile(state))return null;
 		return state.Profiles.FirstOrDefault((VpnProfile p) => p.Id == state.SelectedProfileId) ?? state.Profiles.FirstOrDefault();
 	}
 
-	private void CopyState(AppState source)
-	{
-        if (gamingSession != null || gamingCancellation != null) throw new InvalidOperationException("Завершите игровую сессию перед импортом настроек.");
-		if (source == null)
-		{
-			throw new InvalidOperationException("Резервная копия пуста.");
-		}
-		if (state.Zapret?.RoutingChangesApplied == true)
-		{
-			throw new InvalidOperationException("Сначала выключите Zapret: исходные VPN-маршруты временно сохранены для автоматического возврата.");
-		}
-		core.SelectEngine(source.EngineSelection == 1 ? VpnEngine.Reality : VpnEngine.SingBox);
-        state.SubscriptionIdentities = source.SubscriptionIdentities ?? new IdentityState();
-        state.ManualGames = source.ManualGames ?? new List<InstalledGame>();
-        state.GamePreferences = source.GamePreferences ?? new List<GamePreferences>();
-        gamingLibraryLoaded = false; gamingSelected = null;
-        state.EngineSelection = (int)core.Engine;
-        state.Profiles = source.Profiles ?? new List<VpnProfile>();
-		state.SelectedProfileId = source.SelectedProfileId;
-		state.Routing = source.Routing ?? new RoutingSettings();
-		state.AutoConnect = source.AutoConnect;
-		// Autostart is machine/user-specific. Import must not pretend a scheduler task exists.
-		state.LastWorkingProfileId = source.LastWorkingProfileId;
-		state.LastConnectedProfileId = source.LastConnectedProfileId;
-		state.MinimizeToTray = source.MinimizeToTray;
-		state.Theme = source.Theme;
-		state.AutoReconnect = source.AutoReconnect;
-		state.AutoSelectBestServer = source.AutoSelectBestServer;
-		state.KillSwitch = source.KillSwitch;
-		state.ShowAnimations = source.ShowAnimations;
-		state.ShowNotifications = source.ShowNotifications;
-		state.SuppressUpdatePrompts = source.SuppressUpdatePrompts;
-		state.LastSeenReleaseNotesVersion = source.LastSeenReleaseNotesVersion;
-		state.ShowTrainingOnStartup = source.ShowTrainingOnStartup;
-		state.ShowTrainingHints = source.ShowTrainingHints;
-		state.SubscriptionUpdateIntervalHours = source.SubscriptionUpdateIntervalHours;
-		state.LastSubscriptionUpdateUtc = source.LastSubscriptionUpdateUtc;
-		state.PauseUntilUtc = source.PauseUntilUtc;
-		state.ConnectionHistory = source.ConnectionHistory ?? new List<ConnectionHistoryItem>();
-		state.Visual = source.Visual?.Clone() ?? new VisualPreferences();
-        state.Visual.MigrateWindowsDesign();
-		state.Zapret = source.Zapret ?? new ZapretSettings();
-		state.SchemaVersion = source.SchemaVersion;
-	}
+    private bool CanRestoreFullState() => !snapshotMode&&!closing&&!subscriptionReviewBusy&&!SubscriptionManager.IsUpdating&&!startupSettingsBusy&&!startupConnecting&&core.CanSelectEngine&&workloadProxies?.HasEntries!=true&&!collectionEditorBusy&&!configuredFallbackBusy&&!profileSwitchInProgress&&gamingSession==null&&gamingCancellation==null&&!zapret.IsRunning&&!ZapretRoutingTransitionService.HasActiveRouting(state);
+    private void RestoreIdentitiesOnly(IdentityState source)
+    {
+        if(!CanRestoreFullState())throw new InvalidOperationException("Завершите подключения, обновление подписок и редакторы перед переносом идентификации.");
+        var plan=FullStateRestorePlan.PrepareIdentitiesOnly(state,source);plan.Apply(state,CanRestoreFullState,StateStore.Save);
+    }
+    private void RestoreSettingsOnly(AppState source)
+    {
+        if(!CanRestoreFullState())throw new InvalidOperationException("Завершите VPN, локальные прокси и редакторы перед импортом настроек.");
+        var plan=FullStateRestorePlan.PrepareSettingsOnly(state,source);plan.Apply(state,CanRestoreFullState,StateStore.Save);
+    }
+    private void RestoreFullState(AppState source)
+    {
+        if(!CanRestoreFullState())throw new InvalidOperationException("Завершите VPN, локальные прокси и редакторы перед восстановлением.");
+        var plan=FullStateRestorePlan.Prepare(state,source);plan.Apply(state,CanRestoreFullState,StateStore.Save);
+        gamingLibraryLoaded=false;gamingSelected=null;
+        try{core.SelectEngine(state.EngineSelection==1?VpnEngine.Reality:VpnEngine.SingBox);core.ConfigureEcoModeForNextStart(state.CoreEcoMode);}
+        catch(Exception error){throw new InvalidOperationException("Копия сохранена. Не удалось обновить параметры ядра; перезапустите NOVA перед подключением.",error);}
+    }
 
 	private Border AppearanceSummaryCard()
 	{
@@ -4327,9 +4753,11 @@ public sealed partial class MainWindow : Window
         if (gamingSession != null && core.Status == CoreStatus.Connected) return "Игровой режим · " + gamingSession.Game;
 		if (core.Status == CoreStatus.Connected)
 		{
+            if(core.LastConnectedRouting?.MultiServer!=null)return !core.Verification.Completed?"Проверяем назначенные серверы":
+                HasVerifiedConnection(core.Verification)?"Все выходы проверены":"Проверка выходов не подтверждена";
 			return !core.Verification.Completed ? "Проверяем соединение" : !core.Verification.InternetOk ? "Нет доступа в интернет" :
 				core.Verification.ProfileProbe?.Supported == true && !core.Verification.ProfileProbe.Success ? "Профиль не прошёл проверку" :
-				core.Verification.ProfileProbe?.Success == true ? "Вы защищены" : "Туннель включён";
+				HasVerifiedConnection(core.Verification) ? "Вы защищены" : "Туннель включён";
 		}
 		if (core.Status == CoreStatus.Connecting)
 		{
@@ -4347,10 +4775,11 @@ public sealed partial class MainWindow : Window
         if (gamingSession != null && core.Status == CoreStatus.Connected) return gamingSession.GameOnly ? "Отдельный конфиг используется только для игровых EXE. Остальные приложения выходят напрямую." : "Игра использует отдельный выход. Остальные приложения работают по обычным правилам NOVA.";
 		if (core.Status == CoreStatus.Connected)
 		{
+            if(core.LastConnectedRouting?.MultiServer!=null)return core.Verification.MultiExits?.Summary??"Отдельный HTTPS-запрос через каждый назначенный сервер. Назначения сохраняются при ошибке проверки.";
 			return !core.Verification.Completed ? "Туннель включён. Проверяем доступ в интернет через выбранный профиль." :
 				!core.Verification.InternetOk ? "Контрольный HTTPS-запрос не прошёл. Выберите зелёную точку на карте." :
 				core.Verification.ProfileProbe?.Supported == true && !core.Verification.ProfileProbe.Success ? "Интернет доступен, но HTTPS через выбранный VPN-профиль не прошёл. Выберите зелёную точку на карте." :
-				core.Verification.ProfileProbe?.Success == true ? "HTTPS через выбранный VPN-профиль подтверждён недавней проверкой." :
+				HasVerifiedConnection(core.Verification) ? "HTTPS через выбранный VPN-профиль подтверждён недавней проверкой." :
 				"Интернет доступен, но прохождение HTTPS через этот профиль не подтверждено.";
 		}
 		if (core.Status == CoreStatus.Connecting)
@@ -4361,7 +4790,7 @@ public sealed partial class MainWindow : Window
 		{
 			return "Откройте журнал в диагностике или проверьте ключ.";
 		}
-		if (SelectedProfile() != null)
+		if (HasConnectionSelection)
 		{
 			return "Нажмите кнопку, чтобы создать защищённый туннель.";
 		}

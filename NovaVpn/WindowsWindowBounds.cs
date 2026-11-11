@@ -24,12 +24,29 @@ internal static class WindowsWindowBounds
         window.Closed += delegate { source?.RemoveHook(HandleMessage); };
     }
 
+    public static Size WorkAreaSize(Window owner)
+    {
+        var source = owner == null ? null : PresentationSource.FromVisual(owner) as HwndSource;
+        var fallback = SystemParameters.WorkArea.Size;
+        if (source?.CompositionTarget == null || !TryGetMonitorInfo(source.Handle, out var info))
+            return fallback;
+
+        var pixels = new Vector(info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top);
+        var logical = source.CompositionTarget.TransformFromDevice.Transform(pixels);
+        return logical.X > 0 && logical.Y > 0 ? new Size(logical.X, logical.Y) : fallback;
+    }
+
+    private static bool TryGetMonitorInfo(IntPtr hwnd, out MonitorInfo info)
+    {
+        var monitor = MonitorFromWindow(hwnd, 2); // nearest monitor, including secondary screens
+        info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
+        return monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info);
+    }
+
     private static IntPtr HandleMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (message != 0x0024 || lParam == IntPtr.Zero) return IntPtr.Zero; // WM_GETMINMAXINFO
-        var monitor = MonitorFromWindow(hwnd, 2); // nearest monitor, including secondary screens
-        var info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
-        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info)) return IntPtr.Zero;
+        if (!TryGetMonitorInfo(hwnd, out var info)) return IntPtr.Zero;
         var limits = (MinMaxInfo)Marshal.PtrToStructure(lParam, typeof(MinMaxInfo));
         limits.MaxPosition.X = info.Work.Left - info.Monitor.Left;
         limits.MaxPosition.Y = info.Work.Top - info.Monitor.Top;

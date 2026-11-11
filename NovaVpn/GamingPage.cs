@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -160,18 +160,18 @@ public sealed partial class MainWindow
         GameUdpDiscovery udpObserver = null;
         InvalidateGamingResults(); GamingOptions.ProfileId = null;
         try {
-            if (state.KillSwitch) throw new InvalidOperationException("Kill Switch запрещает прямое сравнение. Игровой VPN без него не включается.");
+            if (state.KillSwitch) throw new InvalidOperationException("Строгий режим TUN запрещает прямое сравнение. Игровой VPN без него не включается.");
             if (!AutomaticGamingService.SupportsGameQuery(game)) {
                 gamingAutomaticResult = AutomaticGamingService.Unsupported(game); gamingMessage = gamingAutomaticResult.Message;
                 GamingOptions.ProfileId = "direct"; GamingOptions.AllowDirect = true;
                 gamingNetwork = GameCatalog.NetworkKey();
-                gamingRecommendation = new GamingRecommendationStamp(game, state.Profiles, gamingNetwork, core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
+                gamingRecommendation = new GamingRecommendationStamp(game, CollectionCandidates(), gamingNetwork, core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
                 SaveGameOptions(); return;
             }
             if (!game.Executables.Any(File.Exists)) throw new InvalidOperationException("Файлы игры не найдены. Обновите библиотеку после установки игры.");
             if (!File.Exists(core.ProbeCorePath)) throw new InvalidOperationException("Не найден компонент проверки серверов. Переустановите NOVA.");
             var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
-            var profiles = state.Profiles.Where(p => p.Protocol != "sing-box").Select(p => serializer.Deserialize<VpnProfile>(serializer.Serialize(p))).ToArray();
+            var profiles = CollectionCandidates().Where(p => p.Protocol != "sing-box").Select(p => serializer.Deserialize<VpnProfile>(serializer.Serialize(p))).ToArray();
             if (profiles.Length == 0) throw new InvalidOperationException("Добавьте ваши серверы в NOVA — подбор будет использовать их.");
             gamingNetwork = GameCatalog.NetworkKey();
             var stamp = new GamingRecommendationStamp(game, profiles, gamingNetwork, core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
@@ -221,8 +221,8 @@ public sealed partial class MainWindow
             var result = await new AutomaticGamingService().SelectAsync(game, endpoints.Values, profiles, core.Status == CoreStatus.Connected ? core.ActiveProfileId : null,
                 core.ProbeCorePath, Path.Combine(StateStore.DirectoryPath, "runtime"), progress, token, !state.KillSwitch);
             token.ThrowIfCancellationRequested();
-            if (!stamp.Matches(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status)) throw new InvalidOperationException("Сеть, игра или конфиги изменились во время подбора. Повторите подбор.");
-            gamingRecommendation = new GamingRecommendationStamp(game, state.Profiles, gamingNetwork, core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
+            if (!stamp.Matches(game, CollectionCandidates(), GameCatalog.NetworkKey(), core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status)) throw new InvalidOperationException("Сеть, игра или конфиги изменились во время подбора. Повторите подбор.");
+            gamingRecommendation = new GamingRecommendationStamp(game, CollectionCandidates(), gamingNetwork, core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
             gamingAutomaticResult = result; gamingMessage = result.Message;
             if (usingHistory && result.ProfileId != null) gamingMessage += " Проверен предыдущий сервер игры; новый матч может использовать другой сервер.";
             if (result.ProfileId != null) {
@@ -237,7 +237,7 @@ public sealed partial class MainWindow
         finally { udpObserver?.Dispose(); gamingCancellation?.Dispose(); gamingCancellation = null; if (!closing && currentPage == "gaming") Navigate("gaming"); }
     }
     private bool IsGamingRecommendationCurrent(InstalledGame game) => gamingRecommendation != null && game != null &&
-        gamingRecommendation.IsCurrent(game, state.Profiles, GameCatalog.NetworkKey(), core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
+        gamingRecommendation.IsCurrent(game, CollectionCandidates(), GameCatalog.NetworkKey(), core.ActiveProfileId, state.KillSwitch, core.Engine, core.Status, DateTime.UtcNow);
     private async Task PlayGamingAsync()
     {
         if (gamingAutomaticResult?.CanPlay != true || !GamingEditable) return;
@@ -267,25 +267,28 @@ public sealed partial class MainWindow
             var pref = GamingOptions;
             if (pref.ProfileId != gamingAutomaticResult.ProfileId) throw new InvalidOperationException("Результат подбора изменился. Повторите сравнение с прямым соединением.");
             var chosen = pref.ProfileId == "direct" ? null : state.Profiles.FirstOrDefault(p => p.Id == pref.ProfileId && p.Protocol != "sing-box");
+            if (chosen != null && ProfileCollectionService.Exclusion(state, chosen) is string excluded) throw new InvalidOperationException(excluded);
             pref.StopWhenGameExits = true; pref.EndOnDisconnect = true;
             if (pref.ProfileId == null || (pref.ProfileId != "direct" && chosen == null)) throw new InvalidOperationException("Выберите конфиг для игры.");
             if (chosen == null && (!pref.AllowDirect || state.KillSwitch)) throw new InvalidOperationException("Прямой игровой выход запрещён.");
             if (!IsGamingRecommendationCurrent(gamingSelected)) throw new InvalidOperationException("Результат устарел. Нажмите «Подобрать конфиг» ещё раз.");
             bool connected = core.Status == CoreStatus.Connected; var basis = state.Profiles.FirstOrDefault(p => p.Id == core.ActiveProfileId) ?? SelectedProfile() ?? chosen ?? (pref.ProfileId == "direct" ? new VpnProfile { Id = "direct-game-session", Protocol = "direct", PortableOutboundJson = "{\"type\":\"direct\",\"tag\":\"proxy\"}" } : null);
             if (basis == null || basis.Protocol == "sing-box") throw new InvalidOperationException("Выберите обычный профиль NOVA.");
+            if (ProfileCollectionService.Exclusion(state, basis) is string basisExcluded) throw new InvalidOperationException(basisExcluded);
             var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
-            var route = new GamingRoute { GameId = gamingSelected.Id, Game = gamingSelected.Name, ExecutablePaths = paths, Processes = paths.Select(Path.GetFileName).ToArray(), GameOnly = !connected, Profile = chosen == null ? null : serializer.Deserialize<VpnProfile>(serializer.Serialize(chosen)) };
-            var frozen = RoutingOverlayService.Clone(connected ? core.LastConnectedRouting ?? state.Routing : state.Routing); frozen.Gaming = null; var effective = GamingRouting.Effective(frozen, route, state.KillSwitch);
-            string error = await core.ValidateAsync(basis, effective); if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException(error);
+            var frozen = RoutingOverlayService.Clone(connected ? core.LastConnectedRouting ?? state.Routing : state.Routing); frozen.Gaming = null;
+            var route = new GamingRoute { GameId = gamingSelected.Id, Game = gamingSelected.Name, ExecutablePaths = paths, Processes = paths.Select(Path.GetFileName).ToArray(), GameOnly = !connected && frozen.MultiServer == null, Profile = chosen == null ? null : serializer.Deserialize<VpnProfile>(serializer.Serialize(chosen)) };
+            var effective = GamingRouting.Effective(frozen, route, state.KillSwitch);
+            string error = await core.ValidateAsync(basis, effective, state.Profiles); if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException(error);
             if (!IsGamingRecommendationCurrent(gamingSelected)) throw new InvalidOperationException("Конфиги или сеть изменились. Повторите подбор.");
             if (gamingSelected.IsRunning) throw new InvalidOperationException("Игра уже запустилась. Маршрут сохранён для следующего запуска.");
             gamingSessions.Prepare(route.GameId, connected, basis.Id); gamingBaseRouting = frozen; gamingSession = route;
             gamingLastPeerKey = null; gamingLastObservationUtc = DateTime.MinValue;
-            try { manualDisconnect = true; reconnectTimer.Stop(); core.Stop(); manualDisconnect = false; connectionRequested = true; await core.StartAsync(basis, effective); gamingSessions.Activate(); gamingLastRunningUtc = DateTime.UtcNow; gamingSessionTimer.Start(); }
-            catch { gamingSession = null; gamingBaseRouting = null; core.Stop(); if (connected) { manualDisconnect = false; connectionRequested = true; await core.StartAsync(basis, GamingRouting.Effective(state.Routing, null, state.KillSwitch)); } else { manualDisconnect = true; connectionRequested = false; } gamingSessions.Finish(); throw; }
+            try { manualDisconnect = true; reconnectTimer.Stop(); core.Stop(); manualDisconnect = false; connectionRequested = true; await core.StartAsync(basis, effective, state.Profiles); gamingSessions.Activate(); gamingLastRunningUtc = DateTime.UtcNow; gamingSessionTimer.Start(); }
+            catch { gamingSession = null; gamingBaseRouting = null; core.Stop(); if (connected) { manualDisconnect = false; connectionRequested = true; await core.StartAsync(basis, GamingRouting.Effective(frozen, null, state.KillSwitch), state.Profiles); } else { manualDisconnect = true; connectionRequested = false; } gamingSessions.Finish(); throw; }
             gamingMessage = "Маршрут включён только для «" + route.Game + "». После завершения сессии вернутся актуальные обычные правила."; SaveGameOptions();
         } catch (Exception ex) { gamingMessage = LogSanitizer.Sanitize(ex.Message); }
-        finally { gamingTransitionBusy = false; if (!closing) Navigate("gaming"); }
+        finally { gamingTransitionBusy = false; ScheduleRetiredProfileCleanup(); if (!closing) Navigate("gaming"); }
     }
     private async Task StopGamingAsync(string reason = "Игровой режим выключен.")
     {
@@ -295,7 +298,7 @@ public sealed partial class MainWindow
         try {
             manualDisconnect = true; connectionRequested = false; reconnectTimer.Stop(); core.Stop();
             gamingSession = null; gamingBaseRouting = null;
-            if (restore) { var profile = state.Profiles.FirstOrDefault(p => p.Id == profileId) ?? SelectedProfile(); if (profile == null) throw new InvalidOperationException("Обычный профиль удалён. VPN отключён."); manualDisconnect = false; connectionRequested = true; await core.StartAsync(profile, GamingRouting.Effective(state.Routing, null, state.KillSwitch)); }
+            if (restore) { var profile = state.Profiles.FirstOrDefault(p => p.Id == profileId) ?? SelectedProfile(); if (profile == null) throw new InvalidOperationException("Обычный профиль удалён. VPN отключён."); manualDisconnect = false; connectionRequested = true; await core.StartAsync(profile, GamingRouting.Effective(state.Routing, null, state.KillSwitch), state.Profiles); }
             gamingSessions.Finish(); applicationRoutingPending = false; gamingMessage = reason + (restore ? " Обычный VPN и актуальные правила восстановлены." : " Восстановлено обычное подключение без VPN.");
         } catch (Exception ex) {
             if (gamingSession != null) { gamingSessions.AbortRestore(); gamingSessionTimer.Start(); gamingMessage = "Не удалось остановить ядро, игровой маршрут ещё активен. Повторите завершение. " + LogSanitizer.Sanitize(ex.Message); }
@@ -305,7 +308,7 @@ public sealed partial class MainWindow
                 if (restore && state.AutoReconnect) ScheduleReconnect();
             }
         }
-        finally { gamingTransitionBusy = false; if (!closing && currentPage == "gaming") Navigate("gaming"); }
+        finally { gamingTransitionBusy = false; ScheduleRetiredProfileCleanup(); if (!closing && currentPage == "gaming") Navigate("gaming"); }
     }
     private async Task CheckGamingSessionAsync()
     {

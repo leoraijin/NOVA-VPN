@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory=$true)][string]$InstallerPath,
     [Parameter(Mandatory=$true)][string]$AppPath
 )
@@ -10,7 +10,7 @@ if($null -eq $stream){throw 'Missing embedded payload'}
 $zip=[IO.Compression.ZipArchive]::new($stream,[IO.Compression.ZipArchiveMode]::Read)
 try {
     $names=@($zip.Entries | ForEach-Object {$_.FullName.Replace('\','/')})
-    foreach($required in @('NOVA VPN.exe','NOVA Core Host.exe','core/sing-box.exe','zapret/current/general.bat','zapret/current/nova-version.txt','LICENSE','THIRD_PARTY.md')) {
+    foreach($required in @('NOVA VPN.exe','NOVA Core Host.exe','NOVA Traffic Guard.exe','NOVA Guard Recovery.exe','NOVA Guard Setup.exe','core/sing-box.exe','zapret/current/general.bat','zapret/current/nova-version.txt','LICENSE','THIRD_PARTY.md')) {
         if($names -notcontains $required){throw ('Missing component: '+$required)}
     }
     foreach($name in $names) {
@@ -21,6 +21,13 @@ try {
     $sha=[Security.Cryptography.SHA256]::Create()
     try {$embeddedHash=[BitConverter]::ToString($sha.ComputeHash($entry)).Replace('-','')} finally {$sha.Dispose();$entry.Dispose()}
     if($embeddedHash -ne (Get-FileHash -LiteralPath $AppPath -Algorithm SHA256).Hash){throw 'Payload differs from tested application'}
+    foreach($name in @('NOVA Core Host.exe','NOVA Traffic Guard.exe','NOVA Guard Recovery.exe','NOVA Guard Setup.exe')) {
+        $entry=$zip.GetEntry($name).Open()
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try {$embeddedHash=[BitConverter]::ToString($sha.ComputeHash($entry)).Replace('-','')} finally {$sha.Dispose();$entry.Dispose()}
+        $expected=Join-Path (Split-Path ([IO.Path]::GetFullPath($AppPath))) $name
+        if($embeddedHash -ne (Get-FileHash -LiteralPath $expected -Algorithm SHA256).Hash){throw "Bundled companion differs from tested build: $name"}
+    }
     $appVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo([IO.Path]::GetFullPath($AppPath)).FileVersion
     if($assembly.GetName().Version.ToString() -ne $appVersion){throw 'Installer/application version mismatch'}
     $changelogEntry=$zip.GetEntry('CHANGELOG.txt')

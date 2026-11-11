@@ -45,8 +45,8 @@ public sealed class InteractiveServerMap : Canvas
 		return profiles.Length == 0 ? "Нет профилей в этой стране" : string.Join("\n", profiles.OrderBy(p => Score(p)).Take(6).Select(p => p.Name + " · " + Status(p)))
 			+ (profiles.Length > 6 ? "\nЕщё " + (profiles.Length - 6) + " · нажмите для выбора" : "\nНажмите для выбора");
 	}
-	private string Status(VpnProfile p) => health.TryGetValue(p.Id, out var value) ? value.Label : "Не проверен";
-	private int Score(VpnProfile p) => health.TryGetValue(p.Id, out var value) && value.Supported && value.IsFresh ? value.Success ? value.LatencyMs : int.MaxValue : int.MaxValue - 1;
+	private string Status(VpnProfile p) => health.TryGetValue(p.Id, out var value) && value.IsFreshFor(p) ? value.Label : "Нужна свежая проверка";
+	private int Score(VpnProfile p) => health.TryGetValue(p.Id, out var value) && value.Supported && value.IsFreshFor(p) ? value.Success ? value.LatencyMs : int.MaxValue : int.MaxValue - 1;
 
 	public void AddServerNode(Point point, string country, VpnProfile[] profiles, Action<bool> highlight)
 	{
@@ -65,13 +65,13 @@ public sealed class InteractiveServerMap : Canvas
 
 	public void RefreshStatus()
 	{
-		int best = nodes.SelectMany(n => n.Profiles).Where(p => health.TryGetValue(p.Id, out var h) && h.Supported && h.IsFresh && h.Success).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
+		int best = nodes.SelectMany(n => n.Profiles).Where(p => health.TryGetValue(p.Id, out var h) && h.Supported && h.IsFreshFor(p) && h.Success).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
 		foreach (var node in nodes)
 		{
-			int latency = node.Profiles.Where(p => health.TryGetValue(p.Id, out var h) && h.Supported && h.IsFresh && h.Success).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
+			int latency = node.Profiles.Where(p => health.TryGetValue(p.Id, out var h) && h.Supported && h.IsFreshFor(p) && h.Success).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
 			bool verified = latency < int.MaxValue;
 			bool active = node.Profiles.Any(p => p.Id == selectedId);
-			bool failed = node.Profiles.All(p => health.TryGetValue(p.Id, out var value) && value.Supported && value.IsFresh && !value.Success);
+			bool failed = node.Profiles.All(p => health.TryGetValue(p.Id, out var value) && value.Supported && value.IsFreshFor(p) && !value.Success);
 			Color color = verified ? Color.FromRgb(45, 174, 112) : failed ? Color.FromRgb(224, 76, 83) : palette.Muted;
 			node.Dot.Fill = new SolidColorBrush(color);
 			node.Dot.Stroke = new SolidColorBrush(active ? palette.Accent : palette.Surface);

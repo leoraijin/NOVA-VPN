@@ -10,7 +10,7 @@ namespace NovaVpn;
 
 public static class DiagnosticService
 {
-	public static async Task<DiagnosticReport> RunAsync(CoreManager core, VpnProfile profile, RoutingSettings routing)
+	public static async Task<DiagnosticReport> RunAsync(CoreManager core, VpnProfile profile, RoutingSettings routing, System.Collections.Generic.IEnumerable<VpnProfile> profiles = null)
 	{
 		DiagnosticReport report = new DiagnosticReport();
 		report.Items.Add(Item("Права администратора", IsAdministrator(), IsAdministrator() ? "достаточно для Windows TUN" : "перезапустите клиент от имени администратора"));
@@ -19,14 +19,14 @@ public static class DiagnosticService
 		report.Items.Add(CheckTunAdapter(core));
 		report.Items.Add(CheckAdapters(routing));
 		bool dnsProtected = routing != null && routing.StrictRoute && string.Equals(routing.DnsMode, "Secure", StringComparison.OrdinalIgnoreCase);
-		report.Items.Add(Item("Защита DNS", dnsProtected, dnsProtected ? "DoH и строгая маршрутизация включены" : "для максимальной защиты включите защищённый DNS и строгий маршрут"));
+		report.Items.Add(Item("Настройка DNS", dnsProtected, dnsProtected ? "DoH и строгая маршрутизация включены. Отсутствие утечек отдельной проверкой не подтверждено." : "Проверьте защищённый DNS и строгий маршрут. Это проверка настроек, не тест утечек."));
 		report.Items.Add(Item("Выбранный профиль", profile != null, profile == null ? "сервер не выбран" : profile.ProtocolLabel + " · " + SafeEndpoint(profile)));
 		if (profile != null && core != null && core.IsCoreInstalled)
 		{
-			string validation = await core.ValidateAsync(profile, routing);
+			string validation = await core.ValidateAsync(profile, routing, profiles);
 			report.Items.Add(Item("Конфигурация sing-box", string.IsNullOrWhiteSpace(validation), string.IsNullOrWhiteSpace(validation) ? "проверка пройдена" : LogSanitizer.Sanitize(validation)));
 			ServerHealthResult health = await HealthCheckService.TestAsync(profile);
-			report.Items.Add(Item("Доступность сервера", health.Success, health.Success ? health.LatencyMs + " мс · " + health.Message : health.Message));
+			report.Items.Add(Item("HTTPS через профиль", health.Success, health.Success ? health.LatencyMs + " мс · " + health.Message : health.Message));
 		}
 		report.Items.Add(await CheckInternetAsync());
 		foreach (string warning in RoutingInspector.Validate(routing))

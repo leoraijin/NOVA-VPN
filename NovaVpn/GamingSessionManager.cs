@@ -49,10 +49,15 @@ public sealed class GamingSessionManager
         Phase = GamingSessionPhase.RecoveryRequired;
         string runtime = Path.Combine(Path.GetDirectoryName(journal), "runtime");
         if (Directory.Exists(runtime) && (File.GetAttributes(runtime) & FileAttributes.ReparsePoint) == 0) {
-            foreach (string file in Directory.EnumerateFiles(runtime, "*.json")) {
-                string name = Path.GetFileName(file);
-                if (name == "active.json" || System.Text.RegularExpressions.Regex.IsMatch(name, "^(gaming|map)-[a-f0-9]{32}\\.json$")) {
-                    try { File.Delete(file); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            foreach (string directory in new[] { runtime, Path.Combine(runtime, "native-configs") }) {
+                if (!Directory.Exists(directory) || (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) continue;
+                using (var identity = System.Security.Principal.WindowsIdentity.GetCurrent())
+                    if (directory != runtime && !Directory.GetAccessControl(directory).GetOwner(typeof(System.Security.Principal.SecurityIdentifier)).Equals(identity.User)) continue;
+                foreach (string file in Directory.EnumerateFiles(directory, "*.json")) {
+                    string name = Path.GetFileName(file);
+                    if (name == "active.json" || System.Text.RegularExpressions.Regex.IsMatch(name, "^(gaming|map|workload)-[a-f0-9]{32}\\.json$")) {
+                        try { File.Delete(file); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                    }
                 }
             }
         }

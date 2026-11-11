@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
@@ -16,13 +16,13 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NOVA VPN Setup")]
 [assembly: AssemblyProduct("NOVA VPN")]
-[assembly: AssemblyVersion("2.6.3.0")]
-[assembly: AssemblyFileVersion("2.6.3.0")]
+[assembly: AssemblyVersion("2.6.4.0")]
+[assembly: AssemblyFileVersion("2.6.4.0")]
 
 internal sealed class NovaInstaller : Form
 {
     private new const string ProductName = "NOVA VPN";
-    private const string DisplayVersion = "2.6.3";
+    private const string DisplayVersion = "2.6.4";
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NOVA VPN";
     private readonly Color background = Color.FromArgb(233, 239, 246);
     private readonly Color panel = Color.FromArgb(248, 250, 253);
@@ -52,9 +52,6 @@ internal sealed class NovaInstaller : Form
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool MoveFileEx(string existingName, string newName, int flags);
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern void SHChangeNotify(uint eventId, uint flags, string item1, string item2);
 
     private NovaInstaller(string updatePath = null, int parentProcessId = 0, bool deleteSetupOnExit = false)
     {
@@ -125,7 +122,7 @@ internal sealed class NovaInstaller : Form
         footer.Controls.Add(primary);
         footer.Controls.Add(secondary);
 
-        pathBox = new TextBox { Location = new Point(39, 193), Size = new Size(445, 31), Font = new Font("Segoe UI", 10F), BorderStyle = BorderStyle.FixedSingle, BackColor = panelLight, ForeColor = Color.FromArgb(38, 56, 75), Text = updateMode ? updatePath : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), ProductName) };
+        pathBox = new TextBox { Location = new Point(39, 193), Size = new Size(445, 31), Font = new Font("Segoe UI", 10F), BorderStyle = BorderStyle.FixedSingle, BackColor = panelLight, ForeColor = Color.FromArgb(38, 56, 75), Text = updateMode ? updatePath : InstallerFileSafety.DefaultRoot };
         Button browse = MakeButton("Обзор…", false);
         browse.Location = new Point(495, 190);
         browse.Size = new Size(118, 36);
@@ -344,22 +341,19 @@ internal sealed class NovaInstaller : Form
 
     private string ValidateTarget(string value)
     {
-        if (String.IsNullOrWhiteSpace(value)) throw new InvalidOperationException("Укажите папку установки.");
-        string full = Path.GetFullPath(Environment.ExpandEnvironmentVariables(value.Trim().Trim('"'))).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string root = Path.GetPathRoot(full).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (String.Equals(full, root, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Выберите папку внутри диска, например C:\\Program Files\\NOVA VPN.");
-        string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd(Path.DirectorySeparatorChar);
-        if (full.StartsWith(windows + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Не устанавливайте приложение внутрь папки Windows.");
-        return full;
+        return InstallerFileSafety.ValidateRoot(value);
     }
 
     private void InstallWorker(object sender, DoWorkEventArgs e)
     {
         InstallOptions options = (InstallOptions)e.Argument;
+        InstallerGuardSafety.DemandCanModify(options.Target);
         Directory.CreateDirectory(options.Target);
         worker.ReportProgress(0, "Завершение компонентов прежней версии…");
-        StopInstalledComponents(options.Target);
+        using (var transaction = InstallerFileTransaction.BeginRecovered(options.Target, delegate { StopInstalledComponents(options.Target); InstallerUninstallTransaction.RecoverInstalledUnderLease(options.Target); }))
+        {
         List<string> installed = new List<string>();
+        List<string> emptyDirectories = new List<string>();
         string prefix = Path.GetFullPath(options.Target).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         using (Stream file = Assembly.GetExecutingAssembly().GetManifestResourceStream("NOVA.Payload.zip"))
         {
@@ -374,61 +368,38 @@ internal sealed class NovaInstaller : Form
             {
                 string relative = entry.FullName.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
                 if (Path.IsPathRooted(relative) || relative.IndexOf(':') >= 0 || relative.IndexOf('\0') >= 0) throw new InvalidDataException("Архив содержит небезопасный путь.");
-                string destination = Path.GetFullPath(Path.Combine(options.Target, relative));
+                string destination = SafeInstallPath(options.Target, String.IsNullOrEmpty(entry.Name) ? relative.TrimEnd('\\', '/') : relative);
                 if (!destination.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Архив содержит путь вне папки установки.");
-                if (String.IsNullOrEmpty(entry.Name)) { Directory.CreateDirectory(destination); continue; }
-                Directory.CreateDirectory(Path.GetDirectoryName(destination));
+                if (String.IsNullOrEmpty(entry.Name)) { emptyDirectories.Add(destination); continue; }
                 using (Stream input = entry.Open())
-                using (FileStream output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
-                    byte[] buffer = new byte[65536];
-                    int read;
-                    while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        output.Write(buffer, 0, read);
-                        complete += read;
-                        int percent = (int)Math.Min(100, complete * 100 / total);
-                        worker.ReportProgress(percent, "Установка компонентов… " + percent + "%");
-                    }
+                    transaction.Add(relative, input);
+                    complete += entry.Length;
+                    int percent = (int)Math.Min(100, complete * 100 / total);
+                    worker.ReportProgress(percent, "Подготовка компонентов… " + percent + "%");
                 }
                 installed.Add(relative);
             }
         }
         }
 
-        string installerDestination = Path.Combine(options.Target, "NOVA VPN Uninstaller.exe");
         using (Stream uninstaller = Assembly.GetExecutingAssembly().GetManifestResourceStream("NOVA.Uninstaller.exe"))
         {
             if (uninstaller == null) throw new FileNotFoundException("В установщике не найден компонент удаления.");
-            using (FileStream output = new FileStream(installerDestination, FileMode.Create, FileAccess.Write, FileShare.None)) uninstaller.CopyTo(output);
+            transaction.Add("NOVA VPN Uninstaller.exe", uninstaller);
         }
         installed.Add("NOVA VPN Uninstaller.exe");
-        string manifest = Path.Combine(options.Target, "install-manifest.txt");
         installed.Add("install-manifest.txt");
-        File.WriteAllLines(manifest, installed.Distinct(StringComparer.OrdinalIgnoreCase), new UTF8Encoding(false));
+        using (var manifestData = new MemoryStream(new UTF8Encoding(false).GetBytes(String.Join(Environment.NewLine, installed.Distinct(StringComparer.OrdinalIgnoreCase)) + Environment.NewLine))) transaction.Add("install-manifest.txt", manifestData);
+        transaction.PrepareRegistry(DisplayVersion, options.DesktopShortcut);
+        transaction.PrepareShortcuts(options.DesktopShortcut);
+        worker.ReportProgress(100, "Замена подготовленных файлов…");
+        transaction.Apply();
+        foreach (string directory in emptyDirectories) Directory.CreateDirectory(directory);
 
-        string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), ProductName);
-        Directory.CreateDirectory(startMenu);
-        CreateShortcut(Path.Combine(startMenu, ProductName + ".lnk"), Path.Combine(options.Target, ProductName + ".exe"), options.Target);
-        CreateShortcut(Path.Combine(startMenu, "Удалить " + ProductName + ".lnk"), installerDestination, options.Target, "--uninstall");
-        string desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), ProductName + ".lnk");
-        if (options.DesktopShortcut || File.Exists(desktopLink)) CreateShortcut(desktopLink, Path.Combine(options.Target, ProductName + ".exe"), options.Target);
-        string personalDesktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), ProductName + ".lnk");
-        if (File.Exists(personalDesktopLink)) CreateShortcut(personalDesktopLink, Path.Combine(options.Target, ProductName + ".exe"), options.Target);
-
-        using (RegistryKey key = Registry.LocalMachine.CreateSubKey(UninstallKey))
-        {
-            key.SetValue("DisplayName", ProductName, RegistryValueKind.String);
-            key.SetValue("DisplayVersion", DisplayVersion, RegistryValueKind.String);
-            key.SetValue("Publisher", "NOVA Project", RegistryValueKind.String);
-            key.SetValue("InstallLocation", options.Target, RegistryValueKind.String);
-            key.SetValue("DisplayIcon", Path.Combine(options.Target, ProductName + ".exe"), RegistryValueKind.String);
-            key.SetValue("UninstallString", "\"" + installerDestination + "\" --uninstall", RegistryValueKind.String);
-            key.SetValue("NoModify", 1, RegistryValueKind.DWord);
-            key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
-            key.SetValue("DesktopShortcut", options.DesktopShortcut ? 1 : 0, RegistryValueKind.DWord);
-            long installedBytes = installed.Where(File.Exists).Sum(relative => new FileInfo(Path.Combine(options.Target, relative)).Length);
-            key.SetValue("EstimatedSize", (int)Math.Min(Int32.MaxValue, installedBytes / 1024), RegistryValueKind.DWord);
+        transaction.ApplyShortcuts();
+        transaction.ApplyRegistry();
+        transaction.Complete();
         }
     }
 
@@ -476,8 +447,9 @@ internal sealed class NovaInstaller : Form
     {
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
+            string relative = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
+            string path = SafeInstallPath(target, String.IsNullOrEmpty(entry.Name) ? relative.TrimEnd('\\', '/') : relative);
             if (String.IsNullOrEmpty(entry.Name)) continue;
-            string path = SafeInstallPath(target, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(path)) continue;
             try { using (var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { } }
             catch (IOException)
@@ -511,34 +483,6 @@ internal sealed class NovaInstaller : Form
         ShowFinished(null);
     }
 
-    private static void CreateShortcut(string path, string target, string workingDirectory, string arguments = "")
-    {
-        Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-        if (shellType == null) throw new InvalidOperationException("В Windows недоступно создание ярлыков.");
-        object shell = Activator.CreateInstance(shellType);
-        object shortcut = null;
-        try
-        {
-            shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path });
-            Type type = shortcut.GetType();
-            type.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { target });
-            type.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut, new object[] { workingDirectory });
-            string brandIconPath = Path.Combine(workingDirectory, "Assets", "nova-desktop-v3.ico");
-            string iconPath = File.Exists(brandIconPath) ? brandIconPath : target;
-            // IconLocation is a shell property, not a command line: literal quotes
-            // become part of the filename and make Explorer display a blank icon.
-            type.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut, new object[] { iconPath + ",0" });
-            type.InvokeMember("Arguments", BindingFlags.SetProperty, null, shortcut, new object[] { arguments });
-            type.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
-            SHChangeNotify(0x00002000, 0x0005, path, null); // UPDATEITEM / PATHW
-        }
-        finally
-        {
-            if (shortcut != null && Marshal.IsComObject(shortcut)) Marshal.FinalReleaseComObject(shortcut);
-            if (Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
-        }
-    }
-
     private static void Uninstall()
     {
         string current = Application.ExecutablePath;
@@ -554,54 +498,44 @@ internal sealed class NovaInstaller : Form
 
         try
         {
-            bool removeDesktopShortcut = false;
-            using (Process startup = Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "schtasks.exe"), "/Delete /TN \"NOVA VPN Startup\" /F") { UseShellExecute = false, CreateNoWindow = true }))
+            InstallerGuardSafety.DemandCanModify(install);
+            using (InstallerFileTransaction.AcquireRootLease(install))
             {
-                if (!startup.WaitForExit(5000)) startup.Kill();
-            }
-            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(UninstallKey, true))
+            StopInstalledComponents(install);
+            bool recoveredRemoval = InstallerUninstallTransaction.RecoverInstalledUnderLease(install);
+            if (recoveredRemoval && !File.Exists(Path.Combine(install, "install-manifest.txt"))) { MessageBox.Show("Предыдущее удаление NOVA VPN завершено.", ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            var registration = new WindowsInstallerRegistryStore();
+            using (registration.AcquireLease())
+            using (var startup = new WindowsInstallerStartupTaskStore(Path.Combine(install, "NOVA VPN.exe")))
             {
-                if (key != null)
-                {
-                    removeDesktopShortcut = Convert.ToInt32(key.GetValue("DesktopShortcut", 0)) == 1;
-                    Registry.LocalMachine.DeleteSubKeyTree(UninstallKey, false);
-                }
-            }
+            var shortcuts = new WindowsInstallerShortcutEnvironment();
+            InstallerFileTransaction.RecoverUnderLease(install, registration, shortcuts);
+            string[] installedPaths = InstallerFileSafety.ReadUninstallPaths(install);
+            bool rebootCleanup = false;
+            var transaction = new InstallerUninstallTransaction(install, registration, shortcuts, startup, null, delegate(string retired) { InstallerUninstallTransaction.QueueRetiredFile(retired); rebootCleanup = true; });
+            transaction.Execute(current);
             string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), ProductName);
-            TryDeleteFile(Path.Combine(startMenu, ProductName + ".lnk"));
-            TryDeleteFile(Path.Combine(startMenu, "Удалить " + ProductName + ".lnk"));
             try { Directory.Delete(startMenu, false); } catch { }
-            if (removeDesktopShortcut) TryDeleteFile(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), ProductName + ".lnk"));
 
-            string manifest = Path.Combine(install, "install-manifest.txt");
-            if (!File.Exists(manifest)) throw new FileNotFoundException("Не найден список файлов установки; для безопасности файлы не удалены.");
-            if (File.Exists(manifest))
+            if (installedPaths.Length != 0)
             {
-                string[] installed = File.ReadAllLines(manifest, Encoding.UTF8);
-                foreach (string relative in installed)
-                {
-                    string path = SafeInstallPath(install, relative);
-                    if (File.Exists(path)) TryDeleteFile(path);
-                }
-                string[] directories = installed.Select(relative => Path.GetDirectoryName(SafeInstallPath(install, relative)))
+                string[] directories = installedPaths.Select(path => Path.GetDirectoryName(path))
                     .Where(path => !String.IsNullOrEmpty(path)).Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderByDescending(path => path.Length).ToArray();
                 foreach (string directory in directories) { try { Directory.Delete(directory, false); } catch { } }
             }
             try { Directory.Delete(install, false); } catch { }
-            MessageBox.Show("NOVA VPN удалена. Настройки профиля Windows оставлены на месте.", ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
-            if (File.Exists(current)) MoveFileEx(current, null, 4);
-            if (Directory.Exists(install)) MoveFileEx(install, null, 4);
+            string cleanup = InstallerUninstallTransaction.HasPending(install) ? Environment.NewLine + "Очистка старых файлов не завершена. Повторная установка восстановит её по журналу." : rebootCleanup ? Environment.NewLine + "Старый файл удаления будет очищен после перезагрузки." : "";
+            MessageBox.Show("NOVA VPN удалена. Настройки профиля Windows оставлены на месте." + cleanup, ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            }
         }
         catch (Exception ex) { MessageBox.Show("Не удалось полностью удалить NOVA VPN: " + ex.Message, ProductName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
     private static string SafeInstallPath(string root, string relative)
     {
-        string candidate = Path.GetFullPath(Path.Combine(root, relative.TrimStart('\\', '/')));
-        string prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Манифест удаления содержит путь за пределами приложения.");
-        return candidate;
+        return InstallerFileSafety.ResolvePayload(root, relative);
     }
 
     private static void TryDeleteFile(string path)

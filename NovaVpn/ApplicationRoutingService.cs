@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace NovaVpn;
 
@@ -55,6 +57,35 @@ public static class ApplicationRoutingService
 		string a = NormalizePath(first);
 		string b = NormalizePath(second);
 		return a.Length > 0 && b.Length > 0 && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private const string ExactPathPrefix = @"(?i)\A";
+	private const string ExactPathSuffix = @"\z";
+
+	internal static string ExactPathRegex(string path)
+	{
+		var pattern = new StringBuilder(ExactPathPrefix);
+		foreach (char character in path)
+		{
+			if (@"\.+*?()|[]{}^$".IndexOf(character) >= 0) pattern.Append('\\');
+			pattern.Append(character);
+		}
+		return pattern.Append(ExactPathSuffix).ToString();
+	}
+
+	internal static string DecodeExactPathRegex(string pattern)
+	{
+		if (!pattern.StartsWith(ExactPathPrefix, StringComparison.Ordinal) ||
+			!pattern.EndsWith(ExactPathSuffix, StringComparison.Ordinal)) return null;
+
+		string path;
+		try
+		{
+			path = Regex.Unescape(pattern.Substring(ExactPathPrefix.Length,
+				pattern.Length - ExactPathPrefix.Length - ExactPathSuffix.Length));
+		}
+		catch (ArgumentException) { return null; }
+		return NormalizePath(path).Length > 0 && ExactPathRegex(path) == pattern ? path : null;
 	}
 
 	private static bool Contains(IEnumerable<string> values, string path)

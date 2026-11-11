@@ -46,9 +46,13 @@ public static class GameCatalog
     {
         return string.Join("|", NetworkInterface.GetAllNetworkInterfaces()
             .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-            .Select(n => n.Id + ":" + string.Join(",", n.GetIPProperties().UnicastAddresses.Select(a => a.Address.ToString()).OrderBy(a => a)) + ":" +
-                string.Join(",", n.GetIPProperties().GatewayAddresses.Select(a => a.Address.ToString()).OrderBy(a => a)))
-            .OrderBy(n => n));
+            .Select(n => {
+                var properties = n.GetIPProperties();
+                return n.Id + ":" + string.Join(",", properties.UnicastAddresses.Select(a => a.Address + "/" + a.PrefixLength).OrderBy(a => a)) + ":" +
+                    string.Join(",", properties.GatewayAddresses.Select(a => a.Address.ToString()).OrderBy(a => a)) + ":" +
+                    string.Join(",", properties.DnsAddresses.Select(a => a.ToString()).OrderBy(a => a));
+            })
+            .OrderBy(n => n)) + "|routes-v1:" + WindowsRouteInventory.CaptureFingerprint();
     }
 }
 
@@ -133,8 +137,34 @@ public static class GamingRouting
     public static RoutingSettings Effective(RoutingSettings basis, GamingRoute game, bool killSwitch)
     {
         if (game != null && killSwitch && (game.Profile == null || game.GameOnly))
-            throw new InvalidOperationException("Kill Switch запрещает прямой выход. Для игрового режима сначала подключите обычный VPN.");
+            throw new InvalidOperationException("Строгий режим TUN запрещает прямой выход. Для игрового режима сначала подключите обычный VPN.");
         var result = RoutingOverlayService.Clone(basis); result.Gaming = game;
+        if (game != null && result.MultiServer != null) {
+            if (game.GameOnly) throw new InvalidOperationException("Назначения серверов сохраняют основной маршрут во время игровой сессии.");
+            var settings = result.MultiServer.Copy();
+            if (settings.RequiresRebinding) throw new InvalidOperationException("Сначала назначьте серверы импортированным правилам.");
+            if (game.Profile != null && (game.Profile.RetiredFromSubscription || String.IsNullOrWhiteSpace(game.Profile.Id)))
+                throw new InvalidOperationException("Игровой сервер недоступен.");
+            var paths = game.ExecutablePaths?.Length > 0 ? game.ExecutablePaths :
+                !String.IsNullOrEmpty(game.ExecutablePath) ? new[] { game.ExecutablePath } : Array.Empty<string>();
+            if (paths.Length == 0 || paths.Length > 512) throw new InvalidOperationException("Для назначения игрового сервера нужны полные пути игровых EXE.");
+            var target = game.Profile == null ? new ServerRouteTarget(ServerRouteKind.Direct) : new ServerRouteTarget(ServerRouteKind.Profile, game.Profile.Id);
+            var normalized = paths.Select(path => new MultiServerRule(path, null, false, target).ApplicationPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var gamePaths = new HashSet<string>(normalized, StringComparer.OrdinalIgnoreCase);
+            // Explicit blocks remain stronger than the temporary game assignment.
+            var blocked = new HashSet<string>(settings.Rules.Where(rule => rule.ApplicationPath != null && rule.ToRule().Target.Kind == ServerRouteKind.Block)
+                .Select(rule => rule.ToRule().ApplicationPath), StringComparer.OrdinalIgnoreCase);
+            settings.Rules = settings.Rules.Where(rule => rule.ApplicationPath == null || !gamePaths.Contains(rule.ToRule().ApplicationPath) || blocked.Contains(rule.ToRule().ApplicationPath)).ToList();
+            foreach (var path in normalized.Where(path => !blocked.Contains(path)))
+                settings.Rules.Add(new MultiServerRuleRecord { ApplicationPath = path, Target = target.Kind.ToString(), ProfileId = target.ProfileId });
+            settings.Revision = checked(settings.Revision + 1); settings.Validate();
+            result.MultiServer = settings;
+            // Compile through the standard multi-exit path, including DNS, inspector and health.
+            // The persistent state and session's separately retained baseline are not changed.
+            result.Gaming = null;
+            return result;
+        }
         if (game?.GameOnly == true) { result.Mode = "Direct"; result.DnsMode = "System"; }
         return result;
     }
@@ -148,9 +178,10 @@ public static class GamingRouting
         string tag = "direct";
         if (game.Profile != null) {
             tag = "nova-game";
-            var outbound = serializer.Deserialize<Dictionary<string, object>>(ConfigBuilder.ExportOutbound(game.Profile));
+            var outbound = serializer.Deserialize<Dictionary<string, object>>(ConfigBuilder.ExportBaseOutbound(game.Profile));
             outbound["tag"] = tag;
             config["outbounds"] = ((System.Collections.IEnumerable)config["outbounds"]).Cast<object>().Concat(new object[] { outbound }).ToArray();
+            CorporateProxy.Apply(config, game.Profile, tag);
         }
         var rule = new Dictionary<string, object> { ["action"] = "route", ["outbound"] = tag };
         if (game.ExecutablePaths?.Length > 0) rule["process_path"] = game.ExecutablePaths;

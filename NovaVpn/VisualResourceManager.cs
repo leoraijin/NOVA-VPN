@@ -131,12 +131,18 @@ public static class VisualResourceManager
   <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='{x:Type ScrollBar}'>
     <Grid Background='Transparent'>
       <Track x:Name='PART_Track' Orientation='{TemplateBinding Orientation}' IsDirectionReversed='True' Focusable='False'>
-        <Track.DecreaseRepeatButton><RepeatButton Focusable='False' IsTabStop='False' Command='{x:Static ScrollBar.PageUpCommand}' Opacity='0'/></Track.DecreaseRepeatButton>
-        <Track.Thumb><Thumb MinHeight='38'><Thumb.Template><ControlTemplate TargetType='{x:Type Thumb}'><Border x:Name='Grip' Background='{DynamicResource NovaBorderBrush}' CornerRadius='3' Width='6' HorizontalAlignment='Center' Opacity='0.7'/><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Grip' Property='Opacity' Value='1'/></Trigger><Trigger Property='IsDragging' Value='True'><Setter TargetName='Grip' Property='Background' Value='{DynamicResource NovaAccentBrush}'/></Trigger><DataTrigger Binding='{Binding Orientation, RelativeSource={RelativeSource AncestorType={x:Type ScrollBar}}}' Value='Horizontal'><Setter TargetName='Grip' Property='Width' Value='Auto'/><Setter TargetName='Grip' Property='Height' Value='6'/><Setter TargetName='Grip' Property='HorizontalAlignment' Value='Stretch'/></DataTrigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
-        <Track.IncreaseRepeatButton><RepeatButton Focusable='False' IsTabStop='False' Command='{x:Static ScrollBar.PageDownCommand}' Opacity='0'/></Track.IncreaseRepeatButton>
+        <Track.DecreaseRepeatButton><RepeatButton x:Name='PageDecrease' Focusable='False' IsTabStop='False' Command='{x:Static ScrollBar.PageUpCommand}' Opacity='0'/></Track.DecreaseRepeatButton>
+        <Track.Thumb><Thumb x:Name='GripThumb' MinHeight='38'><Thumb.Template><ControlTemplate TargetType='{x:Type Thumb}'><Border x:Name='Grip' Background='{DynamicResource NovaBorderBrush}' CornerRadius='3' Width='6' HorizontalAlignment='Center' Opacity='0.7'/><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Grip' Property='Opacity' Value='1'/></Trigger><Trigger Property='IsDragging' Value='True'><Setter TargetName='Grip' Property='Background' Value='{DynamicResource NovaAccentBrush}'/></Trigger><DataTrigger Binding='{Binding Orientation, RelativeSource={RelativeSource AncestorType={x:Type ScrollBar}}}' Value='Horizontal'><Setter TargetName='Grip' Property='Width' Value='Auto'/><Setter TargetName='Grip' Property='Height' Value='6'/><Setter TargetName='Grip' Property='HorizontalAlignment' Value='Stretch'/></DataTrigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+        <Track.IncreaseRepeatButton><RepeatButton x:Name='PageIncrease' Focusable='False' IsTabStop='False' Command='{x:Static ScrollBar.PageDownCommand}' Opacity='0'/></Track.IncreaseRepeatButton>
       </Track>
     </Grid>
+    <ControlTemplate.Triggers><Trigger Property='Orientation' Value='Horizontal'>
+      <Setter TargetName='PART_Track' Property='IsDirectionReversed' Value='False'/>
+      <Setter TargetName='GripThumb' Property='MinHeight' Value='0'/><Setter TargetName='GripThumb' Property='MinWidth' Value='38'/>
+      <Setter TargetName='PageDecrease' Property='Command' Value='{x:Static ScrollBar.PageLeftCommand}'/><Setter TargetName='PageIncrease' Property='Command' Value='{x:Static ScrollBar.PageRightCommand}'/>
+    </Trigger></ControlTemplate.Triggers>
   </ControlTemplate></Setter.Value></Setter>
+  <Style.Triggers><Trigger Property='Orientation' Value='Horizontal'><Setter Property='Width' Value='Auto'/><Setter Property='Height' Value='9'/></Trigger></Style.Triggers>
 </Style>";
 
 	private const string SliderStyle = @"

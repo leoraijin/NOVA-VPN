@@ -23,7 +23,48 @@ public static class ZapretRoutingTransitionService
 	{
 		if (state == null) throw new ArgumentNullException(nameof(state));
 		Ensure(state);
-		return active ? Activate(state) : Restore(state);
+		if (state.Routing.MultiServer == null) return active ? Activate(state) : Restore(state);
+
+		// Older builds could leave the legacy transition lists on a multi-server policy.
+		int changed = Restore(state);
+		var overlay = active ? GetTargetDomains(state.Zapret.StandardDomains).Select(ToDirectRule)
+			.Distinct(StringComparer.OrdinalIgnoreCase).ToList() : new List<string>();
+		var current = state.Routing.ZapretDirectDomains;
+		if (!current.SequenceEqual(overlay, StringComparer.OrdinalIgnoreCase))
+		{
+			changed += current.Except(overlay, StringComparer.OrdinalIgnoreCase).Count() +
+				overlay.Except(current, StringComparer.OrdinalIgnoreCase).Count();
+			state.Routing.ZapretDirectDomains = overlay;
+		}
+		return changed;
+	}
+
+	internal static bool HasActiveRouting(AppState state) =>
+		state.Zapret?.RoutingChangesApplied == true || state.Routing?.ZapretDirectDomains?.Count > 0;
+
+	internal static AppState WithoutLegacyRouting(AppState current)
+	{
+		var draft = new AppState { Routing = RoutingOverlayService.Clone(current.Routing), Zapret = current.Zapret?.Clone() };
+		Ensure(draft);
+		Restore(draft);
+		draft.Routing.ZapretDirectDomains.Clear();
+		return draft;
+	}
+
+	internal static (RoutingSettings Routing, ZapretSettings Zapret) PrepareAssignedRouting(AppState current, RoutingSettings candidate)
+	{
+		var draft = WithoutLegacyRouting(current);
+		draft.Routing = RoutingOverlayService.Clone(candidate);
+		SetActive(draft, RoutingOverlayService.IsZapretMode(draft.Zapret.Mode));
+		return (draft.Routing, draft.Zapret);
+	}
+
+	internal static (RoutingSettings Routing, ZapretSettings Zapret) PrepareOrdinaryRouting(AppState current, RoutingSettings snapshot)
+	{
+		var restored = new AppState { Routing = RoutingOverlayService.Clone(snapshot), Zapret = current.Zapret?.Clone() };
+		restored.Routing.ZapretDirectDomains.Clear();
+		SetActive(restored, RoutingOverlayService.IsZapretMode(restored.Zapret?.Mode));
+		return (restored.Routing, restored.Zapret);
 	}
 
 	private static int Activate(AppState state)

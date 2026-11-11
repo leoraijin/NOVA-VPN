@@ -85,7 +85,7 @@ public sealed class AutomaticGamingService
         IProgress<string> progress, CancellationToken token, bool compareDirect = true)
     {
         token.ThrowIfCancellationRequested();
-        if (!compareDirect) return new AutomaticGamingResult { Message = "Прямое сравнение запрещено Kill Switch. Игровой VPN без сравнения с прямым соединением не включается." };
+        if (!compareDirect) return new AutomaticGamingResult { Message = "Прямое сравнение запрещено строгим режимом TUN. Игровой VPN без сравнения с прямым соединением не включается." };
         if (!SupportsGameQuery(game)) return Unsupported(game);
         var candidates = profiles.Where(p => p != null && p.Protocol != "sing-box" && !string.IsNullOrEmpty(p.Id) && p.Id != "direct")
             .GroupBy(p => p.Id).Select(g => g.First()).ToList();

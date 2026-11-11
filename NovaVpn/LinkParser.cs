@@ -6,6 +6,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Web.Script.Serialization;
 
 namespace NovaVpn;
@@ -16,11 +17,14 @@ public static class LinkParser
 	private const int MaxProfiles = 2000;
 	public static async Task<List<VpnProfile>> ImportAsync(string input)
 	{
-		return (await ImportDetailedAsync(input)).Profiles;
+		return (await ImportDetailedAsync(input).ConfigureAwait(false)).Profiles;
 	}
 
-	public static async Task<ImportResult> ImportDetailedAsync(string input)
+    public static Task<ImportResult> ImportDetailedAsync(string input) => ImportWithCancellationAsync(input, CancellationToken.None);
+
+	public static async Task<ImportResult> ImportWithCancellationAsync(string input, CancellationToken token)
 	{
+        token.ThrowIfCancellationRequested();
 		input = (input ?? string.Empty).Trim();
 		if (string.IsNullOrWhiteSpace(input))
 		{
@@ -31,6 +35,7 @@ public static class LinkParser
 			throw new InvalidOperationException("Импорт слишком большой. Ограничение — 4 МБ.");
 		}
 		string subscriptionUrl = IsHttpUrl(input) ? input : "";
+        SubscriptionQuota quota = null;
 		if (!string.IsNullOrWhiteSpace(subscriptionUrl))
 		{
 			Uri requested = new Uri(subscriptionUrl);
@@ -44,13 +49,17 @@ public static class LinkParser
 			}
 			using HttpClientHandler handler = new HttpClientHandler
 			{
+				AllowAutoRedirect = false,
 				AutomaticDecompression = (DecompressionMethods.GZip | DecompressionMethods.Deflate)
 			};
 			using HttpClient client = new HttpClient(handler);
 			client.Timeout = TimeSpan.FromSeconds(20.0);
 			client.DefaultRequestHeaders.UserAgent.ParseAdd("NOVA-VPN/2.0");
-			using HttpResponseMessage response = await client.GetAsync(subscriptionUrl, HttpCompletionOption.ResponseHeadersRead);
+            using var requestDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+            requestDeadline.CancelAfter(TimeSpan.FromSeconds(20));
+			using HttpResponseMessage response = await GetSubscriptionResponseAsync(client, requested, requestDeadline.Token).ConfigureAwait(false);
 			response.EnsureSuccessStatusCode();
+            if (response.Headers.TryGetValues("subscription-userinfo", out var metadata)) quota = SubscriptionQuota.Parse(metadata, DateTime.UtcNow);
 			Uri finalUri = response.RequestMessage.RequestUri;
 			if (finalUri.Scheme != Uri.UriSchemeHttps && !finalUri.IsLoopback)
 			{
@@ -60,10 +69,16 @@ public static class LinkParser
 			{
 				throw new InvalidOperationException("Ответ подписки слишком большой.");
 			}
-			input = await ReadLimitedAsync(response.Content, MaxImportBytes);
+			input = await ReadLimitedAsync(response.Content, MaxImportBytes, requestDeadline.Token).ConfigureAwait(false);
 		}
 		input = TryDecodeSubscription(input);
+        if (ExternalProfileImport.TryRead(input, subscriptionUrl, out var external))
+        {
+            external.Quota = quota;
+            return external;
+        }
 		List<VpnProfile> result = new List<VpnProfile>();
+        var warnings = new List<string>();
 		string[] lines = input.Replace("\r", "").Split(new char[1] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
 		string[] array = lines;
 		foreach (string text in array)
@@ -85,12 +100,13 @@ public static class LinkParser
 					result.Add(vpnProfile);
 				}
 			}
-			catch
+			catch (Exception ex) when (ex is FormatException || ex is NotSupportedException || ex is ArgumentException || ex is InvalidOperationException)
 			{
 				if (lines.Length == 1)
 				{
 					throw;
 				}
+                warnings.Add("Запись " + (Array.IndexOf(lines, text) + 1) + ": " + (ex is NotSupportedException ? "неподдерживаемые параметры" : "неверный формат"));
 			}
 		}
 		if (result.Count == 0 && input.TrimStart().StartsWith("{"))
@@ -110,24 +126,59 @@ public static class LinkParser
 				profile.SubscriptionUpdatedUtc = updated;
 			}
 		}
-		return new ImportResult(result, subscriptionUrl);
+        foreach (var profile in result) profile.ProviderName = profile.Name;
+        var imported = new ImportResult(result, subscriptionUrl) { Quota = quota };
+        imported.Warnings.AddRange(warnings);
+        return imported;
 	}
 
-	private static async Task<string> ReadLimitedAsync(HttpContent content, int limit)
+    private static async Task<HttpResponseMessage> GetSubscriptionResponseAsync(HttpClient client, Uri initial, CancellationToken token)
+    {
+        Uri target = initial;
+        for (int redirect = 0; redirect <= 5; redirect++)
+        {
+            if (!string.IsNullOrEmpty(target.UserInfo) || target.Scheme != Uri.UriSchemeHttp && target.Scheme != Uri.UriSchemeHttps || target.Scheme != Uri.UriSchemeHttps && !target.IsLoopback ||
+                initial.Scheme == Uri.UriSchemeHttps && target.Scheme != Uri.UriSchemeHttps)
+                throw new InvalidOperationException("Подписка перенаправлена на недопустимый или незащищённый адрес.");
+            var response = await client.GetAsync(target, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            int code = (int)response.StatusCode;
+            if ((code == 301 || code == 302 || code == 303 || code == 307 || code == 308) && response.Headers.Location != null)
+            {
+                try
+                {
+                    if (redirect == 5) throw new InvalidOperationException("Слишком много перенаправлений подписки.");
+                    target = response.Headers.Location.IsAbsoluteUri ? response.Headers.Location : new Uri(target, response.Headers.Location);
+                }
+                finally { response.Dispose(); }
+                continue;
+            }
+            return response;
+        }
+        throw new InvalidOperationException("Слишком много перенаправлений подписки.");
+    }
+
+	private static async Task<string> ReadLimitedAsync(HttpContent content, int limit, CancellationToken token)
 	{
-		using (Stream stream = await content.ReadAsStreamAsync())
+        token.ThrowIfCancellationRequested();
+		using (Stream stream = await content.ReadAsStreamAsync().ConfigureAwait(false))
+        using (token.Register(() => { try { stream.Dispose(); } catch (IOException) { } catch (ObjectDisposedException) { } }))
 		using (MemoryStream buffer = new MemoryStream())
 		{
+            try {
 			byte[] chunk = new byte[81920];
 			int total = 0;
 			int read;
-			while ((read = await stream.ReadAsync(chunk, 0, chunk.Length)) > 0)
+			while ((read = await stream.ReadAsync(chunk, 0, chunk.Length, token).ConfigureAwait(false)) > 0)
 			{
 				total += read;
 				if (total > limit) throw new InvalidOperationException("Ответ подписки слишком большой.");
 				buffer.Write(chunk, 0, read);
 			}
-			return Encoding.UTF8.GetString(buffer.ToArray());
+            token.ThrowIfCancellationRequested();
+			return new UTF8Encoding(false, true).GetString(buffer.ToArray());
+            } catch (Exception error) when (token.IsCancellationRequested &&
+                (error is IOException || error is ObjectDisposedException || error is HttpRequestException || error is WebException))
+            { throw new OperationCanceledException("Subscription import cancelled.", error, token); }
 		}
 	}
 
@@ -382,14 +433,14 @@ public static class LinkParser
 	private static string TryDecodeSubscription(string input)
 	{
 		string text = input.Trim();
-		if (text.Contains("://") || text.StartsWith("{"))
+		if (text.Contains("://") || text.StartsWith("{") || text.StartsWith("["))
 		{
 			return text;
 		}
 		try
 		{
 			string text2 = DecodeBase64(text);
-			return (text2.Contains("://") || text2.TrimStart().StartsWith("{")) ? text2 : text;
+			return (text2.Contains("://") || text2.TrimStart().StartsWith("{") || text2.TrimStart().StartsWith("[")) ? text2 : text;
 		}
 		catch
 		{

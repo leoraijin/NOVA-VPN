@@ -9,7 +9,7 @@ namespace NovaVpn;
 // A dedicated physical-network exit: never reuse an imported selector/detour.
 public static class StrictDirectRouting
 {
-	private const string ExitTag = "nova-strict-direct";
+	internal const string ExitTag = "nova-strict-direct";
 	private const string DnsTag = "nova-strict-direct-dns";
 
 	public static bool Matches(IEnumerable<string> domains, string host, out string matched)
@@ -26,6 +26,9 @@ public static class StrictDirectRouting
 		var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 		var config = serializer.DeserializeObject(json) as Dictionary<string, object>;
 		if (config == null) throw new InvalidOperationException("Некорректная конфигурация строгого прямого маршрута.");
+		if (config.TryGetValue("endpoints", out object endpoints) && endpoints is object[] entries
+			&& entries.Any(item => item is Dictionary<string, object> endpoint && Tag(endpoint) == ExitTag))
+			throw new InvalidOperationException("Тег nova-strict-direct уже занят в импортированном JSON.");
 		var outbounds = Array(config, "outbounds");
 		outbounds.RemoveAll(item => item is Dictionary<string, object> existing && Tag(existing) == ExitTag);
 		outbounds.Add(Obj("type", "direct", "tag", ExitTag, "domain_resolver", DnsTag));

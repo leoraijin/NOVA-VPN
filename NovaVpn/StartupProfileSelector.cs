@@ -11,7 +11,7 @@ public static class StartupProfileSelector
 	public static async Task<VpnProfile> SelectAsync(IEnumerable<VpnProfile> source, string preferredId,
 		Func<VpnProfile, Task<ServerMapHealth>> check, CancellationToken token)
 	{
-		var profiles = source.Where(p => p != null).ToArray();
+		var profiles = source.Where(p => p != null && !p.RetiredFromSubscription).ToArray();
 		var preferred = profiles.FirstOrDefault(p => p.Id == preferredId);
 		if (preferred != null) {
 			token.ThrowIfCancellationRequested();

@@ -32,9 +32,9 @@ public sealed class GamingRecommendationStamp
         var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         var configuration = new List<string>();
         foreach (var profile in profiles.Where(p => p.Protocol != "sing-box").OrderBy(p => p.Id, StringComparer.Ordinal)) {
-            var fields = serializer.Deserialize<Dictionary<string, object>>(serializer.Serialize(profile));
-            foreach (string key in new[] { "Name", "AddedAt", "LastLatency", "AverageLatency", "LastCheckedUtc", "ConsecutiveFailures", "LastLossPercent", "HealthStatus", "LastTestMessage", "IsFavorite", "Source", "SubscriptionUrl", "SubscriptionUpdatedUtc" }) fields.Remove(key);
-            configuration.Add(serializer.Serialize(fields.OrderBy(p => p.Key, StringComparer.Ordinal).ToDictionary(p => p.Key, p => p.Value)));
+            // Eligibility is represented by the caller's filtered set. Only connection
+            // configuration belongs here; background health/aliases must not invalidate a game measurement.
+            configuration.Add(serializer.Serialize(new { profile.Id, Configuration = SubscriptionManager.ConfigKey(profile) }));
         }
         var files = new List<string>();
         foreach (string path in game.Executables.Where(p => !string.IsNullOrWhiteSpace(p)).OrderBy(p => p, StringComparer.OrdinalIgnoreCase)) {

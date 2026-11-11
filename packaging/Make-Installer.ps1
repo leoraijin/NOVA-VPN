@@ -1,11 +1,18 @@
-﻿param(
+param(
     [string]$ZapretArchive = (Join-Path $PSScriptRoot '..\..\zapret-1.10.3.zip'),
     [string]$AppOutput = (Join-Path $PSScriptRoot '..\bin\Release\NOVA VPN.exe'),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\..\outputs'),
-    [string]$RecoveredPayloadDirectory = $null
+    [string]$RecoveredPayloadDirectory = $null,
+    [string]$PatchedCorePackage = $null
 )
 
 $ErrorActionPreference = 'Stop'
+$patchedManifest = $null
+if (-not [string]::IsNullOrWhiteSpace($PatchedCorePackage)) {
+    . (Join-Path $PSScriptRoot 'CorePackage.ps1')
+    $PatchedCorePackage = [IO.Path]::GetFullPath($PatchedCorePackage)
+    $patchedManifest = Assert-NovaCorePackage -PackageDirectory $PatchedCorePackage
+}
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $zapretHash = '244314AE1C24538A0D751601DA8E0C925C843371EEC4456EB15F14C4FD6B7058'
 $actualHash = $null
@@ -25,6 +32,12 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
 }
 if (-not (Test-Path -LiteralPath $AppOutput -PathType Leaf)) { throw "Не найдена собранная NOVA: $AppOutput" }
 
+$companionNames = @('NOVA Core Host.exe', 'NOVA Traffic Guard.exe', 'NOVA Guard Recovery.exe', 'NOVA Guard Setup.exe')
+foreach ($name in $companionNames) {
+    if (-not (Test-Path -LiteralPath (Join-Path (Split-Path $AppOutput) $name) -PathType Leaf)) {
+        throw "Missing required application companion: $name"
+    }
+}
 $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $csc -PathType Leaf)) { throw 'Не найден компилятор C# для сборки интерфейса установщика.' }
 
@@ -37,23 +50,34 @@ New-Item -ItemType Directory -Path $payload,$zapretExtract,$setupFiles -Force | 
 
 $uninstaller = Join-Path $setupFiles 'NOVA-VPN-Uninstaller.exe'
 $installerSource = Join-Path $PSScriptRoot 'InstallerUI.cs'
+$installerSafetySource = Join-Path $PSScriptRoot 'InstallerFileSafety.cs'
+$installerTransactionSource = Join-Path $PSScriptRoot 'InstallerFileTransaction.cs'
+$installerRegistrySource = Join-Path $PSScriptRoot 'InstallerRegistryTransaction.cs'
+$installerShortcutSource = Join-Path $PSScriptRoot 'InstallerShortcutTransaction.cs'
+$installerStartupSource = Join-Path $PSScriptRoot 'InstallerStartupTasks.cs'
+$installerUninstallSource = Join-Path $PSScriptRoot 'InstallerUninstallTransaction.cs'
+$installationLeaseSource = Join-Path $PSScriptRoot '..\NovaVpn\WindowsInstallationLease.cs'
+$startupPolicySource = Join-Path $PSScriptRoot '..\NovaVpn\WindowsStartupTaskPolicy.cs'
 $manifest = Join-Path $PSScriptRoot 'Installer.manifest'
 $icon = Join-Path $PSScriptRoot '..\Assets\nova-desktop-v3.ico'
-$compilerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $uninstaller),
+$compilerArgs = @('/nologo','/codepage:65001','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $uninstaller),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),
-    '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll',
-    '/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll',
-    $installerSource)
+    '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:Microsoft.CSharp.dll','/reference:System.Xml.dll',
+    '/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll','/reference:System.Web.Extensions.dll',
+    $installerSource,$installerSafetySource,$installerTransactionSource,$installerRegistrySource,$installerShortcutSource,$installerStartupSource,$startupPolicySource,$installerUninstallSource,$installationLeaseSource)
 & $csc @compilerArgs
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Не удалось собрать компонент удаления.' }
 
 Copy-Item -LiteralPath $AppOutput -Destination (Join-Path $payload 'NOVA VPN.exe')
-Copy-Item -LiteralPath (Join-Path (Split-Path $AppOutput) 'NOVA Core Host.exe') -Destination (Join-Path $payload 'NOVA Core Host.exe')
+foreach ($name in $companionNames) {
+    Copy-Item -LiteralPath (Join-Path (Split-Path $AppOutput) $name) -Destination (Join-Path $payload $name)
+}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $payload 'LICENSE')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY.md') -Destination (Join-Path $payload 'THIRD_PARTY.md')
-foreach ($dependency in @('zxing.dll','LICENSE-ZXing.txt')) {
-    $dependencyPath = Join-Path $PSScriptRoot ('..\libs\' + $dependency)
-    if (-not (Test-Path -LiteralPath $dependencyPath -PathType Leaf)) { throw "Missing required identity/QR dependency: $dependency" }
+foreach ($dependency in @('zxing.dll','LICENSE-ZXing.txt','YamlDotNet.dll','LICENSE-YamlDotNet.txt')) {
+    $dependencyPath = Join-Path (Split-Path $AppOutput) $dependency
+    if (-not (Test-Path -LiteralPath $dependencyPath -PathType Leaf)) { $dependencyPath = Join-Path $PSScriptRoot ('..\libs\' + $dependency) }
+    if (-not (Test-Path -LiteralPath $dependencyPath -PathType Leaf)) { throw "Missing required application dependency: $dependency" }
     Copy-Item -LiteralPath $dependencyPath -Destination (Join-Path $payload $dependency)
 }
 $payloadAssets = Join-Path $payload 'Assets'
@@ -72,9 +96,12 @@ if ([string]::IsNullOrWhiteSpace($RecoveredPayloadDirectory)) {
         Copy-Item -LiteralPath (Join-Path $RecoveredPayloadDirectory $notice) -Destination $payload
     }
 }
+if ($null -ne $patchedManifest) {
+    Copy-NovaCorePackageToPayload -PackageDirectory $PatchedCorePackage -PayloadDirectory $payload
+}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ASSET-NOTICES.txt') -Destination $payload
 $releaseNotes = @'
-NOVA VPN 2.6.3 — проверка выигрыша у прямого соединения
+NOVA VPN 2.6.4 — маршрутизация через два VPN
 - Автоматическое обнаружение Steam/Epic/GOG/Riot, карточки и конфиг только для игровых EXE.
 - Временный слой маршрутизации, завершение по выходу из игры, журнал аварийного восстановления.
 - Контролируемое дерево ядра завершается при падении владельца; обычные настройки сохраняются.
@@ -354,15 +381,15 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.6.3.exe'
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.6.4.exe'
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
-$packagerArgs = @('/nologo','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
+$packagerArgs = @('/nologo','/codepage:65001','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),
-    '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll',
-    '/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll',
+    '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:Microsoft.CSharp.dll','/reference:System.Xml.dll',
+    '/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll','/reference:System.Web.Extensions.dll',
     ('/resource:' + $payloadZip + ',NOVA.Payload.zip'),
     ('/resource:' + $uninstaller + ',NOVA.Uninstaller.exe'),
-    $installerSource)
+    $installerSource,$installerSafetySource,$installerTransactionSource,$installerRegistrySource,$installerShortcutSource,$installerStartupSource,$startupPolicySource,$installerUninstallSource,$installationLeaseSource)
 & $csc @packagerArgs
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $stagedSetup -PathType Leaf)) { throw 'Не удалось собрать единый установщик с встроенными компонентами.' }
 if ((Get-Item -LiteralPath $stagedSetup).Length -le (Get-Item -LiteralPath $payloadZip).Length) { throw 'Установщик не содержит полный архив приложения.' }

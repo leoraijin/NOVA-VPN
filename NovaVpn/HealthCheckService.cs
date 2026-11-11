@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -11,7 +12,32 @@ namespace NovaVpn;
 
 public static class HealthCheckService
 {
-	public static async Task<ServerHealthResult> TestAsync(VpnProfile profile, int timeoutMs = 4500)
+    public static async Task<ServerHealthResult> TestAsync(VpnProfile profile, int timeoutMs = 30000)
+    {
+        using (var deadline = new CancellationTokenSource(Math.Max(1000, timeoutMs)))
+        {
+            try
+            {
+                var result = await ServerMapHealthService.TestAsync(profile, VpnEngines.ExecutablePath(VpnEngine.SingBox),
+                    Path.Combine(StateStore.DirectoryPath, "runtime", "profile-probes"), deadline.Token);
+                return FromProbe(result);
+            }
+            catch (OperationCanceledException)
+            {
+                if (profile != null) { profile.LastLatency = -1; profile.HealthMeasurement = ""; profile.HealthStatus = "Тайм-аут"; }
+                return new ServerHealthResult { Status = "Тайм-аут", Message = "HTTPS через профиль: время проверки истекло." };
+            }
+        }
+    }
+
+    public static ServerHealthResult FromProbe(ServerMapHealth health) => new ServerHealthResult {
+        Success = health.Success, Supported = health.Supported, LatencyMs = health.Success ? health.LatencyMs : -1,
+        CheckedUtc = health.CheckedUtc, Measurement = "https-profile", PacketLossPercent = -1,
+        SampleCount = health.Success ? 3 : 0, SuccessfulSamples = health.Success ? 3 : 0,
+        Status = !health.Supported ? "Не проверен" : health.Success ? "HTTPS работает" : "Проверка не прошла", Message = health.Message };
+
+    // Optional port diagnostic; it does not rank profiles or claim VPN connectivity.
+	public static async Task<ServerHealthResult> TestPortAsync(VpnProfile profile, int timeoutMs = 4500)
 	{
 		ServerHealthResult result = new ServerHealthResult();
 		if (profile == null)
@@ -25,14 +51,12 @@ public static class HealthCheckService
 			result.Success = !string.IsNullOrWhiteSpace(profile.RawJson);
 			result.Status = result.Success ? "Конфигурация" : "Ошибка";
 			result.Message = result.Success ? "Полная конфигурация проверяется перед подключением." : "Конфигурация пуста.";
-			Apply(profile, result);
 			return result;
 		}
 		if (string.IsNullOrWhiteSpace(profile.Server) || profile.Port < 1 || profile.Port > 65535)
 		{
 			result.Status = "Ошибка";
 			result.Message = "Некорректный адрес или порт сервера.";
-			Apply(profile, result);
 			return result;
 		}
 		try
@@ -74,7 +98,6 @@ public static class HealthCheckService
 			}
 			result.SampleCount = 3;
 			result.SuccessfulSamples = samples.Count;
-			result.PacketLossPercent = (3 - samples.Count) * 100 / 3;
 			if (samples.Count == 0)
 			{
 				if (lastError != null) throw lastError;
@@ -82,8 +105,9 @@ public static class HealthCheckService
 			}
 			result.Success = true;
 			result.LatencyMs = (int)Math.Round(samples.Average());
-			result.Status = result.PacketLossPercent > 0 ? "Нестабильный" : result.LatencyMs <= 120 ? "Быстрый" : result.LatencyMs <= 260 ? "Доступен" : "Медленный";
-			result.Message = "DNS и TCP работают · потери " + result.PacketLossPercent + "% · " + samples.Count + "/3 ответов.";
+            result.Measurement = "tcp-connect";
+			result.Status = "TCP-порт доступен";
+			result.Message = "TCP-подключений: " + samples.Count + "/3. Это не проверка VPN и не измерение потерь пакетов.";
 		}
 		catch (TimeoutException ex)
 		{
@@ -100,7 +124,6 @@ public static class HealthCheckService
 			result.Status = "Ошибка";
 			result.Message = ex.Message;
 		}
-		Apply(profile, result);
 		return result;
 	}
 
@@ -113,7 +136,7 @@ public static class HealthCheckService
 		}
 		using (SemaphoreSlim gate = new SemaphoreSlim(Math.Max(1, maxParallel)))
 		{
-			Task<ServerHealthResult>[] tasks = profiles.Select(async profile =>
+			Task<ServerHealthResult>[] tasks = profiles.Where(p => p != null && !p.RetiredFromSubscription).ToArray().Select(async profile =>
 			{
 				await gate.WaitAsync();
 				try
@@ -132,29 +155,19 @@ public static class HealthCheckService
 
 	public static VpnProfile BestAvailable(IEnumerable<VpnProfile> profiles)
 	{
-		return (profiles ?? Enumerable.Empty<VpnProfile>())
-			.Where(p => p != null && p.LastLatency > 0 && p.ConsecutiveFailures == 0)
-			.OrderBy(p => p.AverageLatency > 0 ? p.AverageLatency : p.LastLatency)
-			.ThenByDescending(p => p.IsFavorite)
-			.FirstOrDefault();
-	}
+        string network = ProfileHealthEvidence.NetworkKey();
+        string core = ProfileHealthEvidence.CoreKey(VpnEngines.ExecutablePath(VpnEngine.SingBox));
+        return BestAvailableFor(profiles, DateTime.UtcNow, network, core);
+    }
 
-	private static void Apply(VpnProfile profile, ServerHealthResult result)
-	{
-		profile.LastCheckedUtc = result.CheckedUtc;
-		profile.LastLatency = result.LatencyMs;
-		profile.HealthStatus = result.Status;
-		profile.LastTestMessage = result.Message;
-		profile.LastLossPercent = result.PacketLossPercent;
-		if (result.Success && result.LatencyMs > 0)
-		{
-			profile.AverageLatency = profile.AverageLatency > 0 ? (profile.AverageLatency * 2 + result.LatencyMs) / 3 : result.LatencyMs;
-			profile.ConsecutiveFailures = 0;
-		}
-		else if (!result.Success)
-		{
-			profile.ConsecutiveFailures++;
-		}
+    public static VpnProfile BestAvailableFor(IEnumerable<VpnProfile> profiles, DateTime now, string network, string core)
+    {
+        // Compare measurements to the same control endpoint, never unrelated RTTs.
+        var group = (profiles ?? Enumerable.Empty<VpnProfile>())
+            .Where(p => ProfileHealthEvidence.IsCurrent(p, now, network, core))
+            .GroupBy(p => p.HealthTarget ?? "")
+            .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).FirstOrDefault();
+        return group?.OrderBy(p => p.LastLatency).ThenByDescending(p => p.IsFavorite).FirstOrDefault();
 	}
 
 	private static string FriendlySocketError(SocketError error)

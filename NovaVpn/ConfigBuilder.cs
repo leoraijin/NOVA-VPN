@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -18,17 +18,21 @@ public static class ConfigBuilder
 				"users", new object[] { Obj("username", user, "password", password) }) },
 			"outbounds", new object[] { BuildProxy(profile) },
 			"route", Obj("final", "proxy", "auto_detect_interface", true, "default_domain_resolver", "local-dns"));
+		CorporateProxy.Apply(config, profile, "proxy");
 		return new JavaScriptSerializer().Serialize(config);
 	}
 
 	public static string Build(VpnProfile profile, RoutingSettings routing)
 	{
+		if (routing?.MultiServer != null) throw new NotSupportedException("Назначения серверов требуют многосерверной сборки конфигурации.");
 		if (profile == null)
 		{
 			throw new InvalidOperationException("Сначала выберите сервер.");
 		}
 		if (profile.Protocol == "sing-box")
 		{
+            if (routing.MigratedPolicy != null) throw new NotSupportedException("Перенесённые правила требуют отдельный профиль вместо полного конфига.");
+            if (CorporateProxy.Enabled(profile)) throw new NotSupportedException("Для корпоративного прокси выберите отдельный профиль вместо полного конфига.");
             if (routing.Gaming != null) throw new NotSupportedException("Игровой режим требует обычный профиль вместо полной sing-box конфигурации.");
 			if (string.IsNullOrWhiteSpace(profile.RawJson))
 			{
@@ -39,6 +43,7 @@ public static class ConfigBuilder
 		Dictionary<string, object> dictionary = new Dictionary<string, object>();
 		dictionary["log"] = Obj("level", "info", "timestamp", true);
 		Dictionary<string, object> dictionary2 = BuildDnsServer(routing);
+        if (CorporateProxy.Enabled(profile)) dictionary2["detour"] = "proxy";
 		Dictionary<string, object> dictionary3 = Obj("type", "local", "tag", "local-dns");
 		List<object> dnsRules = new List<object>();
 		if (routing.BypassPrivateDns)
@@ -76,7 +81,7 @@ public static class ConfigBuilder
 		// Only the curated Discord/YouTube exceptions bypass per-application
 		// VPN rules; other traffic from the same browser remains in the VPN.
 		AddDomainRule(list2, routing.ZapretDirectDomains, "direct");
-		AddAdvancedRules(list2, routing.AdvancedRules);
+		list2.AddRange(BuildAdvancedRules(routing.AdvancedRules));
 		// Host/domain routing is more specific than an app-wide browser route.
 		// Keep these rules ahead of process_path/process_name so a site rule wins
 		// even when the browser itself is explicitly assigned to another route.
@@ -98,7 +103,10 @@ public static class ConfigBuilder
 		dictionary["route"] = Obj("rules", list2.ToArray(), "final", text, "auto_detect_interface", true, "default_domain_resolver", "local-dns");
 		JavaScriptSerializer javaScriptSerializer = new JavaScriptSerializer();
 		javaScriptSerializer.MaxJsonLength = int.MaxValue;
-		return PrettyJson(GamingRouting.Apply(StrictDirectRouting.Apply(javaScriptSerializer.Serialize(dictionary), routing), routing.Gaming));
+		CorporateProxy.Apply(dictionary, profile, "proxy");
+		string prepared = StrictDirectRouting.Apply(javaScriptSerializer.Serialize(dictionary), routing);
+        if (routing.MigratedPolicy != null) prepared = routing.MigratedPolicy.Apply(prepared);
+        return PrettyJson(GamingRouting.Apply(prepared, routing.Gaming));
 	}
 
 	private static Dictionary<string, object> BuildDnsServer(RoutingSettings routing)
@@ -143,10 +151,11 @@ public static class ConfigBuilder
 		return "prefer_ipv4";
 	}
 
-	public static string ExportOutbound(VpnProfile p) => new JavaScriptSerializer().Serialize(BuildProxy(p));
+	public static string ExportOutbound(VpnProfile p) => CorporateProxy.Enabled(p) ? CorporateProxy.ExportMarker() : ExportBaseOutbound(p);
+    internal static string ExportBaseOutbound(VpnProfile p) => new JavaScriptSerializer().Serialize(BuildProxy(p));
     private static Dictionary<string, object> BuildProxy(VpnProfile p)
 	{
-        if(!String.IsNullOrWhiteSpace(p.PortableOutboundJson)) { var saved=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(p.PortableOutboundJson);saved["tag"]="proxy";return saved; }
+        if(!String.IsNullOrWhiteSpace(p.EffectivePortableOutboundJson)) { var saved=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(p.EffectivePortableOutboundJson);saved["tag"]="proxy";return saved; }
 
 		Dictionary<string, object> dictionary = Obj("type", p.Protocol, "tag", "proxy", "server", p.Server, "server_port", p.Port, "domain_resolver", "local-dns");
 		switch ((p.Protocol ?? "").ToLowerInvariant())
@@ -241,13 +250,19 @@ public static class ConfigBuilder
 		return dictionary;
 	}
 
+	internal static Dictionary<string, object> ProcessNameSelector(IEnumerable<string> values)
+	{
+		string[] names = Clean(values);
+		return names.Length == 0 ? null : Obj("process_name", names);
+	}
+
 	private static void AddProcessRule(List<object> rules, IEnumerable<string> values, string outbound)
 	{
-		string[] array = Clean(values);
-		if (array.Length != 0)
-		{
-			rules.Add(Obj("process_name", array, "action", "route", "outbound", outbound));
-		}
+		var selector = ProcessNameSelector(values);
+		if (selector == null) return;
+		selector["action"] = "route";
+		selector["outbound"] = outbound;
+		rules.Add(selector);
 	}
 
 	private static void AddProcessPathRule(List<object> rules, IEnumerable<string> values, string outbound)
@@ -259,7 +274,7 @@ public static class ConfigBuilder
 		}
 	}
 
-	private static void AddAdvancedRules(List<object> rules, IEnumerable<string> values)
+	internal static IEnumerable<Dictionary<string, object>> BuildAdvancedRules(IEnumerable<string> values)
 	{
 		foreach (string line in Clean(values))
 		{
@@ -298,7 +313,7 @@ public static class ConfigBuilder
 			if (ranges.Count > 0) rule["port_range"] = ranges.ToArray();
 			rule["action"] = route == "block" ? "reject" : "route";
 			if (route != "block") rule["outbound"] = route;
-			rules.Add(rule);
+			yield return rule;
 		}
 	}
 

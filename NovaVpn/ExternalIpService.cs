@@ -6,6 +6,13 @@ namespace NovaVpn;
 
 public static class ExternalIpService
 {
+    internal static async Task RefreshAsync(Func<Task<string>> query, Func<bool> isCurrent, Func<string, Task> publish)
+    {
+        if (!isCurrent()) return;
+        string value = await query();
+        if (!isCurrent()) return;
+        await publish(value);
+    }
 	public static async Task<string> GetAsync()
 	{
 		try

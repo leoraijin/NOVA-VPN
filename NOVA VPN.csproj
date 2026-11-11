@@ -42,6 +42,7 @@
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.Security" />
+    <Reference Include="System.ServiceProcess" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
@@ -49,11 +50,105 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="[18.1.0]" />
+    <None Include="libs\LICENSE-YamlDotNet.txt"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><TargetPath>LICENSE-YamlDotNet.txt</TargetPath></None>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="NovaVpn\ApplicationBandwidth.cs" />
+    <Compile Include="NovaVpn\ApplicationBandwidthPolicy.cs" />
+    <Compile Include="NovaVpn\ApplicationBandwidthPolicyEdit.cs" />
+    <Compile Include="NovaVpn\ApplicationBandwidthWindow.cs" />
+    <Compile Include="NovaVpn\ApplicationBandwidthWorkloads.cs" />
+    <Compile Include="NovaVpn\ApplicationBandwidthSocksCore.cs" />
+    <Compile Include="NovaVpn\ApplicationBandwidthSocksListener.cs" />
+    <Compile Include="NovaVpn\ApplicationBandwidthTcpRelays.cs" />
+    <Compile Include="NovaVpn\LocalTcpPeerObservation.cs" />
+    <Compile Include="NovaVpn\VpsSshAgentRunner.cs" />
+    <Compile Include="NovaVpn\VpsOperationRecord.cs" />
+    <Compile Include="NovaVpn\VpsManagementWindow.cs" />
+    <Compile Include="NovaVpn\MainWindow.Vps.cs" />
+    <Compile Include="NovaVpn\VpsOperationStore.cs" />
+    <Compile Include="NovaVpn\VpsOperationCoordinator.cs" />
+    <Compile Include="NovaVpn\VpsProfilePreparation.cs" />
+    <Compile Include="NovaVpn\VpsServerStatus.cs" />
+    <Compile Include="NovaVpn\VpsAgentFrame.cs" />
+    <Compile Include="NovaVpn\VpsDeploymentDraft.cs" />
+    <Compile Include="NovaVpn\VpsSshPreflight.cs" />
+    <Compile Include="NovaVpn\VpsSshPreflightRunner.cs" />
     <Compile Include="NovaVpn\AppState.cs" />
     <Compile Include="NovaVpn\SubscriptionIdentity.cs" />
+    <Compile Include="NovaVpn\SubscriptionRecord.cs" />
+    <Compile Include="NovaVpn\MainWindow.Subscriptions.cs" />
+    <Compile Include="NovaVpn\ProfileHealthEvidence.cs" />
+    <Compile Include="NovaVpn\ConnectionRecoveryPolicy.cs" />
+    <Compile Include="NovaVpn\CompiledRoutingPlan.cs" />
+    <Compile Include="NovaVpn\MultiServerPolicy.cs" />
+    <Compile Include="NovaVpn\MultiServerSettings.cs" />
+    <Compile Include="NovaVpn\MultiServerConfigBuilder.cs" />
+    <Compile Include="NovaVpn\MultiServerStartupSelection.cs" />
+    <Compile Include="NovaVpn\MultiServerRoutingWindow.cs" />
+    <Compile Include="NovaVpn\MultiServerRoutingCommitPlan.cs" />
+    <Compile Include="NovaVpn\MultiServerRoutingHistory.cs" />
+    <Compile Include="NovaVpn\RoutingApplyTransaction.cs" />
+    <Compile Include="NovaVpn\ExternalProfileImport.cs" />
+    <Compile Include="NovaVpn\ForeignRoutingPreview.cs" />
+    <Compile Include="NovaVpn\ForeignRoutingMigrationPlan.cs" />
+    <Compile Include="NovaVpn\ForeignRoutingPolicy.cs" />
+    <Compile Include="NovaVpn\RoutingMigrationService.cs" />
+    <Compile Include="NovaVpn\ForeignRoutingWindow.cs" />
+    <Compile Include="NovaVpn\ImportPreviewWindow.cs" />
+    <Compile Include="NovaVpn\QrImportService.cs" />
+    <Compile Include="NovaVpn\QrScreenCapture.cs" />
+    <Compile Include="NovaVpn\MainWindow.Import.cs" />
+    <Compile Include="NovaVpn\ConfiguredFallbackService.cs" />
+    <Compile Include="NovaVpn\FallbackProfilesWindow.cs" />
+    <Compile Include="NovaVpn\MainWindow.Fallback.cs" />
+    <Compile Include="NovaVpn\ProfileCollection.cs" />
+    <Compile Include="NovaVpn\CollectionSelectionPlan.cs" />
+    <Compile Include="NovaVpn\ProfileCollectionWindow.cs" />
+    <Compile Include="NovaVpn\MainWindow.Collections.cs" />
+    <Compile Include="NovaVpn\LocalProxyEndpoint.cs" />
+    <Compile Include="NovaVpn\CorporateProxy.cs" />
+    <Compile Include="NovaVpn\CorporatePacResolver.cs" />
+    <Compile Include="NovaVpn\CorporatePacDialer.cs" />
+    <Compile Include="NovaVpn\CorporatePacBridge.cs" />
+    <Compile Include="NovaVpn\CorporatePacHostSession.cs" />
+    <Compile Include="NovaVpn\CorporatePacPlan.cs" />
+    <Compile Include="NovaVpn\CorporatePacWindow.cs" />
+    <Compile Include="NovaVpn\CorporateProxyWindow.cs" />
+    <Compile Include="NovaVpn\MainWindow.CorporateProxy.cs" />
+    <Compile Include="NovaVpn\PrivateRuntimeFiles.cs" />
+    <Compile Include="NovaVpn\LocalProxyManager.cs" />
+    <Compile Include="NovaVpn\WorkloadReconciliationQueue.cs" />
+    <Compile Include="NovaVpn\LocalProxyEditorWindow.cs" />
+    <Compile Include="NovaVpn\MainWindow.Workloads.cs" />
+    <Compile Include="NovaVpn\ServiceMatrixRunner.cs" />
+    <Compile Include="NovaVpn\ServiceMatrixWindow.cs" />
+    <Compile Include="NovaVpn\CoreBenchmarkRunner.cs" />
+    <Compile Include="NovaVpn\CoreBenchmarkWindow.cs" />
+    <Compile Include="NovaVpn\TrafficGuardPolicy.cs" />
+    <Compile Include="NovaVpn\TrafficGuardNative.cs" />
+    <Compile Include="NovaVpn\TrafficGuardServiceIdentity.cs" />
+    <Compile Include="NovaVpn\TrafficGuardRecovery.cs" />
+    <Compile Include="NovaVpn\TrafficGuardMachineJournalSecurity.cs" />
+    <Compile Include="NovaVpn\TrafficGuardReadback.cs" />
+    <Compile Include="NovaVpn\TrafficGuardServiceRuntime.cs" />
+    <Compile Include="NovaVpn\GuardOwnedProcess.cs" />
+    <Compile Include="NovaVpn\GuardOwnedCoreSession.cs" />
+    <Compile Include="NovaVpn\GuardServiceProxyConfiguration.cs" />
+    <Compile Include="NovaVpn\GuardTunnelIntent.cs" />
+    <Compile Include="NovaVpn\TrafficGuardPipe.cs" />
+    <Compile Include="NovaVpn\TrafficGuardOwnerPolicy.cs" />
+    <Compile Include="NovaVpn\TrafficGuardRegistration.cs" />
+    <Compile Include="NovaVpn\TrafficGuardCommands.cs" />
+    <Compile Include="NovaVpn\TrafficGuardControlClient.cs" />
+    <Compile Include="NovaVpn\MainWindow.Recovery.cs" />
     <Compile Include="NovaVpn\IdentityWindow.cs" />
     <Compile Include="NovaVpn\IdentityQr.cs" />
     <Compile Include="NovaVpn\FullTransfer.cs" />
+    <Compile Include="NovaVpn\FullStateRestorePlan.cs" />
+    <Compile Include="NovaVpn\SubscriptionCommitPlan.cs" />
+    <Compile Include="NovaVpn\SubscriptionQuotaNotifier.cs" />
 	<Compile Include="NovaVpn\ApplicationCatalog.cs" />
 	<Compile Include="NovaVpn\ApplicationRoutingService.cs" />
     <Compile Include="NovaVpn\AppearanceWindow.cs" />
@@ -75,12 +170,20 @@
     <Compile Include="NovaVpn\GameConnectionMonitor.cs" />
     <Compile Include="NovaVpn\GamingSessionManager.cs" />
     <Compile Include="NovaVpn\OwnedCoreProcess.cs" />
+    <Compile Include="NovaVpn\CoreResources.cs" />
+    <Compile Include="NovaVpn\CoreResourceWindow.cs" />
     <Compile Include="NovaVpn\GamingProbeService.cs" />
     <Compile Include="NovaVpn\GamingPage.cs" />
 	<Compile Include="NovaVpn\ServerMapHealthService.cs" />
 	<Compile Include="NovaVpn\InteractiveServerMap.cs" />
 	<Compile Include="NovaVpn\ServerMapViewport.cs" />
 	<Compile Include="NovaVpn\WindowsStartupService.cs" />
+    <Compile Include="NovaVpn\WindowsInstallationLease.cs" />
+    <Compile Include="NovaVpn\WindowsStartupTaskPolicy.cs" />
+    <Compile Include="NovaVpn\WindowsStartupTaskTransaction.cs" />
+    <Compile Include="NovaVpn\WindowsStartupTaskRecovery.cs" />
+    <Compile Include="NovaVpn\WindowsStartupTaskJournal.cs" />
+    <Compile Include="NovaVpn\WindowsStartupSchedulerStore.cs" />
 	<Compile Include="NovaVpn\StartupProfileSelector.cs" />
     <Compile Include="NovaVpn\StrictDirectRouting.cs" />
     <Compile Include="NovaVpn\ConnectionHistoryItem.cs" />
@@ -88,7 +191,21 @@
     <Compile Include="NovaVpn\VpnEngine.cs" />
     <Compile Include="NovaVpn\RealityConfigBuilder.cs" />
     <Compile Include="NovaVpn\CoreManager.cs" />
+    <Compile Include="NovaVpn\ActiveCoreProbe.cs" />
+    <Compile Include="NovaVpn\ActiveCoreProbe.MultiExit.cs" />
+    <Compile Include="NovaVpn\MultiExitHealth.cs" />
+    <Compile Include="NovaVpn\CoreManager.MultiExitHealth.cs" />
     <Compile Include="NovaVpn\TunnelRoutingReadiness.cs" />
+    <Compile Include="NovaVpn\TunnelNetworkPreflight.cs" />
+    <Compile Include="NovaVpn\GatewayAddressPlan.cs" />
+    <Compile Include="NovaVpn\GatewayDnsTcpClient.cs" />
+    <Compile Include="NovaVpn\GatewayDnsTcpServer.cs" />
+    <Compile Include="NovaVpn\GatewayDnsUdpServer.cs" />
+    <Compile Include="NovaVpn\GatewayDnsService.cs" />
+    <Compile Include="NovaVpn\GatewayCoreLifetime.cs" />
+    <Compile Include="NovaVpn\GatewayUlaIdentity.cs" />
+    <Compile Include="NovaVpn\WindowsRouteInventory.cs" />
+    <Compile Include="NovaVpn\WindowsEndpointRoute.cs" />
     <Compile Include="NovaVpn\CoreStatus.cs" />
     <Compile Include="NovaVpn\DiagnosticItem.cs" />
     <Compile Include="NovaVpn\DiagnosticReport.cs" />
@@ -110,6 +227,8 @@
     <Compile Include="NovaVpn\NetworkSpeedResult.cs" />
     <Compile Include="NovaVpn\NetworkSpeedService.cs" />
     <Compile Include="NovaVpn\Program.cs" />
+    <Compile Include="NovaVpn\WindowsUserInstance.cs" />
+    <Compile Include="NovaVpn\MachineTunnelLease.cs" />
     <Compile Include="NovaVpn\PortableConfigService.cs" />
 	<Compile Include="NovaVpn\ProfileSwitchService.cs" />
 	<Compile Include="NovaVpn\RawConfigRoutingAdapter.cs" />
@@ -124,6 +243,7 @@
     <Compile Include="NovaVpn\ServerGroupingService.cs" />
     <Compile Include="NovaVpn\ServerRegionMapService.cs" />
     <Compile Include="NovaVpn\StateStore.cs" />
+    <Compile Include="NovaVpn\EncryptedStateFiles.cs" />
     <Compile Include="NovaVpn\SubscriptionManager.cs" />
     <Compile Include="NovaVpn\SubscriptionUpdateResult.cs" />
     <Compile Include="NovaVpn\TextPromptWindow.cs" />
@@ -151,12 +271,28 @@
 	<EmbeddedResource Include="NovaVpn\Assets\ne_50m_populated_places.geojson">
 	  <LogicalName>NovaVpn.Assets.ne_50m_populated_places.geojson</LogicalName>
 	</EmbeddedResource>
+    <EmbeddedResource Include="NovaVpn\Assets\vps-managed-agent.py"><LogicalName>NovaVpn.Assets.vps-managed-agent.py</LogicalName></EmbeddedResource>
     <None Include="app.manifest" />
     <None Include="app-test.manifest" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="BuildOwnedCoreHost" AfterTargets="Build">
     <Csc Sources="packaging\CoreHostEntry.cs" References="$(TargetPath)" OutputAssembly="$(TargetDir)NOVA Core Host.exe" TargetType="Exe" ToolPath="$(CscToolPath)" />
+  </Target>
+  <Target Name="BuildTrafficGuardService" AfterTargets="Build">
+    <Csc Sources="packaging\TrafficGuardServiceEntry.cs" References="@(ReferencePath);$(TargetPath)" OutputAssembly="$(TargetDir)NOVA Traffic Guard.exe" TargetType="Exe" LangVersion="latest" ToolPath="$(CscToolPath)" />
+  </Target>
+  <ItemGroup>
+    <GuardRecoverySource Include="NovaVpn\TrafficGuardPolicy.cs;NovaVpn\TrafficGuardNative.cs;NovaVpn\TrafficGuardReadback.cs;NovaVpn\TrafficGuardRecovery.cs;NovaVpn\TrafficGuardMachineJournalSecurity.cs;NovaVpn\TrafficGuardServiceIdentity.cs;NovaVpn\TrafficGuardOwnerPolicy.cs;NovaVpn\PrivateRuntimeFiles.cs;packaging\GuardRecoveryEntry.cs" />
+  </ItemGroup>
+  <Target Name="BuildGuardRecovery" AfterTargets="Build">
+    <Csc Sources="@(GuardRecoverySource)" References="@(ReferencePath)" OutputAssembly="$(TargetDir)NOVA Guard Recovery.exe" Win32Manifest="$(ApplicationManifest)" TargetType="Exe" LangVersion="latest" ToolPath="$(CscToolPath)" />
+  </Target>
+  <ItemGroup>
+    <GuardSetupSource Include="NovaVpn\TrafficGuardPolicy.cs;NovaVpn\TrafficGuardNative.cs;NovaVpn\TrafficGuardReadback.cs;NovaVpn\TrafficGuardRecovery.cs;NovaVpn\TrafficGuardMachineJournalSecurity.cs;NovaVpn\TrafficGuardServiceIdentity.cs;NovaVpn\TrafficGuardOwnerPolicy.cs;NovaVpn\PrivateRuntimeFiles.cs;NovaVpn\TrafficGuardRegistration.cs;packaging\GuardSetupEntry.cs" />
+  </ItemGroup>
+  <Target Name="BuildGuardSetup" AfterTargets="Build">
+    <Csc Sources="@(GuardSetupSource)" References="@(ReferencePath)" OutputAssembly="$(TargetDir)NOVA Guard Setup.exe" Win32Manifest="$(ApplicationManifest)" TargetType="Exe" LangVersion="latest" ToolPath="$(CscToolPath)" />
   </Target>
 <ItemGroup><Reference Include="zxing"><HintPath>libs\zxing.dll</HintPath><Private>True</Private></Reference></ItemGroup>
 </Project>

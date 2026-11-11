@@ -6,6 +6,8 @@ namespace NovaVpn;
 [DataContract]
 public sealed class RoutingSettings
 {
+    [DataMember] public ForeignRoutingPolicy MigratedPolicy;
+    [DataMember] public MultiServerSettings MultiServer;
     // Session-only overlay. Never persisted into personal routing settings.
     public GamingRoute Gaming;
 	[DataMember]

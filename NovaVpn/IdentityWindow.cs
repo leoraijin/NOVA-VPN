@@ -11,6 +11,7 @@ public sealed class IdentityWindow : Window
 {
     public AppState FullRestore { get; private set; }
     public IdentityState Result { get; private set; }
+    public string ImportCode { set { code.Text = value ?? ""; } }
     readonly ComboBox profiles = new ComboBox { MinHeight=32 };
     readonly TextBox name=new TextBox(), hwid=new TextBox(), ua=new TextBox(), header=new TextBox(), extras=new TextBox { AcceptsReturn=true,MinHeight=80 }, urls=new TextBox { AcceptsReturn=true,MinHeight=60 }, code=new TextBox { AcceptsReturn=true,MinHeight=80,MaxHeight=140,TextWrapping=TextWrapping.Wrap,VerticalScrollBarVisibility=ScrollBarVisibility.Auto };
     readonly PasswordBox password=new PasswordBox { MinHeight=30 };

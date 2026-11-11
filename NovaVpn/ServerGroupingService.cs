@@ -16,6 +16,8 @@ public static class ServerGroupingService
 
 	public static string CountryLabel(VpnProfile profile)
 	{
+        string declared = ProfileCollectionService.Country(profile?.DeclaredCountryCode);
+        if (declared != "") return Countries.TryGetValue(declared, out string label) ? label : declared;
 		string name = profile?.Name ?? "";
 		Match match = Regex.Match(name, @"(?:^|\s|[-_\[])\b([A-Za-z]{2})\b");
 		if (match.Success && Countries.TryGetValue(match.Groups[1].Value, out string country))
@@ -27,6 +29,8 @@ public static class ServerGroupingService
 
 	public static string CountryCode(VpnProfile profile)
 	{
+        string declared = ProfileCollectionService.Country(profile?.DeclaredCountryCode);
+        if (declared != "") return declared;
 		string name = profile?.Name ?? "";
 		Match match = Regex.Match(name, @"(?:^|\s|[-_\[])\b([A-Za-z]{2})\b");
 		return match.Success && Countries.ContainsKey(match.Groups[1].Value) ? match.Groups[1].Value.ToUpperInvariant().Replace("UK", "GB") : "NV";

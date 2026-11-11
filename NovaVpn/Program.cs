@@ -12,7 +12,7 @@ namespace NovaVpn;
 
 public static class Program
 {
-	private static Mutex mutex;
+	private static WindowsUserInstance instance;
 
 	[STAThread]
 	public static void Main(string[] args)
@@ -49,13 +49,26 @@ public static class Program
 			if (string.Equals(args[i], "--text-scale", StringComparison.OrdinalIgnoreCase)) double.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out snapshotTextScale);
 			if (string.Equals(args[i], "--high-contrast", StringComparison.OrdinalIgnoreCase)) bool.TryParse(args[i + 1], out snapshotHighContrast);
 		}
-		mutex = new Mutex(initiallyOwned: true, (text == null) ? "NOVA-VPN-Desktop-Instance" : "NOVA-VPN-Snapshot-Instance", out var createdNew);
-		if (!createdNew)
+		try { instance = WindowsUserInstance.TryAcquire(text == null ? "Desktop" : "Snapshot"); }
+        catch (Exception error) when (error is UnauthorizedAccessException || error is System.Security.SecurityException || error is WaitHandleCannotBeOpenedException || error is LegacyInstanceDetectedException)
+        {
+            if (!windowsStartup) MessageBox.Show("Не удалось проверить экземпляр NOVA для вашей учётной записи Windows. " + error.Message, "NOVA VPN", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+		if (instance == null)
 		{
 			if (windowsStartup) return;
-			MessageBox.Show("NOVA уже запущена.", "NOVA VPN", MessageBoxButton.OK, MessageBoxImage.Asterisk);
+			MessageBox.Show("NOVA уже запущена для вашей учётной записи Windows, возможно в другом сеансе.", "NOVA VPN", MessageBoxButton.OK, MessageBoxImage.Asterisk);
 			return;
 		}
+        FileStream installation = null;
+		try {
+        try { if (text == null) installation = WindowsInstallationLease.AcquireClient(Path.GetDirectoryName(typeof(Program).Assembly.Location)); }
+        catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is System.Security.SecurityException || error is ArgumentException)
+        {
+            if (!windowsStartup) MessageBox.Show("Не удалось открыть установку NOVA. Завершите обновление или повторите установку. " + error.Message, "NOVA VPN", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
 		ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
 		Application application = new Application();
 		application.ShutdownMode = ShutdownMode.OnMainWindowClose;
@@ -120,6 +133,7 @@ public static class Program
 			application.Dispatcher.BeginInvoke((Action)(async () => await window.RunWindowsBackgroundStartupAsync()));
 			application.Run();
 		} else application.Run(window);
-		GC.KeepAlive(mutex);
+		GC.KeepAlive(instance);
+        } finally { try { installation?.Dispose(); } finally { instance.Dispose(); instance = null; } }
 	}
 }

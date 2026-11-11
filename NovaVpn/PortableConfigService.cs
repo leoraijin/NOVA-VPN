@@ -34,12 +34,22 @@ public static class PortableConfigService
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Не указан путь экспорта.", nameof(path));
 
         StateStore.NormalizeForSerialization(state);
+        if (state.Routing?.MigratedPolicy?.HasProcessPaths() == true) throw new InvalidOperationException("Перенесённая политика содержит пути приложений. Для её сохранения используйте полный перенос вместо экспорта общих настроек.");
         AppState safeState = CloneState(state);
+        safeState.RoutingMigrationBackup = null;
+        safeState.MultiServerRoutingHistory = null;
+        if (safeState.Routing?.MultiServer != null) safeState.Routing.MultiServer.RequiresRebinding = true;
         ZapretRoutingTransitionService.SetActive(safeState, false);
         if (safeState.Zapret != null) safeState.Zapret.Mode = "VPN";
         safeState.SubscriptionIdentities = new IdentityState();
+        safeState.Subscriptions = new System.Collections.Generic.List<SubscriptionRecord>();
         safeState.Profiles = new System.Collections.Generic.List<VpnProfile>();
         safeState.SelectedProfileId = null;
+        safeState.FallbackRootProfileId = null;
+        safeState.ActiveProfileCollectionId = null;
+        safeState.ProfileCollections = new System.Collections.Generic.List<ProfileCollection>();
+        safeState.LocalProxies = new System.Collections.Generic.List<LocalProxyEndpoint>();
+        safeState.ApplicationLimitsEnabled=false;safeState.ApplicationBandwidthRules=new System.Collections.Generic.List<ApplicationBandwidthRule>();
         safeState.ConnectionHistory.Clear();
         safeState.AutoConnect = false;
         safeState.StartWithWindows = false;
@@ -71,10 +81,17 @@ public static class PortableConfigService
     public static AppState ImportSettingsOnly(string path)
     {
         AppState state = ReadPackage(path, SettingsOnlyFormat);
+        if (state.Routing?.MigratedPolicy?.HasProcessPaths() == true || state.RoutingMigrationBackup != null || state.MultiServerRoutingHistory != null) throw new InvalidDataException("Общие настройки не должны содержать машинные пути или резервную маршрутизацию.");
         if (state.Profiles != null && state.Profiles.Count != 0)
             throw new InvalidDataException("Файл настроек не должен содержать VPN-профили.");
         state.Profiles = new System.Collections.Generic.List<VpnProfile>();
+        state.Subscriptions = new System.Collections.Generic.List<SubscriptionRecord>();
         state.SelectedProfileId = null;
+        state.FallbackRootProfileId = null;
+        state.ActiveProfileCollectionId = null;
+        state.ProfileCollections = new System.Collections.Generic.List<ProfileCollection>();
+        state.LocalProxies = new System.Collections.Generic.List<LocalProxyEndpoint>();
+        state.ApplicationLimitsEnabled=false;state.ApplicationBandwidthRules=new System.Collections.Generic.List<ApplicationBandwidthRule>();
         ZapretRoutingTransitionService.SetActive(state, false);
         if (state.Zapret != null) state.Zapret.Mode = "VPN";
         state.ConnectionHistory = new System.Collections.Generic.List<ConnectionHistoryItem>();
@@ -87,9 +104,14 @@ public static class PortableConfigService
     public static void ApplySettingsOnly(AppState target, AppState imported)
     {
         if (target == null || imported == null) throw new ArgumentNullException();
-        if (target.Zapret?.RoutingChangesApplied == true)
+        if (ZapretRoutingTransitionService.HasActiveRouting(target))
             throw new InvalidOperationException("Сначала выключите Zapret перед изменением маршрутов.");
-        target.Routing = RoutingOverlayService.Clone(imported.Routing ?? new RoutingSettings());
+        if (imported.Routing?.MigratedPolicy?.HasProcessPaths() == true) throw new InvalidDataException("Общие настройки содержат машинные пути маршрутизации.");
+        var routes = RoutingOverlayService.Clone(imported.Routing ?? new RoutingSettings());
+        if (routes.MultiServer != null) routes.MultiServer.RequiresRebinding = true;
+        target.Routing = routes;
+        target.RoutingMigrationBackup = null;
+        target.MultiServerRoutingHistory = null;
         target.Visual = (imported.Visual ?? new VisualPreferences()).Clone();
         target.Visual.MigrateWindowsDesign();
     }

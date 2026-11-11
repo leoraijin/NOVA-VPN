@@ -7,11 +7,17 @@ namespace NovaVpn;
 [DataContract]
 public sealed class AppState
 {
+    [DataMember] public RoutingSettings RoutingMigrationBackup;
+    [DataMember] public MultiServerRoutingHistory MultiServerRoutingHistory;
     [DataMember] public List<GamingHistoryEntry> GamingHistory = new List<GamingHistoryEntry>();
     [DataMember] public List<InstalledGame> ManualGames = new List<InstalledGame>();
     [DataMember] public List<GamePreferences> GamePreferences = new List<GamePreferences>();
 	[DataMember]
-	public int SchemaVersion = 11;
+	public int SchemaVersion = 17;
+    [DataMember] public bool ApplicationLimitsEnabled;
+    [DataMember] public List<ApplicationBandwidthRule> ApplicationBandwidthRules = new List<ApplicationBandwidthRule>();
+    [DataMember] public bool CoreEcoMode;
+    [DataMember] public List<SubscriptionRecord> Subscriptions = new List<SubscriptionRecord>();
     [DataMember] public IdentityState SubscriptionIdentities = new IdentityState();
 
     [DataMember] public int EngineSelection;
@@ -21,6 +27,10 @@ public sealed class AppState
 
 	[DataMember]
 	public string SelectedProfileId;
+    [DataMember] public string FallbackRootProfileId;
+    [DataMember] public List<ProfileCollection> ProfileCollections = new List<ProfileCollection>();
+    [DataMember] public string ActiveProfileCollectionId;
+    [DataMember] public List<LocalProxyEndpoint> LocalProxies = new List<LocalProxyEndpoint>();
 
 	[DataMember]
 	public RoutingSettings Routing = new RoutingSettings();
@@ -53,6 +63,8 @@ public sealed class AppState
 	public bool AutoSelectBestServer = true;
 
 	[DataMember]
+	// Legacy strict-TUN option. Independent WFP protection is owned by the service,
+	// and must never be inferred from this persisted UI preference.
 	public bool KillSwitch;
 
 	[DataMember]

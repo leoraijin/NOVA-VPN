@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -48,77 +48,13 @@ public static class RoutingInspector
 		return value.Trim('[', ']').TrimEnd('.').ToLowerInvariant();
 	}
 
-	public static RoutingDecision Explain(RoutingSettings settings, string destination, string process)
-	{
-		if (settings == null)
-		{
-			throw new ArgumentNullException(nameof(settings));
-		}
-		destination = NormalizeHost(destination);
-		process = (process ?? "").Trim();
-		if (settings.BypassLan && IsPrivateOrLocal(destination))
-		{
-			return Decision("direct", "Локальный или частный адрес: правило локальной сети имеет наивысший приоритет.");
-		}
-		string matched;
-		if (Matches(settings.BlockDomains, destination, out matched))
-		{
-			return Decision("block", "Совпало правило блокировки домена: " + matched);
-		}
-		if (Matches(settings.ZapretDirectDomains, destination, out matched))
-		{
-			return Decision("direct", "Домен Discord/YouTube направлен напрямую к Zapret: " + matched);
-		}
-		bool globalMode = string.Equals(settings.Mode, "Global", StringComparison.OrdinalIgnoreCase);
-		if (StrictDirectRouting.Matches(settings.DirectDomains, destination, out matched))
-			return Decision("direct", "Строгий прямой маршрут сайта и поддоменов, включая DNS, без возврата на VPN: " + matched);
-		if (globalMode && Matches(settings.DirectDomains, destination, out matched))
-		{
-			return Decision("direct", "Совпало прямое правило домена в глобальном режиме: " + matched);
-		}
-		if (globalMode && Matches(settings.ProxyDomains, destination, out matched))
-		{
-			return Decision("proxy", "Совпало VPN-правило домена в глобальном режиме: " + matched);
-		}
-		if (!globalMode)
-		{
-			DomainMatch direct = FindBestMatch(settings.DirectDomains, destination, "direct");
-			DomainMatch proxy = FindBestMatch(settings.ProxyDomains, destination, "proxy");
-			if (direct != null || proxy != null)
-			{
-				DomainMatch selected = direct == null ? proxy : proxy == null ? direct : Choose(direct, proxy);
-				return Decision(selected.Route, selected.Route == "direct" ? "Совпало прямое правило домена: " + selected.Rule : "Совпало VPN-правило домена: " + selected.Rule);
-			}
-		}
-		if (MatchesProcessPath(settings.DirectProcessPaths, process, out matched))
-		{
-			return Decision("direct", "Совпало правило пути приложения напрямую: " + matched);
-		}
-		if (MatchesProcessPath(settings.ProxyProcessPaths, process, out matched))
-		{
-			return Decision("proxy", "Совпало правило пути приложения через VPN: " + matched);
-		}
-		if (MatchesProcessName(settings.DirectProcesses, process, out matched))
-		{
-			return Decision("direct", "Совпало правило приложения напрямую: " + matched);
-		}
-		if (MatchesProcessName(settings.ProxyProcesses, process, out matched))
-		{
-			return Decision("proxy", "Совпало правило приложения через VPN: " + matched);
-		}
-		if (string.Equals(settings.Mode, "Direct", StringComparison.OrdinalIgnoreCase))
-		{
-			return Decision("direct", "Режим «Только выбранные через VPN»: правило не найдено.");
-		}
-		if (string.Equals(settings.Mode, "Global", StringComparison.OrdinalIgnoreCase))
-		{
-			return Decision("proxy", "Режим «Весь трафик».");
-		}
-		string route = string.Equals(settings.DefaultRoute, "Direct", StringComparison.OrdinalIgnoreCase) ? "direct" : "proxy";
-		return Decision(route, "Использован маршрут по умолчанию режима «По правилам».");
-	}
+	public static RoutingDecision Explain(RoutingSettings settings, string destination, string process) =>
+        ExplainConnection(settings, destination, process, null, null);
 
-	public static List<string> Validate(RoutingSettings settings)
+    public static RoutingDecision ExplainConnection(RoutingSettings settings, string destination, string process, string network, int? port) =>
+        CompiledRoutingPlan.Create(settings).Explain(destination, process, network, port);
+
+    public static List<string> Validate(RoutingSettings settings)
 	{
 		List<string> warnings = new List<string>();
 		if (settings == null)
@@ -126,6 +62,12 @@ public static class RoutingInspector
 			warnings.Add("Настройки маршрутизации отсутствуют.");
 			return warnings;
 		}
+        if (settings.MigratedPolicy != null)
+        {
+            try { settings.MigratedPolicy.Validate(); }
+            catch (System.IO.InvalidDataException) { warnings.Add("Перенесённая политика повреждена или не поддерживается. Восстановите предыдущие правила перед подключением."); }
+            return warnings;
+        }
 		HashSet<string> direct = new HashSet<string>(Clean(settings.DirectDomains), StringComparer.OrdinalIgnoreCase);
 		HashSet<string> proxy = new HashSet<string>(Clean(settings.ProxyDomains), StringComparer.OrdinalIgnoreCase);
 		HashSet<string> blocked = new HashSet<string>(Clean(settings.BlockDomains), StringComparer.OrdinalIgnoreCase);

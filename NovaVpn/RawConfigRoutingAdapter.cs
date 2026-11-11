@@ -19,18 +19,19 @@ public static class RawConfigRoutingAdapter
 		if (!Objects(config, "inbounds").Any(item => Value(item, "type") == "tun"))
 			throw new InvalidOperationException("Маршрутизация приложений в импортированном JSON требует входящего интерфейса TUN.");
 		List<Dictionary<string, object>> outbounds = Objects(config, "outbounds").ToList();
-		if (outbounds.Count == 0) throw new InvalidOperationException("В импортированном JSON не найдены исходящие соединения.");
 		string directTag = outbounds.Where(item => Value(item, "type") == "direct").Select(item => Value(item, "tag")).FirstOrDefault(tag => tag.Length > 0);
 		Dictionary<string, object> route = config.TryGetValue("route", out object routeValue) ? routeValue as Dictionary<string, object> : null;
 		if (route == null) { route = new Dictionary<string, object>(); config["route"] = route; }
 		string final = Value(route, "final");
-		string proxyTag = outbounds.Any(item => Value(item, "tag") == final && IsProxyType(Value(item, "type"))) ? final
+		bool explicitEndpoint = final.Length > 0 && Objects(config, "endpoints").Any(item => Value(item, "tag") == final && Value(item, "type") == "tailscale");
+		if (outbounds.Count == 0 && !explicitEndpoint) throw new InvalidOperationException("В импортированном JSON не найдены исходящие соединения.");
+		string proxyTag = explicitEndpoint || outbounds.Any(item => Value(item, "tag") == final && IsProxyType(Value(item, "type"))) ? final
 			: outbounds.Where(item => IsProxyType(Value(item, "type"))).Select(item => Value(item, "tag")).FirstOrDefault(tag => tag.Length > 0);
 		if (proxyTag == null && HasProxyRules(routing)) throw new InvalidOperationException("В импортированном JSON не найден VPN-выход для выбранных приложений.");
 		if (directTag == null && HasDirectRules(routing))
 		{
 			directTag = "nova-direct";
-			if (outbounds.Any(item => Value(item, "tag") == directTag)) throw new InvalidOperationException("Тег nova-direct уже занят в импортированном JSON.");
+			if (outbounds.Concat(Objects(config, "endpoints")).Any(item => Value(item, "tag") == directTag)) throw new InvalidOperationException("Тег nova-direct уже занят в импортированном JSON.");
 			outbounds.Add(new Dictionary<string, object> { ["type"] = "direct", ["tag"] = directTag });
 			config["outbounds"] = outbounds.ToArray();
 		}

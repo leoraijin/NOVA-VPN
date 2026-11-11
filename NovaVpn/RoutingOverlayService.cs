@@ -26,6 +26,8 @@ public static class RoutingOverlayService
 		return new RoutingSettings
 		{
             Gaming = source.Gaming,
+            MultiServer = source.MultiServer?.Copy(),
+            MigratedPolicy = source.MigratedPolicy?.Copy(),
 			Mode = source.Mode,
 			DefaultRoute = source.DefaultRoute,
 			BypassLan = source.BypassLan,

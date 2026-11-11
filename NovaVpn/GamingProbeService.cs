@@ -88,7 +88,7 @@ internal sealed class GamingProbeChannel : IDisposable
     private readonly IPEndPoint target;
     private readonly bool a2s;
     private Process process;
-    private string configFile;
+    private string configFile, pacDescriptor;
     private int port;
     private string user, password;
     public readonly GamingProbeResult Result;
@@ -104,12 +104,13 @@ internal sealed class GamingProbeChannel : IDisposable
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         try { port = ((IPEndPoint)listener.LocalEndpoint).Port; } finally { listener.Stop(); }
         user = Guid.NewGuid().ToString("N"); password = Guid.NewGuid().ToString("N");
-        Directory.CreateDirectory(runtime);
-        configFile = Path.Combine(runtime, "gaming-" + Guid.NewGuid().ToString("N") + ".json");
-        File.WriteAllText(configFile, ConfigBuilder.BuildProbe(profile, port, user, password), new UTF8Encoding(false));
+        string prepared = ConfigBuilder.BuildProbe(profile, port, user, password);
+        var pacPlan = CorporatePacPlan.Freeze(profile, prepared);
+        configFile = PrivateRuntimeFiles.WriteCoreConfig(runtime, prepared);
+        pacDescriptor = pacPlan?.Prepare(configFile);
         process = new Process { StartInfo = new ProcessStartInfo(corePath, "run -c " + AppUpdateService.QuoteWindowsArgument(configFile)) {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } };
-        process.StartInfo = OwnedCoreProcess.Wrap(process.StartInfo, configFile);
+        process.StartInfo = OwnedCoreProcess.Wrap(process.StartInfo, configFile, pacDescriptorFile: pacDescriptor);
         process.OutputDataReceived += (s, e) => { }; process.ErrorDataReceived += (s, e) => { };
         process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
         for (int i = 0; i < 40 && !process.HasExited; i++) {
@@ -239,5 +240,6 @@ internal sealed class GamingProbeChannel : IDisposable
         if (disposed) return; disposed = true;
         if (process != null) { try { if (!process.HasExited) process.Kill(); process.WaitForExit(2000); } catch { } process.Dispose(); }
         if (configFile != null) { try { File.Delete(configFile); } catch { } }
+        if (pacDescriptor != null) { try { File.Delete(pacDescriptor); } catch { } }
     }
 }

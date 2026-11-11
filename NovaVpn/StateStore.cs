@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.Serialization.Json;
 using System.Runtime.Serialization;
 using System.Security.Cryptography;
@@ -12,73 +13,29 @@ namespace NovaVpn;
 public static class StateStore
 {
 	private static readonly byte[] LegacyEntropy = Encoding.UTF8.GetBytes("NOVA-VPN-STATE-v1");
-	private static readonly object EntropyLock = new object();
-	private static byte[] entropy;
-	private static string EntropyPath => Path.Combine(DirectoryPath, "state.entropy");
+    private static readonly Lazy<EncryptedStateFiles> Files=new Lazy<EncryptedStateFiles>(()=>OpenDirectory(DirectoryPath,null));
+    internal static EncryptedStateFiles OpenDirectory(string directory,Action<string> checkpoint)
+    { return new EncryptedStateFiles(directory,SerializeForStorage,DeserializeStorage,Normalize,CreateDefault,LegacyEntropy,checkpoint); }
+    internal static AppState SnapshotForSave(AppState source)
+    {
+        var copy=FullTransfer.Copy(source);byte[] serialized=SerializeForStorage(copy);
+        try{var stored=DeserializeStorage(serialized);Normalize(stored);return stored;}finally{Array.Clear(serialized,0,serialized.Length);}
+    }
+    private static AppState DeserializeStorage(byte[] bytes)
+    { using(var stream=new MemoryStream(bytes))return (AppState)new DataContractJsonSerializer(typeof(AppState)).ReadObject(stream); }
+    private static byte[] SerializeForStorage(AppState state)
+    {
+        Normalize(state);
+        try{return Serialize(state);}
+        catch(SerializationException){ResetTemporalMetadata(state);return Serialize(state);}
+    }
 
 	public static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NovaVPN");
 
 	public static string StatePath => Path.Combine(DirectoryPath, "state.dat");
 
-	public static AppState Load()
-	{
-		try
-		{
-			if (!File.Exists(StatePath))
-			{
-				return TryLoadBackup() ?? CreateDefault();
-			}
-			AppState appState;
-			try
-			{
-				appState = Decode(File.ReadAllText(StatePath, Encoding.UTF8));
-			}
-			catch
-			{
-				appState = TryLoadBackup();
-			}
-			Normalize(appState);
-			return appState ?? CreateDefault();
-		}
-		catch
-		{
-			return CreateDefault();
-		}
-	}
-
-	public static void Save(AppState state)
-	{
-		if (state == null)
-		{
-			return;
-		}
-		Directory.CreateDirectory(DirectoryPath);
-		Normalize(state);
-		byte[] userData;
-		try
-		{
-			userData = Serialize(state);
-		}
-		catch (SerializationException)
-		{
-			// A legacy state can contain a boundary DateTime whose UTC conversion
-			// overflows inside DataContractJsonSerializer. Drop only temporal
-			// metadata and keep profiles, routing and visual settings intact.
-			ResetTemporalMetadata(state);
-			userData = Serialize(state);
-		}
-		byte[] inArray = ProtectedData.Protect(userData, GetEntropy(), DataProtectionScope.CurrentUser);
-		string text = StatePath + ".tmp";
-		File.WriteAllText(text, Convert.ToBase64String(inArray), Encoding.UTF8);
-		if (File.Exists(StatePath))
-		{
-			File.Replace(text, StatePath, StatePath + ".bak");
-		}
-		else
-		{
-			File.Move(text, StatePath);
-		}
-	}
+    public static AppState Load() => Files.Value.Load();
+    public static void Save(AppState state) => Files.Value.Save(state);
 
 	public static AppState CreateEphemeral()
 	{
@@ -103,6 +60,8 @@ public static class StateStore
 		if (state != null)
 		{
 			state.SubscriptionIdentities = state.SubscriptionIdentities ?? new IdentityState();
+            // Old/partial documents may omit Routing before schema4 migrations.
+            state.Routing=state.Routing??new RoutingSettings();
             if (state.SchemaVersion < 2)
 			{
 				state.AutoReconnect = true;
@@ -252,7 +211,9 @@ public static class StateStore
 			{
 				state.Routing.AdvancedRules = new List<string>();
 			}
-			RoutingInspector.NormalizeDomains(state.Routing.DirectDomains);
+			state.Routing.MultiServer?.Validate();
+            state.MultiServerRoutingHistory?.Validate();
+            RoutingInspector.NormalizeDomains(state.Routing.DirectDomains);
 			RoutingInspector.NormalizeDomains(state.Routing.ProxyDomains);
 			RoutingInspector.NormalizeDomains(state.Routing.BlockDomains);
 			if (string.IsNullOrWhiteSpace(state.Routing.DnsProvider))
@@ -284,9 +245,53 @@ public static class StateStore
 				profile.AddedAt = SafeDate(profile.AddedAt, DateTime.UtcNow);
 				profile.LastCheckedUtc = SafeDate(profile.LastCheckedUtc);
 				profile.SubscriptionUpdatedUtc = SafeDate(profile.SubscriptionUpdatedUtc);
+                if (string.IsNullOrWhiteSpace(profile.HealthMeasurement))
+                {
+                    profile.LastLatency = -1; profile.AverageLatency = -1; profile.LastLossPercent = -1;
+                    profile.HealthStatus = "Нужна проверка HTTPS";
+                }
 			}
+            SubscriptionManager.Normalize(state);
+            ProfileCollectionService.Normalize(state);
+            LocalProxyConfiguration.Normalize(state);
+            // Preserve malformed enabled policies for explicit refusal at the
+            // capture boundary; silently dropping them would remove limits.
+            if(!state.ApplicationLimitsEnabled && state.ApplicationBandwidthRules==null)state.ApplicationBandwidthRules=new List<ApplicationBandwidthRule>();
+            state.SchemaVersion = Math.Max(state.SchemaVersion, 17);
+            foreach (var profile in state.Profiles)
+                profile.FallbackProfileIds = (profile.FallbackProfileIds ?? new List<string>()).Where(id => !string.IsNullOrWhiteSpace(id) && id != profile.Id).Distinct(StringComparer.Ordinal).Take(ConfiguredFallbackService.MaxAlternatives).ToList();
+            foreach (var subscription in state.Subscriptions)
+            {
+                subscription.LastAttemptUtc = SafeDate(subscription.LastAttemptUtc);
+                subscription.LastSuccessUtc = SafeDate(subscription.LastSuccessUtc);
+                subscription.NextAttemptUtc = SafeDate(subscription.NextAttemptUtc);
+                NormalizeQuotaDates(subscription.Quota);
+                if (subscription.Previous != null)
+                {
+                    subscription.Previous.CreatedUtc = SafeDate(subscription.Previous.CreatedUtc);
+                    NormalizeQuotaDates(subscription.Previous.Quota);
+                    foreach (var profile in subscription.Previous.Profiles ?? new List<VpnProfile>())
+                    {
+                        if (profile == null) continue;
+                        profile.AddedAt = SafeDate(profile.AddedAt, DateTime.UtcNow);
+                        profile.LastCheckedUtc = SafeDate(profile.LastCheckedUtc);
+                        profile.SubscriptionUpdatedUtc = SafeDate(profile.SubscriptionUpdatedUtc);
+                    }
+                }
+            }
 		}
 	}
+
+    private static void NormalizeQuotaDates(SubscriptionQuota quota)
+    {
+        if (quota == null) return;
+        quota.ReceivedUtc = SafeDate(quota.ReceivedUtc);
+        if (quota.ExpiresUtc.HasValue)
+        {
+            DateTime safe = SafeDate(quota.ExpiresUtc.Value);
+            quota.ExpiresUtc = safe == DateTime.MinValue ? (DateTime?)null : safe;
+        }
+    }
 
 	private static byte[] Serialize(AppState state)
 	{
@@ -421,18 +426,6 @@ public static class StateStore
 		return fallback;
 	}
 
-	private static AppState TryLoadBackup()
-	{
-		try
-		{
-			string backup = StatePath + ".bak";
-			return File.Exists(backup) ? Decode(File.ReadAllText(backup, Encoding.UTF8)) : null;
-		}
-		catch
-		{
-			return null;
-		}
-	}
 
 	public static void ExportEncrypted(AppState state, string path)
 	{
@@ -455,42 +448,5 @@ public static class StateStore
 		return imported;
 	}
 
-	private static AppState Decode(string encoded)
-	{
-		byte[] encryptedData = Convert.FromBase64String(encoded);
-		byte[] buffer;
-		try
-		{
-			buffer = ProtectedData.Unprotect(encryptedData, GetEntropy(), DataProtectionScope.CurrentUser);
-		}
-		catch (CryptographicException)
-		{
-			// Read states created before per-install entropy was introduced.
-			buffer = ProtectedData.Unprotect(encryptedData, LegacyEntropy, DataProtectionScope.CurrentUser);
-		}
-		using (MemoryStream stream = new MemoryStream(buffer))
-		{
-			DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(AppState));
-			return serializer.ReadObject(stream) as AppState;
-		}
-	}
-
-	private static byte[] GetEntropy()
-	{
-		lock (EntropyLock)
-		{
-			if (entropy != null) return entropy;
-			Directory.CreateDirectory(DirectoryPath);
-			if (File.Exists(EntropyPath))
-			{
-				byte[] existing = File.ReadAllBytes(EntropyPath);
-				if (existing.Length >= 32) return entropy = existing;
-			}
-			entropy = new byte[32];
-			using (RandomNumberGenerator generator = RandomNumberGenerator.Create()) generator.GetBytes(entropy);
-			File.WriteAllBytes(EntropyPath, entropy);
-			try { File.SetAttributes(EntropyPath, FileAttributes.Hidden); } catch { }
-			return entropy;
-		}
-	}
+    private static AppState Decode(string encoded) => Files.Value.Decode(encoded);
 }

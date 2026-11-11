@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections;
 using System.Web.Script.Serialization;
@@ -11,7 +11,10 @@ public static class RealityConfigBuilder
     public static string Build(VpnProfile profile, RoutingSettings routing)
     {
         if (profile == null) throw new InvalidOperationException("Сначала выберите сервер.");
+        if (CorporateProxy.Enabled(profile)) throw new NotSupportedException("Корпоративный прокси пока поддерживается только ядром sing-box.");
         if (routing == null) throw new ArgumentNullException(nameof(routing));
+        if (routing.MultiServer != null) throw new NotSupportedException("Назначения серверов требуют sing-box.");
+        if (routing.MigratedPolicy != null) throw new NotSupportedException("Перенесённые правила пока требуют sing-box; их нельзя молча отбросить в Reality Core.");
         if (profile.Protocol != "vless" && profile.Protocol != "trojan")
             throw new NotSupportedException("Для этого профиля выберите стандартное ядро sing-box. Экспериментальное ядро принимает профили VLESS и Trojan.");
         if (routing.BypassPrivateDns || string.Equals(routing.DnsMode,"System",StringComparison.OrdinalIgnoreCase))
