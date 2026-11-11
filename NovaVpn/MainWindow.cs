@@ -1131,6 +1131,65 @@ public sealed partial class MainWindow : Window
         return TourAnchor("home.dual-vpn", card);
     }
 
+    private async Task ChooseProfileRoleAsync(VpnProfile profile)
+    {
+        if (state.Routing?.MultiServer == null)
+        {
+            await SelectProfileAsync(profile);
+            return;
+        }
+        var menu = new ContextMenu
+        {
+            Background = new SolidColorBrush(Surface),
+            Foreground = new SolidColorBrush(TextColor),
+            BorderBrush = new SolidColorBrush(BorderColor),
+            FontFamily = VisualDesign.InterfaceFont(state.Visual),
+            FontSize = 14 * state.Visual.TextScale,
+            Padding = new Thickness(8)
+        };
+        AddVpnRoleMenuItems(menu, profile);
+        var choices = new StackPanel();
+        var title = T(profile.Name, 18, TextColor, FontWeights.SemiBold);
+        title.TextWrapping = TextWrapping.Wrap;
+        title.Margin = new Thickness(0, 0, 0, 20);
+        choices.Children.Add(title);
+        var dialog = new Window
+        {
+            Title = "Использовать конфиг", Owner = serverMapWindow ?? this,
+            Width = Math.Min(480, SystemParameters.WorkArea.Width),
+            MaxHeight = SystemParameters.WorkArea.Height,
+            SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = new SolidColorBrush(Bg), Foreground = new SolidColorBrush(TextColor),
+            FontFamily = VisualDesign.InterfaceFont(state.Visual), ShowInTaskbar = false
+        };
+        MenuItem selected = null;
+        foreach (MenuItem item in menu.Items)
+        {
+            var button = SmallButton(item.IsChecked ? item.Header + " · уже выбран" : item.Header.ToString());
+            button.Foreground = new SolidColorBrush(TextColor);
+            button.Height = double.NaN;
+            button.MinHeight = 54 * state.Visual.TextScale;
+            button.Padding = new Thickness(16, 12, 16, 12);
+            button.Margin = new Thickness(0, 0, 0, 12);
+            button.Content = new TextBlock { Text = button.Content.ToString(), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
+            button.IsEnabled = item.IsEnabled;
+            button.Click += delegate { selected = item; dialog.DialogResult = true; };
+            choices.Children.Add(button);
+        }
+        var cancel = SmallButton("Отмена");
+        cancel.Foreground = new SolidColorBrush(TextColor);
+        cancel.IsCancel = true;
+        cancel.HorizontalAlignment = HorizontalAlignment.Right;
+        cancel.Margin = new Thickness(0, 4, 0, 0);
+        cancel.Click += delegate { dialog.DialogResult = false; };
+        choices.Children.Add(cancel);
+        dialog.Content = new ScrollViewer { Content = choices, Padding = new Thickness(24), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        dialog.SourceInitialized += delegate { WindowsBackdrop.Apply(dialog, state.Visual.DarkMode, true); };
+        if (dialog.ShowDialog() == true && selected != null)
+            selected.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+    }
+
     private void AddVpnRoleMenuItems(ContextMenu menu, VpnProfile profile)
     {
         var assignments = state.Routing?.MultiServer;
@@ -1164,7 +1223,7 @@ public sealed partial class MainWindow : Window
                     await ApplyServerAssignmentsAsync(opened, candidate);
                 }
                 catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
-                finally { if (!closing && currentPage == "servers") RefreshCurrentPage(); }
+                finally { if (!closing) RefreshCurrentPage(); }
             };
             menu.Items.Add(item);
         }
@@ -1289,7 +1348,7 @@ public sealed partial class MainWindow : Window
 			panel.Children.Add(T("Расположение по данным профиля", 9, Muted));
 
 		InteractiveServerMap map = ServerRegionMapService.BuildInteractiveCanvas(state.Profiles.ToArray(), profile, 250, 132, palette, mapHealth,
-			async target => await SelectProfileAsync(target), false);
+			async target => await ChooseProfileRoleAsync(target), false);
 		liveServerMap = map;
 		map.Margin = new Thickness(0, 5, 0, 0);
 		System.Windows.Automation.AutomationProperties.SetName(map, region.HasCountry
@@ -1318,7 +1377,7 @@ public sealed partial class MainWindow : Window
 		header.Children.Add(T("Зелёный — HTTPS работает · красный — проверка не прошла · серый — нет свежей проверки", 11, Muted));
 		grid.Children.Add(header);
 		expandedServerMap = ServerRegionMapService.BuildInteractiveCanvas(state.Profiles.ToArray(), SelectedProfile(), 820, 400, palette, mapHealth,
-			async target => { dialog.Close(); await SelectProfileAsync(target); }, true);
+			async target => { if (state.Routing?.MultiServer == null) dialog.Close(); await ChooseProfileRoleAsync(target); }, true);
 		var viewport = new ServerMapViewport(expandedServerMap);
 		var view = new Viewbox { Child = viewport, Stretch = Stretch.Uniform, Margin = new Thickness(0, 12, 0, 12) };
 		var controls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
@@ -2480,7 +2539,7 @@ public sealed partial class MainWindow : Window
         border2.KeyDown += async delegate(object sender, KeyEventArgs e) {
             if (e.OriginalSource == border2 && (e.Key == Key.Enter || e.Key == Key.Space)) {
                 e.Handled = true;
-                await SelectProfileAsync(profile);
+                await ChooseProfileRoleAsync(profile);
             }
         };
         border2.MouseLeftButtonUp += async delegate(object sender, MouseButtonEventArgs e) {
@@ -2491,7 +2550,7 @@ public sealed partial class MainWindow : Window
                 source = VisualTreeHelper.GetParent(source);
             }
             e.Handled = true;
-            await SelectProfileAsync(profile);
+            await ChooseProfileRoleAsync(profile);
         };
 		EnableCardMotion(border2);
 		return border2;
@@ -2525,7 +2584,7 @@ public sealed partial class MainWindow : Window
             for (var source = args.OriginalSource as DependencyObject; source != null && source != card;
                 source = VisualTreeHelper.GetParent(source))
                 if (source is System.Windows.Controls.Primitives.ButtonBase) return;
-            await SelectProfileAsync(profile);
+            await ChooseProfileRoleAsync(profile);
         }; EnableCardMotion(card); return card;
 	}
 
