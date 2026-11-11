@@ -9,6 +9,7 @@ public sealed class MultiServerRoutingCommitPlan
  MultiServerRoutingCommitPlan(AppState target,RoutingSettings routing,string connectedId=null,bool restore=false,bool forget=false){this.target=target;baseline=FullStateRestorePlan.Fingerprint(target);previous=FullTransfer.Copy(target);prepared=FullTransfer.Copy(previous);prepared.Routing=RoutingOverlayService.Clone(routing);prepared.Routing.MultiServer?.Validate();
   publishesZapretRouting = restore || !forget && prepared.Routing.MultiServer != null;
   if(restore) {
+   prepared.DualVpnSelectionEnabled=false;
    var history=MultiServerRoutingHistory.PreviewDisable(target);
    var restored=ZapretRoutingTransitionService.PrepareOrdinaryRouting(target,history.SingleServerRouting);
    prepared.Routing=restored.Routing;prepared.Zapret=restored.Zapret;
@@ -46,6 +47,7 @@ public sealed class MultiServerRoutingCommitPlan
    throw;
   }
   if(publishesZapretRouting)target.Zapret=staged.Zapret?.Clone();
+  target.DualVpnSelectionEnabled=staged.DualVpnSelectionEnabled;
   target.SchemaVersion=staged.SchemaVersion;target.Routing=RoutingOverlayService.Clone(staged.Routing);target.SelectedProfileId=staged.SelectedProfileId;target.FallbackRootProfileId=staged.FallbackRootProfileId;target.LastConnectedProfileId=staged.LastConnectedProfileId;target.MultiServerRoutingHistory=staged.MultiServerRoutingHistory?.Copy();
  }
 }

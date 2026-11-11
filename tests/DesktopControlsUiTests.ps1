@@ -44,9 +44,11 @@ try {
   @{Name='compact';Theme='Windows 11 Dark';Width=680;Height=720;Scale=1;Dual=$false},
   @{Name='small-dual';Theme='Windows 11 Dark';Width=680;Height=460;Scale=1;Dual=$true},
   @{Name='large-text';Theme='Windows 11 Light';Width=680;Height=760;Scale=1.35;Dual=$true},
+  @{Name='pending-dual';Theme='Windows 11 Dark';Width=1200;Height=760;Scale=1;Pending=1},
   @{Name='dual';Theme='Windows 11 Light';Width=1200;Height=760;Scale=1;Dual=$true}
  )
  foreach($case in $cases){
+  $state.DualVpnSelectionEnabled=[bool]$case.Pending
   $state.Routing.MultiServer=$null
   if($case.Dual){
    $settings=[Activator]::CreateInstance($assembly.GetType('NovaVpn.MultiServerSettings'))
@@ -61,10 +63,10 @@ try {
   Assert ($null -ne $card -and $null -ne $toggle -and $null -ne $edit) 'Home dual controls missing'
   $labels=@(Nodes $root | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)
   Assert ($labels -contains 'Два VPN-конфига') 'Dual VPN heading missing'
-  Assert ($edit.Content -eq $(if($case.Dual){'Конфиги и маршруты'}else{'Выбрать два конфига'})) 'Wrong configuration action'
+  Assert ($edit.Content -eq 'Выбрать сервер') 'Wrong configuration action'
   $names=Named 'DualVpnProfiles'
-  Assert (($null -ne $names) -eq $case.Dual) 'Profile names do not reflect mode'
-  if($names){Assert ($names.Text.Contains($state.Profiles[0].Name) -and $names.Text.Contains($state.Profiles[2].Name)) 'Selected configs missing'}
+  Assert (($null -ne $names) -eq ($case.Dual -or $case.Pending)) 'Profile names do not reflect mode'
+  if($case.Dual){Assert ($names.Text.Contains($state.Profiles[0].Name) -and $names.Text.Contains($state.Profiles[2].Name)) 'Selected configs missing'}
   Visible $toggle $card 'Dual toggle';Visible $edit $card 'Dual editor button'
   # The entry is visible without scrolling at ordinary desktop sizes; minimum height remains scrollable.
   if($case.Height -ge 720 -and $case.Scale -eq 1){Visible $toggle $root 'Home toggle on first screen'}
@@ -72,6 +74,35 @@ try {
   Visible $toggle $root 'Reachable home toggle'
   $edit.BringIntoView();Layout;Visible $edit $root 'Reachable home editor button'
   Save-Image ('home-'+$case.Name)
+  $edit.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+  Assert ($type.GetField('currentPage',$flags).GetValue($window) -eq 'servers') 'Home server picker did not open server list'
+  Assert (($null -ne $state.Routing.MultiServer) -eq [bool]$case.Dual) 'Opening server list changed routing'
+  if($case.Pending){
+   $type.GetMethod('ShowServerMap',$flags).Invoke($window,@())
+   $map=$type.GetField('expandedServerMap',$flags).GetValue($window)
+   $mapWindow=$type.GetField('serverMapWindow',$flags).GetValue($window)
+   $script:roleOptions=@()
+   $timer=[Windows.Threading.DispatcherTimer]::new()
+   $timer.Interval=[TimeSpan]::FromMilliseconds(250)
+   $timer.Add_Tick({
+    $timer.Stop()
+    $chooser=@($app.Windows|Where-Object {$_.Owner -eq $mapWindow})[0]
+    if($chooser){
+     try {
+      $script:roleOptions=@(Nodes $chooser | Where-Object {$_ -is [Windows.Controls.Button] -and $_.IsEnabled -and $_.Content -is [Windows.Controls.TextBlock]} | ForEach-Object {$_.Content.Text})
+     } finally {$chooser.DialogResult=$false}
+    }
+   })
+   try {
+    $profiles=[Array]::CreateInstance($assembly.GetType('NovaVpn.VpnProfile'),1)
+    $profiles.SetValue($state.Profiles[1],0)
+    $timer.Start()
+    $map.Choose($map,$profiles)
+    Assert ($script:roleOptions -contains 'Использовать как основной VPN') 'Map did not offer primary assignment'
+    Assert ($script:roleOptions -contains 'Использовать как VPN-2') 'Map did not offer secondary assignment before assigning a second profile'
+    Assert ($null -eq $state.Routing.MultiServer) 'Cancelling map role selection changed routing'
+   } finally {$timer.Stop();$mapWindow.Close()}
+  }
   $navigation=$type.GetField('navItems',$flags).GetValue($window)
   Assert (-not $navigation.ContainsKey('gaming')) 'Gaming navigation is still present'
   $window.ShowPageForSnapshot('gaming');Layout
@@ -104,5 +135,5 @@ try {
  $state.Routing.MultiServer=$settings
  $window.ShowPageForSnapshot('routing');Layout
  Assert ($null -ne (Named 'EditMultiServerRouting')) 'Active multi-server routing editor missing'
- Write-Output "PASS: $checks desktop UI checks; six window/theme/mode variants. Synthetic profiles only."
+ Write-Output "PASS: $checks desktop UI checks; seven window/theme/mode variants. Synthetic profiles only."
 } finally {$window.Close();$app.Shutdown()}

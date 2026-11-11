@@ -21,6 +21,8 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 8),
+            "Тумблер включает возможность назначить VPN-2. Кнопка сразу открывает список, а карта предлагает роль даже до назначения второго сервера."),
         new ReleaseNoteEntry(new Version(2, 6, 7),
             "Выбор сервера на карте и в списке открывает окно назначения основного VPN или VPN-2 в текущей теме клиента."),
         new ReleaseNoteEntry(new Version(2, 6, 6),

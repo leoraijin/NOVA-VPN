@@ -44,23 +44,7 @@ public sealed class MultiServerRoutingWindow : Window
     if (rule.ApplicationPath != null) unconfirmedApps.Add(rule);
    }
   }
-  if(source.MultiServer==null){
-   foreach(var path in source.DirectProcessPaths)rules.Add(new MultiServerRuleRecord{ApplicationPath=path,Target="Direct"});
-   foreach(var path in source.ProxyProcessPaths.Where(p=>!source.DirectProcessPaths.Any(d=>ApplicationRoutingService.SamePath(d,p))))rules.Add(new MultiServerRuleRecord{ApplicationPath=path,Target="Default"});
-   var seen = new HashSet<string>(StringComparer.Ordinal);
-   void ImportSites(IEnumerable<string> values, string targetKind)
-   {
-    foreach (string value in values)
-    {
-     string trimmed = (value ?? "").Trim();
-     if (trimmed.Length == 0 || trimmed.StartsWith("#", StringComparison.Ordinal)) continue;
-     string selector = MultiServerRule.NormalizeDomainSelector(RoutingInspector.NormalizeDomainRule(trimmed));
-     if (seen.Add(selector)) rules.Add(new MultiServerRuleRecord { Domain = selector, Target = targetKind });
-    }
-   }
-   ImportSites(source.DirectDomains, "Direct");
-   ImportSites(source.ProxyDomains, "Default");
-  }
+  if (source.MultiServer == null) rules = InitialRules(source);
   foreach(var rule in rules.Where(r=>r.ApplicationPath!=null&&!catalog.Any(a=>ApplicationRoutingService.SamePath(a.ExecutablePath,r.ApplicationPath))))catalog.Add(new ApplicationEntry{Name=Path.GetFileName(rule.ApplicationPath),ExecutablePath=rule.ApplicationPath,Source=SavedRuleSource});
   var colors=ThemePalette.Create(visual??new VisualPreferences());Title="Серверы для приложений и сайтов";WindowStartupLocation=WindowStartupLocation.CenterOwner;Background=new SolidColorBrush(colors.Bg);Foreground=new SolidColorBrush(colors.Text);
   if (owner != null) Owner = owner;
@@ -331,6 +315,41 @@ public sealed class MultiServerRoutingWindow : Window
   secondaryApps.Items.Add(new ListBoxItem{Content=new TextBlock{Text=entry.Name+" — "+Label(rule),
    TextWrapping=TextWrapping.Wrap},Tag=entry,ToolTip=entry.ExecutablePath,Padding=new Thickness(7)});
   }foreach(var rule in rules.Where(r=>r.Domain!=null))sites.Items.Add(new ListBoxItem{Content=new TextBlock{Text=rule.DomainLabel+" — "+Label(rule),TextWrapping=TextWrapping.Wrap},Tag=rule,Padding=new Thickness(7)});}
+ internal static List<MultiServerRuleRecord> InitialRules(RoutingSettings source)
+ {
+   var rules = new List<MultiServerRuleRecord>();
+   foreach(var path in source.DirectProcessPaths)rules.Add(new MultiServerRuleRecord{ApplicationPath=path,Target="Direct"});
+   foreach(var path in source.ProxyProcessPaths.Where(p=>!source.DirectProcessPaths.Any(d=>ApplicationRoutingService.SamePath(d,p))))rules.Add(new MultiServerRuleRecord{ApplicationPath=path,Target="Default"});
+   var seen = new HashSet<string>(StringComparer.Ordinal);
+   void ImportSites(IEnumerable<string> values, string targetKind)
+   {
+    foreach (string value in values)
+    {
+     string trimmed = (value ?? "").Trim();
+     if (trimmed.Length == 0 || trimmed.StartsWith("#", StringComparison.Ordinal)) continue;
+     string selector = MultiServerRule.NormalizeDomainSelector(RoutingInspector.NormalizeDomainRule(trimmed));
+     if (seen.Add(selector)) rules.Add(new MultiServerRuleRecord { Domain = selector, Target = targetKind });
+    }
+   }
+   ImportSites(source.DirectDomains, "Direct");
+   ImportSites(source.ProxyDomains, "Default");
+   return rules;
+ }
+ internal static RoutingSettings CreateCandidate(RoutingSettings source, MultiServerSettings assignments, bool enableIpv6)
+ {
+  var updated = RoutingOverlayService.Clone(source);
+  updated.MultiServer = assignments;
+  assignments.Validate();
+  updated.EnableIpv6 = enableIpv6;
+  updated.DirectDomains.Clear();
+  updated.ProxyDomains.Clear();
+  updated.DirectProcessPaths.Clear();
+  updated.ProxyProcessPaths.Clear();
+  updated.Mode = "Smart";
+  updated.DefaultRoute = "Proxy";
+  updated.DnsMode = "Secure";
+  return updated;
+ }
  RoutingSettings BuildCandidate(){
   if(acknowledgement.IsChecked!=true)throw new InvalidOperationException("Подтвердите проверку перехода на новую схему.");
   bool preservingMissing=source.MultiServer!=null&&!source.MultiServer.RequiresRebinding&&primaryId==source.MultiServer.DefaultProfileId&&
@@ -338,10 +357,8 @@ public sealed class MultiServerRoutingWindow : Window
   if(!preservingMissing&&!profiles.Any(p=>p.Id==primaryId&&!p.RetiredFromSubscription&&p.Protocol!="sing-box"&&!CorporateProxy.Enabled(p)))throw new InvalidOperationException("Выберите доступный совместимый основной сервер.");
   if (unconfirmedApps.Any(rules.Contains)) throw new InvalidOperationException("Укажите путь к .exe для каждого импортированного правила приложения.");
   if(unbound.Any(r=>rules.Contains(r)))throw new InvalidOperationException("Заново назначьте сервер для каждого импортированного правила.");
-  var updated=RoutingOverlayService.Clone(source);updated.MultiServer=new MultiServerSettings{Revision=(source.MultiServer?.Revision??0)+1,DefaultProfileId=primaryId,SecondaryProfileId=secondaryId,Rules=rules.Select(r=>r.Copy()).ToList()};updated.MultiServer.Validate();
-  updated.EnableIpv6=ipv6.IsChecked==true;
-  updated.DirectDomains.Clear();updated.ProxyDomains.Clear();updated.DirectProcessPaths.Clear();updated.ProxyProcessPaths.Clear();updated.Mode="Smart";updated.DefaultRoute="Proxy";updated.DnsMode="Secure";
-  return updated;
+  return CreateCandidate(source, new MultiServerSettings { Revision = (source.MultiServer?.Revision ?? 0) + 1,
+   DefaultProfileId = primaryId, SecondaryProfileId = secondaryId, Rules = rules.Select(r => r.Copy()).ToList() }, ipv6.IsChecked == true);
  }
  void Save(){try{Accepted=BuildCandidate();DialogResult=true;}catch(Exception e){error.Text=LogSanitizer.Sanitize(e.Message);}}
 }

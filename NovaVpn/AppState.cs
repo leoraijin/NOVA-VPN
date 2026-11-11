@@ -9,6 +9,7 @@ public sealed class AppState
 {
     [DataMember] public RoutingSettings RoutingMigrationBackup;
     [DataMember] public MultiServerRoutingHistory MultiServerRoutingHistory;
+    [DataMember(EmitDefaultValue = false)] public bool DualVpnSelectionEnabled;
     [DataMember] public List<GamingHistoryEntry> GamingHistory = new List<GamingHistoryEntry>();
     [DataMember] public List<InstalledGame> ManualGames = new List<InstalledGame>();
     [DataMember] public List<GamePreferences> GamePreferences = new List<GamePreferences>();

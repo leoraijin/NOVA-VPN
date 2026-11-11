@@ -1054,10 +1054,12 @@ public sealed partial class MainWindow : Window
 		});
 	}
 
+    private bool DualVpnEnabled => state.DualVpnSelectionEnabled || state.Routing?.MultiServer != null;
+
     private UIElement BuildDualVpnControl()
     {
         var assignments = state.Routing?.MultiServer;
-        bool enabled = assignments != null;
+        bool enabled = DualVpnEnabled;
         bool editable = CanEditServerAssignments();
         var content = new StackPanel();
         var heading = new Grid();
@@ -1078,7 +1080,7 @@ public sealed partial class MainWindow : Window
         toggle.Name = "DualVpnToggle";
         toggle.IsEnabled = editable;
         System.Windows.Automation.AutomationProperties.SetName(toggle, "Два VPN-конфига: " + (enabled ? "включено" : "выключено"));
-        toggle.ToolTip = enabled ? "Выключить два конфига и вернуть прежнюю маршрутизацию" : "Включить и выбрать основной VPN и VPN-2";
+        toggle.ToolTip = enabled ? "Выключить два конфига и вернуть прежнюю маршрутизацию" : "Разрешить выбор VPN-2";
         Grid.SetColumn(toggle, 1);
         heading.Children.Add(toggle);
         content.Children.Add(heading);
@@ -1086,17 +1088,17 @@ public sealed partial class MainWindow : Window
         {
             string ProfileName(string id) => id == null ? "не выбран" :
                 state.Profiles.FirstOrDefault(p => p.Id == id && !p.RetiredFromSubscription)?.Name ?? "недоступен";
-            var names = T("Основной VPN: " + ProfileName(assignments.DefaultProfileId) +
-                "\nVPN-2: " + ProfileName(assignments.SecondaryProfileId), 12, TextColor);
+            var names = T("Основной VPN: " + ProfileName(assignments?.DefaultProfileId ?? SelectedProfile()?.Id) +
+                "\nVPN-2: " + ProfileName(assignments?.SecondaryProfileId), 12, TextColor);
             names.Name = "DualVpnProfiles";
             names.TextWrapping = TextWrapping.Wrap;
             names.TextTrimming = TextTrimming.None;
             names.Margin = new Thickness(0, 12, 0, 0);
             content.Children.Add(names);
         }
-        var configure = SmallButton(enabled ? "Конфиги и маршруты" : "Выбрать два конфига");
+        var configure = SmallButton("Выбрать сервер");
         configure.Name = "ConfigureDualVpn";
-        configure.IsEnabled = editable;
+        configure.IsEnabled = !closing;
         configure.HorizontalAlignment = HorizontalAlignment.Left;
         configure.Margin = new Thickness(0, 12, 0, 0);
         configure.Foreground = new SolidColorBrush(TextColor);
@@ -1108,19 +1110,25 @@ public sealed partial class MainWindow : Window
             hint.Margin = new Thickness(0, 8, 0, 0);
             content.Children.Add(hint);
         }
-        async Task ChangeAsync(bool turnOff)
+        toggle.Click += async delegate
         {
-            toggle.IsEnabled = configure.IsEnabled = false;
+            if (!CanEditServerAssignments()) return;
+            toggle.IsEnabled = false;
             try
             {
-                if (turnOff) await ApplyServerAssignmentsAsync(state, null, true);
-                else await EditMultiServerRoutingAsync(!enabled && state.MultiServerRoutingHistory != null);
+                if (assignments != null) await ApplyServerAssignmentsAsync(state, null, true);
+                else
+                {
+                    bool previous = state.DualVpnSelectionEnabled;
+                    state.DualVpnSelectionEnabled = !previous;
+                    try { StateStore.Save(state); }
+                    catch { state.DualVpnSelectionEnabled = previous; throw; }
+                }
             }
             catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
             finally { if (!closing && currentPage == "home") RefreshCurrentPage(); }
-        }
-        toggle.Click += async delegate { await ChangeAsync(enabled); };
-        configure.Click += async delegate { await ChangeAsync(false); };
+        };
+        configure.Click += delegate { Navigate("servers"); };
         var card = new Border
         {
             Name = "DualVpnCard", Background = new SolidColorBrush(palette.SoftSelection),
@@ -1133,7 +1141,7 @@ public sealed partial class MainWindow : Window
 
     private async Task ChooseProfileRoleAsync(VpnProfile profile)
     {
-        if (state.Routing?.MultiServer == null)
+        if (!DualVpnEnabled)
         {
             await SelectProfileAsync(profile);
             return;
@@ -1193,29 +1201,56 @@ public sealed partial class MainWindow : Window
     private void AddVpnRoleMenuItems(ContextMenu menu, VpnProfile profile)
     {
         var assignments = state.Routing?.MultiServer;
-        if (assignments == null) return;
+        if (!DualVpnEnabled) return;
+        var primary = SelectedProfile();
+        string primaryId = assignments?.DefaultProfileId ?? primary?.Id;
+        string secondaryId = assignments?.SecondaryProfileId;
         foreach (bool secondary in new[] { false, true })
         {
-            bool current = profile.Id == (secondary ? assignments.SecondaryProfileId : assignments.DefaultProfileId);
+            bool current = profile.Id == (secondary ? secondaryId : primaryId);
             var item = new MenuItem
             {
                 Header = secondary ? "Использовать как VPN-2" : "Использовать как основной VPN",
                 IsCheckable = true,
                 IsChecked = current,
-                IsEnabled = !current && !assignments.RequiresRebinding && MultiServerRoutingWindow.Compatible(profile)
-                    && profile.Id != (secondary ? assignments.DefaultProfileId : assignments.SecondaryProfileId)
+                IsEnabled = !current && assignments?.RequiresRebinding != true && MultiServerRoutingWindow.Compatible(profile)
+                    && (!secondary || assignments != null || (primary != null && MultiServerRoutingWindow.Compatible(primary)))
+                    && profile.Id != (secondary ? primaryId : secondaryId)
             };
             item.Click += async delegate
             {
                 try
                 {
-                    if (!CanEditServerAssignments()) return;
+                    if (!CanEditServerAssignments() || !DualVpnEnabled) return;
                     var opened = state;
                     var candidate = RoutingOverlayService.Clone(opened.Routing);
                     var next = candidate.MultiServer;
                     var chosen = opened.Profiles.FirstOrDefault(p => p.Id == profile.Id);
-                    if (next == null || next.RequiresRebinding || chosen == null || !MultiServerRoutingWindow.Compatible(chosen))
+                    if (next?.RequiresRebinding == true || chosen == null || !MultiServerRoutingWindow.Compatible(chosen))
                         throw new InvalidOperationException("Этот конфиг недоступен для назначения.");
+                    if (next == null)
+                    {
+                        if (!secondary) { await SelectProfileAsync(chosen); return; }
+                        var currentPrimary = SelectedProfile();
+                        if (currentPrimary == null || !MultiServerRoutingWindow.Compatible(currentPrimary))
+                            throw new InvalidOperationException("Сначала выберите совместимый основной VPN.");
+                        var source = MultiServerRoutingHistory.AssignmentEditorSource(opened);
+                        if (source.MigratedPolicy != null)
+                            throw new InvalidOperationException("Преобразуйте перенесённую политику в разделе «Маршрутизация».");
+                        next = new MultiServerSettings { DefaultProfileId = currentPrimary.Id,
+                            Rules = MultiServerRoutingWindow.InitialRules(source) };
+                        if (next.Rules.Count > 0 || source.Mode == "Direct" || source.DefaultRoute == "Direct")
+                        {
+                            if (MessageBox.Show(serverMapWindow ?? this,
+                                "Применить два VPN? Трафик без отдельных правил пойдёт через основной VPN.",
+                                "Два VPN-конфига", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                            if (!ReferenceEquals(opened, state) || !DualVpnEnabled || state.Routing.MultiServer != null ||
+                                SelectedProfile()?.Id != currentPrimary.Id ||
+                                RoutingMigrationService.Fingerprint(source) != RoutingMigrationService.Fingerprint(MultiServerRoutingHistory.AssignmentEditorSource(state)))
+                                throw new InvalidOperationException("Настройки изменились. Выберите сервер заново.");
+                        }
+                        candidate = MultiServerRoutingWindow.CreateCandidate(source, next, source.EnableIpv6);
+                    }
                     if (secondary) next.SetSecondaryProfile(chosen.Id);
                     else next.DefaultProfileId = chosen.Id;
                     next.Revision++;
@@ -1377,7 +1412,7 @@ public sealed partial class MainWindow : Window
 		header.Children.Add(T("Зелёный — HTTPS работает · красный — проверка не прошла · серый — нет свежей проверки", 11, Muted));
 		grid.Children.Add(header);
 		expandedServerMap = ServerRegionMapService.BuildInteractiveCanvas(state.Profiles.ToArray(), SelectedProfile(), 820, 400, palette, mapHealth,
-			async target => { if (state.Routing?.MultiServer == null) dialog.Close(); await ChooseProfileRoleAsync(target); }, true);
+			async target => { if (!DualVpnEnabled) dialog.Close(); await ChooseProfileRoleAsync(target); }, true);
 		var viewport = new ServerMapViewport(expandedServerMap);
 		var view = new Viewbox { Child = viewport, Stretch = Stretch.Uniform, Margin = new Thickness(0, 12, 0, 12) };
 		var controls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
