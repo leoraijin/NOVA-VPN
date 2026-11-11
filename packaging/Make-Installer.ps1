@@ -316,6 +316,10 @@ NOVA VPN 2.1.4 — 24 сентября 2026
 • В комплект входят NOVA VPN, sing-box и Zapret 1.10.3; VPN-ключи не включены.
 
 '@
+$version = ([Version](Get-Item -LiteralPath $AppOutput).VersionInfo.FileVersion).ToString(3)
+$currentNotesPath = Join-Path (Split-Path $PSScriptRoot -Parent) "docs/WINDOWS-$version-RELEASE-NOTES.md"
+if (-not (Test-Path -LiteralPath $currentNotesPath -PathType Leaf)) { throw "Missing release notes for $version" }
+$releaseNotes = (Get-Content -LiteralPath $currentNotesPath -Raw) + [Environment]::NewLine + [Environment]::NewLine + $releaseNotes
 $previousNotes = Get-Content -LiteralPath (Join-Path $payload 'CHANGELOG.txt') -Raw
 Set-Content -LiteralPath (Join-Path $payload 'CHANGELOG.txt') -Value ($releaseNotes + $previousNotes) -Encoding utf8
 
@@ -381,7 +385,6 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$version = ([Version](Get-Item -LiteralPath $AppOutput).VersionInfo.FileVersion).ToString(3)
 $finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) "NOVA VPN Setup $version.exe"
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/codepage:65001','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
