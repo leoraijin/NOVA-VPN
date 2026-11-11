@@ -108,7 +108,6 @@ internal static class InstallerFileSafety
 internal interface IInstallerGuardProbe
 {
     bool ServiceRegistered();
-    bool GuardFilesPresent(string root);
     bool TrustedMachineStatePresent();
 }
 internal static class InstallerGuardSafety
@@ -117,7 +116,8 @@ internal static class InstallerGuardSafety
     internal static void DemandCanModify(string root, IInstallerGuardProbe probe)
     {
         InstallerFileSafety.ValidateRoot(root);
-        if (probe.ServiceRegistered() || probe.GuardFilesPresent(root) || probe.TrustedMachineStatePresent())
+        // The standard payload includes inactive Guard executables even on a fresh install.
+        if (probe.ServiceRegistered() || probe.TrustedMachineStatePresent())
             throw new InvalidOperationException("Обнаружены компоненты системной защиты NOVA. Этот установщик не изменяет их: требуется обслуживание с поддержкой Guard. Файлы и регистрация сохранены.");
     }
     private sealed class WindowsGuardProbe : IInstallerGuardProbe
@@ -125,10 +125,6 @@ internal static class InstallerGuardSafety
         public bool ServiceRegistered()
         {
             using (var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\NovaVpnTrafficGuard")) return key != null;
-        }
-        public bool GuardFilesPresent(string root)
-        {
-            return File.Exists(Path.Combine(root, "NOVA Traffic Guard.exe")) || File.Exists(Path.Combine(root, "NOVA Guard Recovery.exe")) || File.Exists(Path.Combine(root, "NOVA Guard Setup.exe"));
         }
         public bool TrustedMachineStatePresent()
         {

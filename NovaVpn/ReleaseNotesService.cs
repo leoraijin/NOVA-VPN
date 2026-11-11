@@ -21,6 +21,8 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 6),
+            "Установщик обновляет NOVA VPN при наличии неактивных файлов Guard. Сообщения об ошибках отображаются целиком."),
         new ReleaseNoteEntry(new Version(2, 6, 5),
             "На главной появилась заметная карточка «Два VPN-конфига»: переключатель, выбор серверов и быстрый доступ к маршрутам.",
             "Убраны игровой режим и старый блок со списком приложений. Кнопки на странице серверов выровнены в сетку."),

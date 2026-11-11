@@ -8,6 +8,14 @@ $WorkPath=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPat
 $target=Join-Path $WorkPath 'target'
 $other=Join-Path $WorkPath 'other'
 New-Item -ItemType Directory -Path (Join-Path $target 'core'),(Join-Path $other 'core') -Force | Out-Null
+# Older installers ship these files even when the service was never registered.
+foreach($helper in @('NOVA Traffic Guard.exe','NOVA Guard Recovery.exe','NOVA Guard Setup.exe')){
+    [IO.File]::WriteAllText((Join-Path $target $helper),'inactive helper fixture')
+}
+$guardSafety=$assembly.GetType('InstallerGuardSafety',$true)
+$guardPreflight=$guardSafety.GetMethod('DemandCanModify',$flags,$null,[type[]]@([string]),$null)
+$guardPreflight.Invoke($null,[object[]]@([string]$target))
+Write-Output 'PASS: bundled inactive Guard files do not block an update.'
 $fixture=Join-Path $WorkPath 'Sleep.cs'
 [IO.File]::WriteAllText($fixture,'class Fixture { static void Main() { System.Threading.Thread.Sleep(120000); } }')
 $csc=Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'

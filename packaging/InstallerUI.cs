@@ -16,13 +16,13 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NOVA VPN Setup")]
 [assembly: AssemblyProduct("NOVA VPN")]
-[assembly: AssemblyVersion("2.6.5.0")]
-[assembly: AssemblyFileVersion("2.6.5.0")]
+[assembly: AssemblyVersion("2.6.6.0")]
+[assembly: AssemblyFileVersion("2.6.6.0")]
 
 internal sealed class NovaInstaller : Form
 {
     private new const string ProductName = "NOVA VPN";
-    private const string DisplayVersion = "2.6.5";
+    private const string DisplayVersion = "2.6.6";
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NOVA VPN";
     private readonly Color background = Color.FromArgb(233, 239, 246);
     private readonly Color panel = Color.FromArgb(248, 250, 253);
@@ -218,6 +218,7 @@ internal sealed class NovaInstaller : Form
         SetVisibility(status, true);
         SetVisibility(progress, true);
         progress.Value = 0;
+        status.SetBounds(38, 422, 575, 27);
         status.Text = "Подготовка…";
         SetButton(primary, "Установка…", false);
         SetButton(secondary, "", false);
@@ -245,6 +246,9 @@ internal sealed class NovaInstaller : Form
         {
             heading.Text = "Не удалось установить";
             subheading.Text = "Установщик не изменил данные профиля Windows.";
+            SetVisibility(progress, false);
+            body.Controls["package-card"].Visible = false;
+            status.SetBounds(38, 125, 575, 300);
             status.Text = error;
         }
     }
@@ -271,6 +275,7 @@ internal sealed class NovaInstaller : Form
             progress.BringToFront();
         }
         card.Bounds = bounds;
+        card.Visible = true;
         card.Controls["title"].Text = title;
         card.Controls["detail"].Text = detail;
     }
@@ -350,7 +355,7 @@ internal sealed class NovaInstaller : Form
         InstallerGuardSafety.DemandCanModify(options.Target);
         Directory.CreateDirectory(options.Target);
         worker.ReportProgress(0, "Завершение компонентов прежней версии…");
-        using (var transaction = InstallerFileTransaction.BeginRecovered(options.Target, delegate { StopInstalledComponents(options.Target); InstallerUninstallTransaction.RecoverInstalledUnderLease(options.Target); }))
+        using (var transaction = InstallerFileTransaction.BeginRecovered(options.Target, delegate { InstallerGuardSafety.DemandCanModify(options.Target); StopInstalledComponents(options.Target); InstallerUninstallTransaction.RecoverInstalledUnderLease(options.Target); }))
         {
         List<string> installed = new List<string>();
         List<string> emptyDirectories = new List<string>();
@@ -394,6 +399,7 @@ internal sealed class NovaInstaller : Form
         transaction.PrepareRegistry(DisplayVersion, options.DesktopShortcut);
         transaction.PrepareShortcuts(options.DesktopShortcut);
         worker.ReportProgress(100, "Замена подготовленных файлов…");
+        InstallerGuardSafety.DemandCanModify(options.Target);
         transaction.Apply();
         foreach (string directory in emptyDirectories) Directory.CreateDirectory(directory);
 
@@ -501,6 +507,7 @@ internal sealed class NovaInstaller : Form
             InstallerGuardSafety.DemandCanModify(install);
             using (InstallerFileTransaction.AcquireRootLease(install))
             {
+            InstallerGuardSafety.DemandCanModify(install);
             StopInstalledComponents(install);
             bool recoveredRemoval = InstallerUninstallTransaction.RecoverInstalledUnderLease(install);
             if (recoveredRemoval && !File.Exists(Path.Combine(install, "install-manifest.txt"))) { MessageBox.Show("Предыдущее удаление NOVA VPN завершено.", ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
