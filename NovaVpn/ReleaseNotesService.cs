@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 4),
+            "Сайтам и приложениям можно назначать разные VPN-серверы. Правило сайта имеет приоритет.",
+            "Исправлено преждевременное завершение подключения на Windows с медленным запуском VPN-интерфейса."),
         new ReleaseNoteEntry(new Version(2, 6, 3),
             "Кнопки импорта и экспорта настроек расположены рядом на странице маршрутизации.",
             "Перенос настроек сохраняет полные пути приложений. Исправлен импорт старых файлов с отсутствующими полями."),

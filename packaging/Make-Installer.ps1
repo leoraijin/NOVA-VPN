@@ -381,7 +381,8 @@ Set-Content -LiteralPath (Join-Path $payload 'ИНСТРУКЦИЯ.txt') -Value 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $payloadZip = Join-Path $setupFiles 'NOVA-Payload.zip'
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $payloadZip, [IO.Compression.CompressionLevel]::Optimal, $false)
-$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'NOVA VPN Setup 2.6.4.exe'
+$version = ([Version](Get-Item -LiteralPath $AppOutput).VersionInfo.FileVersion).ToString(3)
+$finalTarget = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) "NOVA VPN Setup $version.exe"
 $stagedSetup = Join-Path $setupFiles 'NOVA-VPN-Setup.exe'
 $packagerArgs = @('/nologo','/codepage:65001','/target:winexe','/platform:anycpu','/optimize+',('/out:' + $stagedSetup),
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),

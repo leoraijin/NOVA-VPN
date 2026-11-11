@@ -28,7 +28,7 @@ jobs:
         run: |
           $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
           if (!$msbuild) { throw 'MSBuild not found' }
-          & $msbuild 'NOVA VPN.csproj' /t:Rebuild /p:Configuration=Release /v:minimal /nologo
+          ./scripts/Build-Review.ps1 -Release -CompilerPath (Join-Path (Split-Path $msbuild) 'Roslyn\csc.exe') -OutputPath (Join-Path $PWD 'bin/Release')
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
           $csc = Join-Path (Split-Path $msbuild) 'Roslyn\csc.exe'
           "csc=$csc" >> $env:GITHUB_OUTPUT
