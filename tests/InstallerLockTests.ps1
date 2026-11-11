@@ -4,6 +4,7 @@ Add-Type -AssemblyName System.IO.Compression,System.IO.Compression.FileSystem
 $assembly=[Reflection.Assembly]::LoadFile([IO.Path]::GetFullPath($InstallerPath))
 $type=$assembly.GetType('NovaInstaller',$true)
 $flags=[Reflection.BindingFlags]'Static,NonPublic'
+$WorkPath=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorkPath)
 $target=Join-Path $WorkPath 'target'
 $other=Join-Path $WorkPath 'other'
 New-Item -ItemType Directory -Path (Join-Path $target 'core'),(Join-Path $other 'core') -Force | Out-Null
