@@ -61,6 +61,26 @@ static class MultiExitHealthDisplayTests
             var caption=(string)typeof(MainWindow).GetMethod("StatusCaption",Flags).Invoke(window,null);
             Check(caption.Contains("1 из 2"),"aggregate caption preserves partial success");
             Check(core.Verification.MultiExits.Results[0].Phase==ExitProbePhase.Verified,"display does not erase another exit result");
+            state.Routing.MultiServer.SecondaryProfileId="us";
+            typeof(CoreManager).GetProperty("LastConnectedRouting").GetSetMethod(true).Invoke(core,new object[]{RoutingOverlayService.Clone(state.Routing)});
+            var home=(DependencyObject)typeof(MainWindow).GetMethod("BuildHomePage",Flags).Invoke(window,null);
+            Check(Texts(home).Any(t=>t.StartsWith("VPN-2 · Renamed US")),"secondary server name on home");
+            Check(Texts(home).Any(t=>t.Contains("HTTPS не подтверждён")&&t.Contains("сайтов: 1")),"separate secondary failure on home");
+            var update=typeof(MainWindow).GetMethod("UpdateHomeVpn2Status",Flags);
+            var ok=new ExitProbeResult(new ExitProbeTarget("us","USA",ExitProbeTarget.Fingerprint(us),ExitProbePhase.Queued),ExitProbePhase.Verified,42,DateTime.UtcNow,"https://example.test/");
+            var evidence=typeof(MainWindow).Assembly.GetType("NovaVpn.ProfileHealthEvidence");
+            string network=(string)evidence.GetMethod("NetworkKey").Invoke(null,null);
+            string coreKey=(string)evidence.GetMethod("CoreKey").Invoke(null,new object[]{core.CorePath});
+            typeof(ConnectionVerification).GetProperty("MultiExits").GetSetMethod(true).Invoke(proof,new object[]{new MultiExitHealthSnapshot(new[]{exits[0],ok},network,coreKey)});
+            update.Invoke(window,null);
+            Check(Texts(home).Any(t=>t.Contains("42 мс")&&t.Contains("сайтов: 1")),"secondary own latency missing");
+            us.Password="new-secret-fixture";update.Invoke(window,null);
+            Check(Texts(home).Any(t=>t.StartsWith("Конфиг изменён")),"old success shown after secondary config changed");
+            us.Password=null;
+            state.Routing.MultiServer.Rules.Clear();update.Invoke(window,null);
+            Check(Texts(home).Any(t=>t.StartsWith("Не используется")),"unused secondary shown as connected");
+            state.Routing.MultiServer.SecondaryProfileId=null;update.Invoke(window,null);
+            Check(Texts(home).Contains("VPN-2 · Сервер не выбран"),"unselected secondary not shown");
             Console.WriteLine("MultiExitHealthDisplayTests: "+assertions+" assertions passed; unshown ephemeral WPF snapshot only, not rendered UI or native TUN acceptance.");return 0;
         }catch(Exception error){Console.Error.WriteLine(error);return 1;}finally{if(window!=null)window.Close();}
     }

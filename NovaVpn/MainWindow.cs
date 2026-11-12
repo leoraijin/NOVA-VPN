@@ -109,6 +109,7 @@ public sealed partial class MainWindow : Window
 
 	private TextBlock connectHeadline;
 	private Panel protectionIndicators;
+    private StackPanel homeVpn2Status;
 
 	private TextBlock connectCaption;
 
@@ -964,8 +965,10 @@ public sealed partial class MainWindow : Window
 		stackPanel10.Children.Add(connectCaption);
 		WrapPanel protection = new WrapPanel { Margin = new Thickness(0.0, 12.0, 0.0, 0.0) };
 		protectionIndicators = protection;
+        homeVpn2Status = new StackPanel {Name = "HomeVpn2Status", Margin = new Thickness(0, 10, 0, 0)};
 		UpdateVerificationDisplay();
 		stackPanel10.Children.Add(protection);
+        stackPanel10.Children.Add(homeVpn2Status);
 		if (state.Visual.ShowConnectionMap) stackPanel10.Children.Add(BuildConnectionPath(vpnProfile));
 		if (responsiveMode == "Wide")
 		{
@@ -3087,7 +3090,7 @@ public sealed partial class MainWindow : Window
 
     private UIElement BuildMultiServerRoutingPage()
     {
-        var layout=new DockPanel();var actions=new WrapPanel();
+        var layout=new DockPanel {ClipToBounds = true};var actions=new WrapPanel {Name = "RoutingToolbar"};
         actions.Children.Add(SettingsImportButton("routing"));actions.Children.Add(SettingsExportButton());
         var edit=SmallButton("Назначения серверов");edit.Name="EditMultiServerRouting";edit.IsEnabled=CanEditServerAssignments();
         edit.ToolTip="Применение проверит конфигурацию и переподключит VPN.";edit.Click+=async delegate{await EditMultiServerRoutingAsync();};actions.Children.Add(edit);
@@ -3100,6 +3103,8 @@ public sealed partial class MainWindow : Window
         header.Children.Add(PageHeader("Маршрутизация", "Сайты → приложения → основной сервер", null, null));
         actions.Margin = new Thickness(0, 10, 0, 0);
         header.Children.Add(actions);
+        header.Name = "RoutingHeader";
+        header.Margin = new Thickness(0, 0, 0, 12);
         DockPanel.SetDock(header, Dock.Top);
         layout.Children.Add(header);
 
@@ -3169,8 +3174,10 @@ public sealed partial class MainWindow : Window
         multiExitHealthPanel = new StackPanel { Margin = new Thickness(0, 12, 0, 8) };
         content.Children.Add(multiExitHealthPanel);
         UpdateMultiExitHealthPanel();
+        foreach (FrameworkElement action in actions.Children) action.Margin = new Thickness(0, 0, 8, 8);
         layout.Children.Add(TouchScrollViewer(new ScrollViewer
         {
+            Name = "RoutingContentScroll", ClipToBounds = true,
             Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
         }));
@@ -4938,9 +4945,56 @@ public sealed partial class MainWindow : Window
         if(statusText != null) { statusText.Text = text; statusText.Foreground = new SolidColorBrush(color); }
         if(statusDot != null) statusDot.Background = new SolidColorBrush(color);
     }
+    private void UpdateHomeVpn2Status()
+    {
+        if (homeVpn2Status == null) return;
+        homeVpn2Status.Children.Clear();
+        var configured = state.Routing?.MultiServer;
+        var active = core.Status == CoreStatus.Connected ? core.LastConnectedRouting?.MultiServer : null;
+        bool visible = DualVpnEnabled || active?.SecondaryProfileId != null;
+        homeVpn2Status.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (!visible) return;
+        string id = configured?.SecondaryProfileId;
+        var profile = state.Profiles.FirstOrDefault(item => item.Id == id);
+        var name = T("VPN-2 · " + (profile?.Name ?? (id == null ? "Сервер не выбран" : "Сервер недоступен")), 12, TextColor, FontWeights.SemiBold);
+        name.Name = "HomeVpn2Name"; name.TextWrapping = TextWrapping.Wrap;
+        homeVpn2Status.Children.Add(name);
+        string detail; Color color = Muted;
+        var result = core.Verification.MultiExits?.Results.FirstOrDefault(item => item.Exit.ProfileId == id);
+        bool assigned = id != null && configured != null && configured.EffectiveRules().Any(rule => rule.Target.ProfileId == id);
+        if (id == null) detail = "Выберите второй конфиг во вкладке «Серверы».";
+        else if (profile == null || profile.RetiredFromSubscription) {detail = "Конфиг недоступен · выберите другой сервер"; color = Warning;}
+        else if (configured.RequiresRebinding) {detail = "Привяжите импортированные назначения к серверу"; color = Warning;}
+        else if (!assigned) detail = "Не используется · назначьте сайты или приложения через VPN-2";
+        else if (core.Status == CoreStatus.Connecting) {detail = "Подключается…"; color = Warning;}
+        else if (core.Status != CoreStatus.Connected) detail = "Не подключён";
+        else if (active?.SecondaryProfileId != id || !active.EffectiveRules().Any(rule => rule.Target.ProfileId == id))
+        {detail = "Назначения ещё не применены к подключению"; color = Warning;}
+        else if (result == null) {detail = "HTTPS проверяется…"; color = Warning;}
+        else if (result.Exit.ProfileFingerprint != ExitProbeTarget.Fingerprint(profile))
+        {detail = "Конфиг изменён · требуется переподключение"; color = Warning;}
+        else
+        {
+            bool fresh = result.IsFreshFor(profile, DateTime.UtcNow) &&
+                core.Verification.MultiExits.NetworkKey == ProfileHealthEvidence.NetworkKey() &&
+                core.Verification.MultiExits.CoreKey == ProfileHealthEvidence.CoreKey(core.CorePath);
+            detail = result.Phase == ExitProbePhase.Verified && !fresh ? "Нужна свежая проверка" : result.Label(DateTime.UtcNow);
+            color = fresh ? Green : Warning;
+        }
+        if (configured != null && id != null)
+        {
+            var rules = configured.Rules.Where(rule => rule.Target == "Profile" && rule.ProfileId == id).ToArray();
+            detail += " · сайтов: " + rules.Count(rule => rule.Domain != null) + " · приложений: " + rules.Count(rule => rule.Domain == null);
+        }
+        var status = T(detail, 11, color); status.Name = "HomeVpn2Details";
+        status.TextWrapping = TextWrapping.Wrap; status.Margin = new Thickness(0, 4, 0, 0);
+        homeVpn2Status.Children.Add(status);
+    }
+
 	private void UpdateVerificationDisplay()
 	{
         UpdateSidebarConnectionStatus();
+        UpdateHomeVpn2Status();
 		if (protectionIndicators == null) return;
 		bool tunnelOk = core.Status == CoreStatus.Connected;
 		if (connectHeadline != null) connectHeadline.Text = StatusHeadline();

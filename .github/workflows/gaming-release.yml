@@ -60,7 +60,7 @@ jobs:
         run: |
           $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
           $csc = Join-Path (Split-Path $msbuild) 'Roslyn\csc.exe'
-          ./scripts/Run-MultiServerRegressionChecks.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CompilerPath $csc -Cases @('RoutingCardsTests','MultiServerSettingsTests','MultiServerConfigTests','MultiServerEditorTests','MultiServerRoutingHistoryTests','RoutingApplyTransactionTests')
+          ./scripts/Run-MultiServerRegressionChecks.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CompilerPath $csc -Cases @('MultiExitHealthDisplayTests','RoutingCardsTests','MultiServerSettingsTests','MultiServerConfigTests','MultiServerEditorTests','MultiServerRoutingHistoryTests','RoutingApplyTransactionTests')
           & 'work/payload/core/sing-box.exe' check -c 'bin/Release/RoutingCardsTests/synthetic-config.json'
           if ($LASTEXITCODE -ne 0) { throw 'Routing-card native core check failed' }
       - name: Verify settings transfer

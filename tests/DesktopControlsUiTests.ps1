@@ -64,6 +64,9 @@ try {
   $labels=@(Nodes $root | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)
   Assert ($labels -contains 'Два VPN-конфига') 'Dual VPN heading missing'
   Assert ($edit.Content -eq 'Выбрать сервер') 'Wrong configuration action'
+  $status2=Named 'HomeVpn2Status'
+  Assert (($status2.Visibility -eq [Windows.Visibility]::Visible) -eq ($case.Dual -or $case.Pending)) 'VPN2 home visibility wrong'
+  if($case.Dual){Assert ((Named 'HomeVpn2Name').Text.Contains($state.Profiles[2].Name)) 'VPN2 server missing from home status'}
   $names=Named 'DualVpnProfiles'
   Assert (($null -ne $names) -eq ($case.Dual -or $case.Pending)) 'Profile names do not reflect mode'
   if($case.Dual){Assert ($names.Text.Contains($state.Profiles[0].Name) -and $names.Text.Contains($state.Profiles[2].Name)) 'Selected configs missing'}
@@ -161,6 +164,22 @@ try {
  Assert ((CardText $cards[4]) -contains 'C:\Fixture\Primary.exe' -and (CardText $cards[4]) -contains 'legacy-primary.exe') 'Primary app path or legacy name missing'
  Assert ((CardText $cards[5]) -contains 'C:\Fixture\Secondary.exe') 'VPN-2 app missing'
  Assert ($settings.Rules.Count -eq 89 -and $state.Routing.DirectDomains.Count -eq 0 -and $state.Routing.ProxyDomains.Count -eq 0) 'Routing page modified saved rules'
+ foreach($width in @(680,900,1200)){
+  $window.Width=$width;Layout
+  $toolbar=Named 'RoutingToolbar';$header=Named 'RoutingHeader';$scroller=Named 'RoutingContentScroll'
+  $buttons=@(Nodes $toolbar | Where-Object {$_ -is [Windows.Controls.Button]})
+  for($i=0;$i -lt $buttons.Count;$i++){for($j=$i+1;$j -lt $buttons.Count;$j++){
+   $a=Bounds $buttons[$i] $toolbar;$b=Bounds $buttons[$j] $toolbar
+   $a.Inflate(3,3)
+   Assert (-not $a.IntersectsWith($b)) 'Routing toolbar buttons overlap or have no gap'
+  }}
+  $hb=Bounds $header $root;$sb=Bounds $scroller $root
+  Assert ($hb.Bottom -le $sb.Top) 'Routing content overlaps header'
+  Assert $scroller.ClipToBounds 'Routing scrolling can draw over toolbar'
+  $scroller.ScrollToVerticalOffset(150);Layout
+  Save-Image ('routing-toolbar-'+$width)
+  $scroller.ScrollToTop();Layout
+ }
  Save-Image 'routing-active'
  $secondaryInput=@(Nodes $cards[2] | Where-Object {$_ -is [Windows.Controls.TextBox] -and $_.Name -eq 'RoutingEntry'})[0]
  $secondaryInput.Text='DIRECT-0.example.test'
