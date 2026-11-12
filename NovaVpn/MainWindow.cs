@@ -2625,6 +2625,7 @@ public sealed partial class MainWindow : Window
 
 	private UIElement BuildRoutingPage()
 	{
+        if (state.Routing.MultiServer != null) return BuildMultiServerRoutingPage();
 		Grid grid = new Grid();
 		grid.RowDefinitions.Add(new RowDefinition
 		{
@@ -3093,37 +3094,94 @@ public sealed partial class MainWindow : Window
         disable.ToolTip="Назначения сохранятся для повторного включения. Активное подключение будет переподключено после проверки.";
         disable.Click+=async delegate{try{await ApplyServerAssignmentsAsync(state,null,true);}catch(Exception error){Toast(LogSanitizer.Sanitize(error.Message),Warning);}};actions.Children.Add(disable);
         var inspect=SmallButton("Проверить маршрут");inspect.Click+=delegate{Navigate("diagnostics");};actions.Children.Add(inspect);
-        var header=PageHeader("Маршрутизация","Сайты → приложения → основной сервер",actions,null);DockPanel.SetDock(header,Dock.Top);layout.Children.Add(header);
-        var content=new StackPanel{Margin=new Thickness(0,18,0,0)};var settings=state.Routing.MultiServer;
-        var primary=state.Profiles.FirstOrDefault(p=>p.Id==settings.DefaultProfileId);
-        content.Children.Add(T("Основной сервер: "+(primary==null?"Недоступен — назначьте другой":primary.Name+(primary.RetiredFromSubscription?" · удалён из подписки — трафик блокируется":"")),16,TextColor));
-        var explanation=T("Остальной трафик использует основной сервер. Недоступное назначение блокируется, автоматической замены нет. При применении нового набора VPN переподключается.",12,Muted);explanation.TextWrapping=TextWrapping.Wrap;content.Children.Add(explanation);
-        if (state.Routing.ZapretDirectDomains.Count > 0)
+        var header = new StackPanel();
+        header.Children.Add(PageHeader("Маршрутизация", "Сайты → приложения → основной сервер", null, null));
+        actions.Margin = new Thickness(0, 10, 0, 0);
+        header.Children.Add(actions);
+        DockPanel.SetDock(header, Dock.Top);
+        layout.Children.Add(header);
+
+        var content = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
+        var routing = state.Routing;
+        var settings = routing.MultiServer;
+        var primary = state.Profiles.FirstOrDefault(profile => profile.Id == settings.DefaultProfileId);
+        var secondary = state.Profiles.FirstOrDefault(profile => profile.Id == settings.SecondaryProfileId);
+        if (settings.RequiresRebinding)
         {
-            var zapretHint = T("Сайты Zapret идут напрямую, если для них нет явного назначения или блокировки.", 12, Muted);
-            zapretHint.TextWrapping = TextWrapping.Wrap;
-            content.Children.Add(zapretHint);
+            var warning = T("Импортированные назначения требуют привязки к серверам этого компьютера.", 12, Warning);
+            warning.TextWrapping = TextWrapping.Wrap;
+            warning.Margin = new Thickness(0, 0, 0, 10);
+            content.Children.Add(warning);
         }
-        if (state.Routing.AdvancedRules.Count > 0)
+
+        bool GoesThroughPrimary(MultiServerRuleRecord rule) => rule.Target == "Default" ||
+            (rule.Target == "Profile" && rule.ProfileId == settings.DefaultProfileId);
+        bool GoesThroughSecondary(MultiServerRuleRecord rule) => settings.SecondaryProfileId != null &&
+            rule.Target == "Profile" && rule.ProfileId == settings.SecondaryProfileId;
+        IEnumerable<string> Sites(Func<MultiServerRuleRecord, bool> filter) =>
+            settings.Rules.Where(rule => rule.Domain != null && filter(rule)).Select(rule => rule.DomainLabel);
+        IEnumerable<string> Apps(Func<MultiServerRuleRecord, bool> filter) =>
+            settings.Rules.Where(rule => rule.ApplicationPath != null && filter(rule)).Select(rule => rule.ApplicationPath);
+        string ServerCaption(VpnProfile profile, string unavailable) =>
+            profile == null ? unavailable : profile.Name + (profile.RetiredFromSubscription ? " · недоступен" : "");
+
+        var sitesDirect = RoutingViewCard("Сайты напрямую", "Действующие правила без VPN", Sites(rule => rule.Target == "Direct"), Teal, "RoutingSitesDirect");
+        content.Children.Add(TourAnchor("routing.domains", sitesDirect));
+        content.Children.Add(RoutingViewCard("Сайты через основной VPN", ServerCaption(primary, "Основной сервер недоступен"),
+            Sites(GoesThroughPrimary), Accent, "RoutingSitesPrimary"));
+        content.Children.Add(RoutingViewCard("Сайты через VPN-2", ServerCaption(secondary, settings.SecondaryProfileId == null ? "VPN-2 не выбран" : "VPN-2 недоступен"),
+            Sites(GoesThroughSecondary), Accent, "RoutingSitesSecondary"));
+        content.Children.Add(RoutingViewCard("Приложения напрямую", "Правила по пути и имени .exe",
+            Apps(rule => rule.Target == "Direct").Concat(routing.DirectProcesses), Teal, "RoutingAppsDirect"));
+        content.Children.Add(RoutingViewCard("Приложения через основной VPN", ServerCaption(primary, "Основной сервер недоступен"),
+            Apps(GoesThroughPrimary).Concat(routing.ProxyProcesses), Accent, "RoutingAppsPrimary"));
+        content.Children.Add(RoutingViewCard("Приложения через VPN-2", ServerCaption(secondary, settings.SecondaryProfileId == null ? "VPN-2 не выбран" : "VPN-2 недоступен"),
+            Apps(GoesThroughSecondary), Accent, "RoutingAppsSecondary"));
+
+        var blocked = Sites(rule => rule.Target == "Block").Concat(routing.BlockDomains).Concat(Apps(rule => rule.Target == "Block")).ToArray();
+        if (blocked.Length != 0)
+            content.Children.Add(RoutingViewCard("Блокировать", "Заблокированные сайты и приложения", blocked, Danger, "RoutingBlocked"));
+        var other = settings.Rules.Where(rule => rule.Target == "Profile" && !GoesThroughPrimary(rule) && !GoesThroughSecondary(rule))
+            .Select(rule => (rule.Domain == null ? rule.ApplicationPath : rule.DomainLabel) + " → " +
+                (state.Profiles.FirstOrDefault(profile => profile.Id == rule.ProfileId)?.Name ?? "Сервер недоступен")).ToArray();
+        if (other.Length != 0)
+            content.Children.Add(RoutingViewCard("Другие назначения", "Правила для отдельных серверов", other, Accent, "RoutingOther"));
+        if (routing.ZapretDirectDomains.Count != 0)
+            content.Children.Add(RoutingViewCard("Сайты Zapret", "Напрямую, если нет явного назначения или блокировки",
+                routing.ZapretDirectDomains, Teal, "RoutingZapret"));
+        if (routing.AdvancedRules.Count != 0)
+            content.Children.Add(RouteEditorCard("Расширенные правила", "Правила TCP и UDP", routing.AdvancedRules, Warning, "advanced"));
+
+        multiExitHealthPanel = new StackPanel { Margin = new Thickness(0, 12, 0, 8) };
+        content.Children.Add(multiExitHealthPanel);
+        UpdateMultiExitHealthPanel();
+        layout.Children.Add(TouchScrollViewer(new ScrollViewer
         {
-            var advancedHint = T("Блокировки по портам сохранены. Остальные правила портов действуют для трафика без назначения.", 12, Muted);
-            advancedHint.TextWrapping = TextWrapping.Wrap;
-            content.Children.Add(advancedHint);
-        }
-        if (state.Routing.DirectProcesses.Count > 0 || state.Routing.ProxyProcesses.Count > 0)
+            Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        }));
+        return layout;
+    }
+
+    private Border RoutingViewCard(string title, string caption, IEnumerable<string> values, Color accent, string name)
+    {
+        var rows = new StackPanel();
+        foreach (string value in values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var nameHint = T("Прежние правила по имени .exe действуют после назначений по полному пути и правил портов.", 12, Muted);
-            nameHint.TextWrapping = TextWrapping.Wrap;
-            content.Children.Add(nameHint);
+            var row = T(value, 12, TextColor);
+            row.TextWrapping = TextWrapping.Wrap;
+            rows.Children.Add(new Border { Child = row, Padding = new Thickness(9, 7, 9, 7),
+                Margin = new Thickness(0, 0, 0, 6), Background = new SolidColorBrush(palette.Input),
+                BorderBrush = new SolidColorBrush(BorderColor), BorderThickness = new Thickness(1), ToolTip = value });
         }
-        multiExitHealthPanel=new StackPanel{Margin=new Thickness(0,12,0,8)};content.Children.Add(multiExitHealthPanel);UpdateMultiExitHealthPanel();
-        if(state.MultiServerRoutingHistory?.SingleServerRouting==null)content.Children.Add(T("Прежняя схема не сохранена: отключение использует обычную маршрутизацию с текущими настройками. Назначения останутся для повторного включения.",12,Warning));
-        if(settings.RequiresRebinding)content.Children.Add(T("Импортированные назначения требуют привязки к серверам этого компьютера.",12,Warning));
-        foreach(var rule in settings.Rules){string destination=rule.Domain==null?System.IO.Path.GetFileName(rule.ApplicationPath):rule.DomainLabel;
-            string target=rule.Target=="Profile"?state.Profiles.FirstOrDefault(p=>p.Id==rule.ProfileId)?.Name??"Сервер недоступен":rule.Target=="Direct"?"Напрямую":rule.Target=="Block"?"Блокировать":"Основной сервер";
-            var row=T(destination+" → "+target,13,TextColor);row.Margin=new Thickness(0,8,0,0);row.TextWrapping=TextWrapping.Wrap;row.ToolTip=rule.ApplicationPath;content.Children.Add(row);
-        }
-        layout.Children.Add(TouchScrollViewer(new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}));return layout;
+        if (rows.Children.Count == 0)
+            rows.Children.Add(T("Нет правил.", 11, Muted));
+        var scroll = new ScrollViewer { Content = rows, MaxHeight = 220 * state.Visual.TextScale,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        scroll.PreviewMouseWheel += (sender, args) => SmoothScrollBehavior.ForwardToPage(scroll, args);
+        var card = RouteCard(title, caption, accent, scroll);
+        card.Name = name;
+        return card;
     }
     private StackPanel multiExitHealthPanel;
     private void UpdateMultiExitHealthPanel()
@@ -3432,6 +3490,42 @@ public sealed partial class MainWindow : Window
 
 	private Border RouteEditorCard(string title, string caption, List<string> values, Color accent, string key)
 	{
+		bool zapretTransitionActive = state.Zapret?.RoutingChangesApplied == true;
+		bool routingListLocked = zapretTransitionActive && (key == "proxy-domains" || key == "direct-domains"
+			|| key == "proxy-apps" || key == "direct-apps" || key == "proxy-paths" || key == "direct-paths");
+		string itemLabel = key.EndsWith("domains", StringComparison.Ordinal) ? "домен"
+			: key.EndsWith("apps", StringComparison.Ordinal) ? "приложение"
+			: key.EndsWith("paths", StringComparison.Ordinal) ? "путь" : "правило";
+		var editor = new RoutingListEditor(values, () =>
+		{
+			if (!snapshotMode) StateStore.Save(state);
+		}, () => new TextBox
+		{
+			Background = new SolidColorBrush(palette.Input),
+			Foreground = new SolidColorBrush(TextColor),
+			CaretBrush = new SolidColorBrush(AccentLight),
+			BorderBrush = new SolidColorBrush(BorderColor),
+			BorderThickness = new Thickness(1),
+			FontFamily = new FontFamily("Consolas"),
+			FontSize = 13 * state.Visual.TextScale,
+			MinHeight = Math.Max(36, 36 * state.Visual.TextScale),
+			VerticalContentAlignment = VerticalAlignment.Center,
+			Padding = new Thickness(8, 6, 8, 6),
+			ToolTip = caption
+		}, text =>
+		{
+			Button button = SmallButton(text);
+			button.Foreground = new SolidColorBrush(TextColor);
+			return button;
+		}, itemLabel, routingListLocked);
+		if (routingListLocked)
+			editor.ToolTip = "Выключите Zapret, чтобы редактировать списки маршрутов. Исходные VPN-маршруты временно сохранены и вернутся автоматически.";
+		AutomationProperties.SetName(editor, title);
+        return RouteCard(title, caption, accent, editor);
+    }
+
+    private Border RouteCard(string title, string caption, Color accent, UIElement editor)
+    {
 		Border border = new Border();
 		border.Margin = new Thickness(0.0, 0.0, 0.0, 10.0);
 		border.Padding = new Thickness(17.0, 14.0, 14.0, 14.0);
@@ -3475,37 +3569,6 @@ public sealed partial class MainWindow : Window
 		Grid.SetColumn(stackPanel, 1);
 		grid2.Children.Add(stackPanel);
 		grid.Children.Add(grid2);
-		bool zapretTransitionActive = state.Zapret?.RoutingChangesApplied == true;
-		bool routingListLocked = zapretTransitionActive && (key == "proxy-domains" || key == "direct-domains"
-			|| key == "proxy-apps" || key == "direct-apps" || key == "proxy-paths" || key == "direct-paths");
-		string itemLabel = key.EndsWith("domains", StringComparison.Ordinal) ? "домен"
-			: key.EndsWith("apps", StringComparison.Ordinal) ? "приложение"
-			: key.EndsWith("paths", StringComparison.Ordinal) ? "путь" : "правило";
-		var editor = new RoutingListEditor(values, () =>
-		{
-			if (!snapshotMode) StateStore.Save(state);
-		}, () => new TextBox
-		{
-			Background = new SolidColorBrush(palette.Input),
-			Foreground = new SolidColorBrush(TextColor),
-			CaretBrush = new SolidColorBrush(AccentLight),
-			BorderBrush = new SolidColorBrush(BorderColor),
-			BorderThickness = new Thickness(1),
-			FontFamily = new FontFamily("Consolas"),
-			FontSize = 13 * state.Visual.TextScale,
-			MinHeight = Math.Max(36, 36 * state.Visual.TextScale),
-			VerticalContentAlignment = VerticalAlignment.Center,
-			Padding = new Thickness(8, 6, 8, 6),
-			ToolTip = caption
-		}, text =>
-		{
-			Button button = SmallButton(text);
-			button.Foreground = new SolidColorBrush(TextColor);
-			return button;
-		}, itemLabel, routingListLocked);
-		if (routingListLocked)
-			editor.ToolTip = "Выключите Zapret, чтобы редактировать списки маршрутов. Исходные VPN-маршруты временно сохранены и вернутся автоматически.";
-		AutomationProperties.SetName(editor, title);
 		Grid.SetRow(editor, 2);
 		grid.Children.Add(editor);
 		border2.Child = grid;

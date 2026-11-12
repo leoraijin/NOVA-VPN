@@ -133,7 +133,34 @@ try {
  $edit=Named 'EditMultiServerRouting';Assert ($null -ne $edit) 'Multi-server editor entry removed with legacy block'
  Save-Image 'routing'
  $state.Routing.MultiServer=$settings
+ $ruleType=$assembly.GetType('NovaVpn.MultiServerRuleRecord')
+ function Add-Route($domain,$path,$target,$id){
+  $rule=[Activator]::CreateInstance($ruleType)
+  $rule.Domain=$domain;$rule.ApplicationPath=$path;$rule.Target=$target;$rule.ProfileId=$id
+  $settings.Rules.Add($rule)
+ }
+ for($i=0;$i -lt 13;$i++){Add-Route "direct-$i.example.test" $null 'Direct' $null}
+ for($i=0;$i -lt 72;$i++){Add-Route "primary-$i.example.test" $null 'Default' $null}
+ Add-Route 'secondary.example.test' $null 'Profile' $settings.SecondaryProfileId
+ Add-Route $null 'C:\Fixture\Direct.exe' 'Direct' $null
+ Add-Route $null 'C:\Fixture\Primary.exe' 'Profile' $settings.DefaultProfileId
+ Add-Route $null 'C:\Fixture\Secondary.exe' 'Profile' $settings.SecondaryProfileId
+ $state.Routing.DirectDomains.Clear();$state.Routing.ProxyDomains.Clear()
+ $state.Routing.DirectProcesses.Add('legacy-direct.exe')
+ $state.Routing.ProxyProcesses.Add('legacy-primary.exe')
  $window.ShowPageForSnapshot('routing');Layout
  Assert ($null -ne (Named 'EditMultiServerRouting')) 'Active multi-server routing editor missing'
+ $expected=@('RoutingSitesDirect','RoutingSitesPrimary','RoutingSitesSecondary','RoutingAppsDirect','RoutingAppsPrimary','RoutingAppsSecondary')
+ $cards=@(Nodes $root | Where-Object {$_ -is [Windows.Controls.Border] -and $_.Name -in $expected})
+ Assert (($cards.Name -join '|') -eq ($expected -join '|')) 'Routing card order changed'
+ function CardText($card){@(Nodes $card | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)}
+ Assert (@(CardText $cards[0] | Where-Object {$_ -like 'direct-*.example.test'}).Count -eq 13) 'Direct sites missing from routing page'
+ Assert (@(CardText $cards[1] | Where-Object {$_ -like 'primary-*.example.test'}).Count -eq 72) 'Primary sites missing from routing page'
+ Assert ((CardText $cards[2]) -contains 'secondary.example.test') 'VPN-2 site missing'
+ Assert ((CardText $cards[3]) -contains 'C:\Fixture\Direct.exe' -and (CardText $cards[3]) -contains 'legacy-direct.exe') 'Direct app path or legacy name missing'
+ Assert ((CardText $cards[4]) -contains 'C:\Fixture\Primary.exe' -and (CardText $cards[4]) -contains 'legacy-primary.exe') 'Primary app path or legacy name missing'
+ Assert ((CardText $cards[5]) -contains 'C:\Fixture\Secondary.exe') 'VPN-2 app missing'
+ Assert ($settings.Rules.Count -eq 89 -and $state.Routing.DirectDomains.Count -eq 0 -and $state.Routing.ProxyDomains.Count -eq 0) 'Routing page modified saved rules'
+ Save-Image 'routing-active'
  Write-Output "PASS: $checks desktop UI checks; seven window/theme/mode variants. Synthetic profiles only."
 } finally {$window.Close();$app.Shutdown()}

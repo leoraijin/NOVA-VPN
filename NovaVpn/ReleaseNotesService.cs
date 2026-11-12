@@ -21,6 +21,8 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 11),
+            "В режиме двух VPN страница маршрутизации показывает сохранённые правила сайтов и приложений. В каждой группе порядок: напрямую, основной VPN, VPN-2."),
         new ReleaseNoteEntry(new Version(2, 6, 10),
             "Возвращена версия маршрутизации 2.6.8. Новый номер позволяет установить её через автообновление после 2.6.9."),
         new ReleaseNoteEntry(new Version(2, 6, 8),
