@@ -21,6 +21,8 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 10),
+            "Возвращена версия маршрутизации 2.6.8. Новый номер позволяет установить её через автообновление после 2.6.9."),
         new ReleaseNoteEntry(new Version(2, 6, 8),
             "Тумблер включает возможность назначить VPN-2. Кнопка сразу открывает список, а карта предлагает роль даже до назначения второго сервера."),
         new ReleaseNoteEntry(new Version(2, 6, 7),
