@@ -223,10 +223,11 @@ public static class LinkParser
 		vpnProfile.UserId = Uri.UnescapeDataString(uri.UserInfo);
 		vpnProfile.Security = Get(query, "security", "none");
 		vpnProfile.Transport = Get(query, "type", "tcp");
-		if (string.Equals(vpnProfile.Transport, "xhttp", StringComparison.OrdinalIgnoreCase) || string.Equals(vpnProfile.Transport, "splithttp", StringComparison.OrdinalIgnoreCase))
-		{
-			throw new NotSupportedException("Профили XHTTP пропущены: это транспорт Xray, который не поддерживается ядром sing-box.");
-		}
+        if (ConfigBuilder.RequiresXrayTransport(vpnProfile))
+        {
+            vpnProfile.HealthStatus = "Требуется Xray";
+            vpnProfile.LastTestMessage = "XHTTP сохранён из подписки. Текущие ядра Windows-клиента не поддерживают этот транспорт.";
+        }
 		vpnProfile.Host = Get(query, "host", "");
 		vpnProfile.Path = Get(query, "path", "");
 		vpnProfile.Sni = Get(query, "sni", Get(query, "serverName", ""));
@@ -450,7 +451,7 @@ public static class LinkParser
 
 	private static string DecodeBase64(string value)
 	{
-		value = value.Trim().Replace('-', '+').Replace('_', '/');
+		value = string.Concat(System.Linq.Enumerable.Where(value, c => !char.IsWhiteSpace(c))).Replace('-', '+').Replace('_', '/');
 		int num = value.Length % 4;
 		if (num > 0)
 		{

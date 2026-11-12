@@ -310,7 +310,7 @@ public sealed class MultiServerRoutingWindow : Window
   finally { selecting = false; }
  }
  internal static bool Compatible(VpnProfile profile) =>
-  !profile.RetiredFromSubscription && profile.Protocol != "sing-box" && !CorporateProxy.Enabled(profile);
+  !profile.RetiredFromSubscription && profile.Protocol != "sing-box" && !CorporateProxy.Enabled(profile) && !ConfigBuilder.RequiresXrayTransport(profile);
  void Render(){apps.Items.Clear();sites.Items.Clear();secondaryApps.Items.Clear();foreach(var entry in catalog.GroupBy(a=>a.ExecutablePath,StringComparer.OrdinalIgnoreCase).Select(g=>g.First()).OrderBy(a=>a.Name)){var rule=rules.FirstOrDefault(r=>r.ApplicationPath!=null&&ApplicationRoutingService.SamePath(r.ApplicationPath,entry.ExecutablePath));apps.Items.Add(new ListBoxItem{Content=new TextBlock{Text=entry.Name+" — "+Label(rule),TextWrapping=TextWrapping.Wrap},Tag=entry,ToolTip=entry.ExecutablePath,Padding=new Thickness(7)});
   secondaryApps.Items.Add(new ListBoxItem{Content=new TextBlock{Text=entry.Name+" — "+Label(rule),
    TextWrapping=TextWrapping.Wrap},Tag=entry,ToolTip=entry.ExecutablePath,Padding=new Thickness(7)});

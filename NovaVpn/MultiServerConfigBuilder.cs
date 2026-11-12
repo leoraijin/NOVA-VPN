@@ -143,6 +143,29 @@ public static class MultiServerConfigBuilder
         }
         dnsRules.Add(Obj("query_type",new[]{"HTTPS","SVCB"},"action","predefined","rcode","NOERROR"));
         if(!routing.EnableIpv6)dnsRules.Add(Obj("query_type","AAAA","action","predefined","rcode","NOERROR"));
+        // Keep explicit site precedence while returning real addresses for direct sites.
+        // A cached FakeIP becomes unreachable as soon as the TUN goes away.
+        foreach (var rule in ordered.Where(rule => rule.Domain != null && rule.Target.Kind != ServerRouteKind.Block))
+        {
+            var query = Selector(rule);
+            query["query_type"] = new[] {"A", "AAAA"};
+            query["action"] = "route";
+            query["server"] = rule.Target.Kind == ServerRouteKind.Direct ? "nova-bootstrap-dns" : "nova-fakeip";
+            dnsRules.Add(query);
+        }
+        void AddAddressLookup(Dictionary<string,object> match, bool direct)
+        {
+            if (match == null) return;
+            match["query_type"] = new[] {"A", "AAAA"};
+            match["action"] = "route";
+            match["server"] = direct ? "nova-bootstrap-dns" : "nova-fakeip";
+            dnsRules.Add(match);
+        }
+        foreach (var rule in ordered.Where(rule => rule.ApplicationPath != null && rule.Target.Kind != ServerRouteKind.Block))
+            AddAddressLookup(Selector(rule), rule.Target.Kind == ServerRouteKind.Direct);
+        AddAddressLookup(ConfigBuilder.ProcessNameSelector(routing.DirectProcesses), true);
+        foreach (var rule in ordered.Where(rule => rule.ApplicationName != null && rule.Target.Kind != ServerRouteKind.Block))
+            AddAddressLookup(Selector(rule), rule.Target.Kind == ServerRouteKind.Direct);
         dnsRules.Add(Obj("query_type",new[]{"A","AAAA"},"action","route","server","nova-fakeip"));
         string Exit(ServerRouteTarget target) {if(target.Kind==ServerRouteKind.Block)return null;if(target.Kind==ServerRouteKind.Direct)return "nova-direct";var id=target.Kind==ServerRouteKind.Default?settings.DefaultProfileId:target.ProfileId;return tags.TryGetValue(id,out string tag)?tag:null;}
         void Append(Dictionary<string,object> match,ServerRouteTarget target,string resolver = null) {
@@ -212,7 +235,7 @@ public static class MultiServerConfigBuilder
         string final=Exit(new ServerRouteTarget(ServerRouteKind.Default));
         if(final==null)dnsRules.Add(Obj("action","reject"));
         config["route"]=Obj("auto_detect_interface",true,"default_domain_resolver","nova-bootstrap-dns","rules",rules.ToArray(),"final",final??"nova-direct");
-        config["dns"]=Obj("servers",servers.ToArray(),"rules",dnsRules.ToArray(),"final",final==null?"nova-bootstrap-dns":"dns-"+final,"independent_cache",true);
+        config["dns"]=Obj("servers",servers.ToArray(),"rules",dnsRules.ToArray(),"final",final==null?"nova-bootstrap-dns":"dns-"+final,"independent_cache",true,"reverse_mapping",true);
         config["experimental"]=Obj("cache_file",Obj("enabled",true,"path",cachePath,"store_fakeip",true));
         // Capture IPv6 even when disabled, so the reject rule can handle it.
         Items(config["inbounds"]).Single()["address"]=new[]{"172.19.0.1/30","fdfe:dcba:9876::1/126"};

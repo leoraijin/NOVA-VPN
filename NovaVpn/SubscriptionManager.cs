@@ -306,7 +306,7 @@ public static class SubscriptionManager
     }
     private static Dictionary<string,object> MatchingOutbound(VpnProfile p) =>
         new JavaScriptSerializer {MaxJsonLength=8*1024*1024}.Deserialize<Dictionary<string,object>>(ConfigBuilder.ExportBaseOutbound(p));
-    private static bool IsOpaque(VpnProfile p) => String.Equals(p.Protocol,"sing-box",StringComparison.OrdinalIgnoreCase)||!String.IsNullOrWhiteSpace(p.RawJson);
+    private static bool IsOpaque(VpnProfile p) => ConfigBuilder.RequiresXrayTransport(p) || String.Equals(p.Protocol,"sing-box",StringComparison.OrdinalIgnoreCase)||!String.IsNullOrWhiteSpace(p.RawJson);
     private static string MatchingConfigKey(VpnProfile p) => IsOpaque(p)?"opaque:"+SourceConfigKey(p):Hash(CanonicalConnection(MatchingOutbound(p)));
     private static bool CanRotateAtEndpoint(VpnProfile p)
     {

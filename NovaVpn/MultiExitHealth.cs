@@ -39,7 +39,9 @@ public sealed class ExitProbeResult
     }
     public bool HasRecentSuccess(DateTime now) => Phase==ExitProbePhase.Verified&&LatencyMs>0&&CheckedUtc!=default(DateTime)&&
         now>=CheckedUtc&&now-CheckedUtc<TimeSpan.FromMinutes(3);
-    public string Label(DateTime now) => Phase==ExitProbePhase.Verified?(HasRecentSuccess(now)?"HTTPS подтверждён · "+LatencyMs+" мс":"Нужна свежая проверка"):
+    internal bool UsesIpTarget => Uri.TryCreate(Target, UriKind.Absolute, out Uri uri) &&
+        System.Net.IPAddress.TryParse(uri.Host, out _);
+    public string Label(DateTime now) => Phase==ExitProbePhase.Verified?(HasRecentSuccess(now)?(UsesIpTarget ? "HTTPS по IP · DNS не подтверждён · " : "HTTPS подтверждён · ")+LatencyMs+" мс":"Нужна свежая проверка"):
         Phase==ExitProbePhase.Unavailable?"Конфиг недоступен":Phase==ExitProbePhase.Unsupported?"Проверка не поддерживается":
         Phase==ExitProbePhase.Queued?"Проверяется…":"HTTPS не подтверждён";
     public bool IsFreshFor(VpnProfile profile,DateTime now) {
@@ -63,12 +65,12 @@ public static class MultiExitHealthRunner
                 if(exit.Phase!=ExitProbePhase.Queued)throw new ArgumentException("Некорректное состояние плана проверки.");
                 await slots.WaitAsync(token).ConfigureAwait(false);
                 try {
-                    foreach(string target in new[]{"https://cp.cloudflare.com/generate_204","https://www.gstatic.com/generate_204"}) {
+                    foreach(string target in new[]{"https://cp.cloudflare.com/generate_204","https://1.1.1.1/cdn-cgi/trace"}) {
                         token.ThrowIfCancellationRequested();
                         try {
                             var watch=Stopwatch.StartNew();int status=await read(exit.ProfileId,new Uri(target),token).ConfigureAwait(false);
                             token.ThrowIfCancellationRequested();
-                            if(status==204)return new ExitProbeResult(exit,ExitProbePhase.Verified,(int)Math.Max(1,watch.ElapsedMilliseconds),DateTime.UtcNow,target);
+                            if(status==(target.StartsWith("https://1.1.1.1/",StringComparison.Ordinal)?200:204))return new ExitProbeResult(exit,ExitProbePhase.Verified,(int)Math.Max(1,watch.ElapsedMilliseconds),DateTime.UtcNow,target);
                         } catch(Exception error) when(error is IOException||error is SocketException||error is System.Security.Authentication.AuthenticationException||error is OperationCanceledException||error is ObjectDisposedException) {
                             token.ThrowIfCancellationRequested();
                         }

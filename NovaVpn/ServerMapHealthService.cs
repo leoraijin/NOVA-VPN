@@ -54,6 +54,7 @@ public static class ServerMapHealthService
 		var result = new ServerMapHealth();
 		if (profile == null || profile.Protocol == "sing-box")
 			return new ServerMapHealth { Supported = false, Message = "Полный конфиг: проверка при подключении" };
+        if (ConfigBuilder.RequiresXrayTransport(profile)) return new ServerMapHealth { Supported = false, Message = "XHTTP требует ядро Xray" };
 		if (!File.Exists(corePath)) return new ServerMapHealth { Supported = false, Message = "Нужно установить VPN-ядро" };
 		string file = null, pacDescriptor = null;
 		Process process = null;
@@ -102,7 +103,7 @@ public static class ServerMapHealthService
                     {
                     using (var targetDeadline = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token))
                     {
-                    targetDeadline.CancelAfter(TimeSpan.FromSeconds(12));
+                    targetDeadline.CancelAfter(TimeSpan.FromSeconds(7));
                     bool trace = target.Contains("cdn-cgi/trace");
                     result.LatencyMs = await WarmHttpsLatency.MeasureAsync(async () =>
 					{

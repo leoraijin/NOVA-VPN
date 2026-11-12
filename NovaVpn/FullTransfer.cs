@@ -20,6 +20,7 @@ public sealed class FullTransferDocument {
  public Dictionary<string,string> platforms=new Dictionary<string,string>();
 }
 public static class FullTransfer {
+ const string XhttpMarker = "{\"type\":\"nova-xhttp-required\"}";
  static JavaScriptSerializer Json()=>new JavaScriptSerializer {MaxJsonLength=IdentityTransfer.MaxBytes,RecursionLimit=64};
  public static AppState Copy(AppState state)=>Restore(Snapshot(state));
  static string Snapshot(AppState state){using(var m=new MemoryStream()){new DataContractJsonSerializer(typeof(AppState),new DataContractJsonSerializerSettings { DateTimeFormat=new System.Runtime.Serialization.DateTimeFormat("o",System.Globalization.CultureInfo.InvariantCulture) { DateTimeStyles=System.Globalization.DateTimeStyles.RoundtripKind } }).WriteObject(m,state);return Encoding.UTF8.GetString(m.ToArray());}}
@@ -29,7 +30,7 @@ public static class FullTransfer {
   var identity=state.SubscriptionIdentities??new IdentityState();identity.Validate();
   var doc=new FullTransferDocument {identity=new IdentityState {identities=identity.identities,bindings=identity.bindings},selectedId=state.SelectedProfileId??"",dark=state.Visual?.DarkMode??false,ipv6=state.Routing?.EnableIpv6??false,directDomains=state.Routing?.DirectDomains??new List<string>(),proxyDomains=state.Routing?.ProxyDomains??new List<string>(),platforms=new Dictionary<string,string>(identity.platforms??new Dictionary<string,string>())};
   var copy=Restore(Snapshot(state));copy.SubscriptionIdentities=new IdentityState();doc.platforms["windows"]=Snapshot(copy);
-  foreach(var p in state.Profiles)doc.profiles.Add(new TransferProfile {id=p.Id,name=p.Name,protocol=p.Protocol,server=p.Server,port=p.Port,outboundJson=p.Protocol=="sing-box"?null:ConfigBuilder.ExportOutbound(p),fullConfigJson=p.Protocol=="sing-box"?p.RawJson:null,subscriptionUrl=p.SubscriptionUrl,favorite=p.IsFavorite,retiredFromSubscription=p.RetiredFromSubscription});
+  foreach(var p in state.Profiles)doc.profiles.Add(new TransferProfile {id=p.Id,name=p.Name,protocol=p.Protocol,server=p.Server,port=p.Port,outboundJson=p.Protocol=="sing-box"?null:ConfigBuilder.RequiresXrayTransport(p)?XhttpMarker:ConfigBuilder.ExportOutbound(p),fullConfigJson=p.Protocol=="sing-box"?p.RawJson:null,subscriptionUrl=p.SubscriptionUrl,favorite=p.IsFavorite,retiredFromSubscription=p.RetiredFromSubscription});
   return IdentityTransfer.Seal(Json().Serialize(doc),password);
  }
  // Older Android copies record availability as subscription/manual ownership.
@@ -105,6 +106,14 @@ public static class FullTransfer {
    if(String.IsNullOrWhiteSpace(p.fullConfigJson)){var o=Json().DeserializeObject(p.outboundJson??"") as Dictionary<string,object>;if(o==null||!o.ContainsKey("type"))throw new FormatException("Некорректная конфигурация сервера.");}
    else if(!(Json().DeserializeObject(p.fullConfigJson) is Dictionary<string,object>))throw new FormatException("Некорректная полная конфигурация.");
    savedProfiles.TryGetValue(p.id,out var saved);
+   if (p.outboundJson == XhttpMarker) {
+    if (!ConfigBuilder.RequiresXrayTransport(saved) || !String.IsNullOrWhiteSpace(p.fullConfigJson))
+     throw new FormatException("В пакете отсутствует исходный профиль XHTTP для Windows.");
+    saved.Name=p.name;saved.IsFavorite=p.favorite||saved.IsFavorite;
+    saved.RetiredFromSubscription=p.retiredFromSubscription??saved.RetiredFromSubscription;
+    profiles.Add(saved);
+    continue;
+   }
    var portable=p.outboundJson;
    if(String.IsNullOrWhiteSpace(p.fullConfigJson)&&Equals((Json().DeserializeObject(p.outboundJson) as Dictionary<string,object>)?["type"],CorporateProxy.RequiredOutboundType)) {
     if(!CorporateProxy.Enabled(saved))throw new FormatException("Для этого профиля нужен Windows-пакет с настройками корпоративного прокси.");

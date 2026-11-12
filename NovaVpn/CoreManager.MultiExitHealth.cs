@@ -21,7 +21,8 @@ public sealed partial class CoreManager
         if(operation.Token.IsCancellationRequested||!IsCurrentVerification(operation)||network!=ProfileHealthEvidence.NetworkKey()||core!=ProfileHealthEvidence.CoreKey(operation.CorePath))
             return new ConnectionVerification{ProfileId=operation.ProfileId,Message="Подключение изменилось во время проверки выходов"};
         result.MultiExits=new MultiExitHealthSnapshot(exits,network,core);
-        result.InternetOk=result.DnsOk=result.MultiExits.AllVerified;
+        result.InternetOk=result.MultiExits.AllVerified;
+        result.DnsOk=result.InternetOk && exits.All(exit => !exit.UsesIpTarget);
         result.InternetLatencyMs=exits.Where(e=>e.Phase==ExitProbePhase.Verified).Select(e=>e.LatencyMs).DefaultIfEmpty(-1).Max();
         result.Message=result.MultiExits.Summary;
         if(TryPublishVerification(operation,operation.Generation,result))VerificationChanged?.Invoke(result);

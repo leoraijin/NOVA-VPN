@@ -153,8 +153,13 @@ public static class ConfigBuilder
 
 	public static string ExportOutbound(VpnProfile p) => CorporateProxy.Enabled(p) ? CorporateProxy.ExportMarker() : ExportBaseOutbound(p);
     internal static string ExportBaseOutbound(VpnProfile p) => new JavaScriptSerializer().Serialize(BuildProxy(p));
+    internal static bool RequiresXrayTransport(VpnProfile profile) =>
+        string.Equals(profile?.Transport, "xhttp", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(profile?.Transport, "splithttp", StringComparison.OrdinalIgnoreCase);
+
     private static Dictionary<string, object> BuildProxy(VpnProfile p)
 	{
+        if (RequiresXrayTransport(p)) throw new NotSupportedException("Для XHTTP требуется ядро Xray. В Windows-клиенте оно пока не подключено.");
         if(!String.IsNullOrWhiteSpace(p.EffectivePortableOutboundJson)) { var saved=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(p.EffectivePortableOutboundJson);saved["tag"]="proxy";return saved; }
 
 		Dictionary<string, object> dictionary = Obj("type", p.Protocol, "tag", "proxy", "server", p.Server, "server_port", p.Port, "domain_resolver", "local-dns");

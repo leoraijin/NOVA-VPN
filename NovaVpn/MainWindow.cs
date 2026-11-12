@@ -130,7 +130,7 @@ public sealed partial class MainWindow : Window
 	private readonly DispatcherTimer subscriptionTimer;
 
 	private readonly DispatcherTimer visualTimer;
-	private readonly DispatcherTimer mapHealthTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+	private readonly DispatcherTimer mapHealthTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
 	private readonly System.Threading.CancellationTokenSource mapHealthCancellation = new System.Threading.CancellationTokenSource();
 	private readonly Dictionary<string, ServerMapHealth> mapHealth = new Dictionary<string, ServerMapHealth>();
 	private InteractiveServerMap liveServerMap, expandedServerMap;
@@ -1456,13 +1456,13 @@ public sealed partial class MainWindow : Window
 			var candidates = new List<VpnProfile>();
 			var selected = SelectedProfile();
 			if (selected != null && (!mapHealth.TryGetValue(selected.Id, out var selectedHealth) ||
-				(selectedHealth.ProfileKey != SubscriptionManager.ConfigKey(selected) || selectedHealth.Supported && DateTime.UtcNow - selectedHealth.CheckedUtc > TimeSpan.FromSeconds(90)))) candidates.Add(selected);
+				(selectedHealth.ProfileKey != SubscriptionManager.ConfigKey(selected) || selectedHealth.Supported && DateTime.UtcNow - selectedHealth.CheckedUtc > TimeSpan.FromSeconds(150)))) candidates.Add(selected);
 			for (int i = 0; i < profiles.Length && candidates.Count < 8; i++)
 			{
 				var profile = profiles[mapHealthCursor++ % profiles.Length];
 				if (candidates.Contains(profile)) continue;
 				if (!mapHealth.TryGetValue(profile.Id, out var checkedResult) ||
-					(checkedResult.ProfileKey != SubscriptionManager.ConfigKey(profile) || checkedResult.Supported && DateTime.UtcNow - checkedResult.CheckedUtc > TimeSpan.FromSeconds(90))) candidates.Add(profile);
+					(checkedResult.ProfileKey != SubscriptionManager.ConfigKey(profile) || checkedResult.Supported && DateTime.UtcNow - checkedResult.CheckedUtc > TimeSpan.FromSeconds(150))) candidates.Add(profile);
 			}
 			using (var gate = new System.Threading.SemaphoreSlim(2))
 			{
@@ -4781,6 +4781,7 @@ public sealed partial class MainWindow : Window
     private void CoreStatusChanged(CoreStatus newStatus,string message,int generation)
     {
         if(closing||generation!=core.RuntimeGeneration||newStatus!=core.Status)return;
+        if (newStatus == CoreStatus.Error) core.RecordReportLog("Ошибка ядра: " + message);
         long revision=System.Threading.Interlocked.Increment(ref coreStatusNotificationRevision);
 		base.Dispatcher.BeginInvoke((Action)delegate
 		{
