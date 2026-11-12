@@ -3096,7 +3096,12 @@ public sealed partial class MainWindow : Window
         disable.ToolTip="Назначения сохранятся для повторного включения. Активное подключение будет переподключено после проверки.";
         disable.Click+=async delegate{try{await ApplyServerAssignmentsAsync(state,null,true);}catch(Exception error){Toast(LogSanitizer.Sanitize(error.Message),Warning);}};actions.Children.Add(disable);
         var inspect=SmallButton("Проверить маршрут");inspect.Click+=delegate{Navigate("diagnostics");};actions.Children.Add(inspect);
-        var header=PageHeader("Маршрутизация","Сайты → приложения → основной сервер",actions,null);DockPanel.SetDock(header,Dock.Top);layout.Children.Add(header);
+        var header = new StackPanel();
+        header.Children.Add(PageHeader("Маршрутизация", "Сайты → приложения → основной сервер", null, null));
+        actions.Margin = new Thickness(0, 10, 0, 0);
+        header.Children.Add(actions);
+        DockPanel.SetDock(header, Dock.Top);
+        layout.Children.Add(header);
         var content=new StackPanel{Margin=new Thickness(0,18,0,0)};var settings=state.Routing.MultiServer;
         var primary=state.Profiles.FirstOrDefault(p=>p.Id==settings.DefaultProfileId);
         content.Children.Add(T("Основной сервер: "+(primary==null?"Недоступен — назначьте другой":primary.Name+(primary.RetiredFromSubscription?" · удалён из подписки — трафик блокируется":"")),16,TextColor));
@@ -3120,7 +3125,13 @@ public sealed partial class MainWindow : Window
             content.Children.Add(nameHint);
         }
         multiExitHealthPanel=new StackPanel{Margin=new Thickness(0,12,0,8)};content.Children.Add(multiExitHealthPanel);UpdateMultiExitHealthPanel();
-        if(state.MultiServerRoutingHistory?.SingleServerRouting==null)content.Children.Add(T("Прежняя схема не сохранена: отключение использует обычную маршрутизацию с текущими настройками. Назначения останутся для повторного включения.",12,Warning));
+        if (state.MultiServerRoutingHistory?.SingleServerRouting == null)
+        {
+            var note = T("Прежняя схема не сохранена. При отключении назначения останутся для повторного включения.", 12, Warning);
+            note.TextWrapping = TextWrapping.Wrap;
+            note.Margin = new Thickness(0, 0, 0, 8);
+            content.Children.Add(note);
+        }
         if(settings.RequiresRebinding)content.Children.Add(T("Импортированные назначения требуют привязки к серверам этого компьютера.",12,Warning));
         content.Children.Add(BuildAssignedRouteCard(false, "Profile"));
         content.Children.Add(BuildAssignedRouteCard(true, "Profile"));
