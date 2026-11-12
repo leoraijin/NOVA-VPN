@@ -1108,13 +1108,6 @@ public sealed partial class MainWindow : Window
         configure.Margin = new Thickness(0, 12, 0, 0);
         configure.Foreground = new SolidColorBrush(TextColor);
         content.Children.Add(configure);
-        if (core.Engine != VpnEngine.SingBox)
-        {
-            var hint = T("Для двух конфигов выберите sing-box во вкладке «VPN-ядро».", 12, Muted);
-            hint.TextWrapping = TextWrapping.Wrap;
-            hint.Margin = new Thickness(0, 8, 0, 0);
-            content.Children.Add(hint);
-        }
         toggle.Click += async delegate
         {
             if (!CanEditServerAssignments()) return;
@@ -3334,7 +3327,7 @@ public sealed partial class MainWindow : Window
     }
     private bool multiServerApplyBusy;
     private bool CanEditServerAssignments(bool owner=false) => !snapshotMode&&!closing&&(owner||!profileAliasEditorBusy)&&(owner||!multiServerApplyBusy)&&!subscriptionReviewBusy&&!SubscriptionManager.IsUpdating&&!configuredFallbackBusy&&!profileSwitchInProgress&&!startupConnecting&&!startupSettingsBusy&&gamingSession==null&&gamingCancellation==null&&
-        (core.CanSelectEngine||core.Status==CoreStatus.Connected)&&core.Engine==VpnEngine.SingBox;
+        (core.CanSelectEngine||core.Status==CoreStatus.Connected);
     private async Task<bool> ApplyServerAssignmentsAsync(AppState opened,RoutingSettings accepted,bool restorePrevious=false)
     {
         await trafficModeGate.WaitAsync();
@@ -4038,7 +4031,7 @@ public sealed partial class MainWindow : Window
                 BorderBrush = new SolidColorBrush(core.Engine == engine ? Accent : BorderColor),
                 BorderThickness = new Thickness(1), CornerRadius = Radius(8) });
         }
-        var details = T("Reality Core: нужен защищённый DNS и отключённый обход DNS локальных имён. Для правил сайтов и блокировки рекламы нужен sing-box. Правила приложений и другие несовместимые параметры проверяются перед подключением.\n\nЛокальные SOCKS/VLESS-проверки пройдены. Работа Windows TUN и реального провайдера в этой сборке ещё не подтверждена.",14,Muted);
+        var details = T("Reality Core поддерживает назначения приложений и сайтов в режиме двух VPN. В режиме одного VPN для правил сайтов и блокировки рекламы используйте sing-box. Совместимость профилей и правил проверяется перед подключением.",14,Muted);
         details.TextWrapping = TextWrapping.Wrap; details.Margin = new Thickness(0,12,0,0); body.Children.Add(details);
         return TouchScrollViewer(new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
     }

@@ -52,6 +52,24 @@ static class MultiExitHealthTests
             Reject(()=>probe.Apply(original),"multi channel cannot be repurposed by legacy apply");
             File.WriteAllText(Path.Combine(output,"synthetic-multi-health.json"),prepared);
         }
+        using (var probe = new ActiveCoreProbe()) {
+            var prepared = Json.Deserialize<Dictionary<string,object>>(probe.ApplyMulti(original, policy, profiles, separateListeners: true));
+            var listeners = Items(prepared["inbounds"]).Where(i => Equals(i["type"], "http")).ToArray();
+            Check(listeners.Length == 2 && listeners.All(i => Items(i["users"]).Length == 1) &&
+                listeners.Select(i => i["listen_port"]).Distinct().Count() == 2, "Reality has one authenticated listener per exit");
+            var rules = Items(((Dictionary<string,object>)prepared["route"])["rules"]);
+            for (int i = 0; i < listeners.Length; i++) {
+                var resolve = rules[2*i]; var send = rules[2*i+1];
+                Check(!send.ContainsKey("auth_user") && !resolve.ContainsKey("auth_user") &&
+                    ((IEnumerable)send["inbound"]).Cast<object>().Single().Equals(listeners[i]["tag"]) &&
+                    Json.Serialize(resolve["inbound"]) == Json.Serialize(send["inbound"]) &&
+                    Equals(resolve["server"], "dns-nova-exit-"+i) &&
+                    Equals(send["outbound"], "nova-exit-"+i), "Reality listener is bound to its exact exit and DNS");
+            }
+            Check(Equals(rules[4]["action"], "reject") &&
+                ((IEnumerable)rules[4]["inbound"]).Cast<object>().SequenceEqual(listeners.Select(i => i["tag"])),
+                "Reality fallback rejects only known probe listeners");
+        }
         var missingPolicy=Policy(true);string missing=Config(missingPolicy,profiles,output);
         using(var probe=new ActiveCoreProbe()) {
             Apply(probe,missing,missingPolicy,profiles);

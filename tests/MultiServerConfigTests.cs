@@ -75,7 +75,13 @@ class MultiServerConfigTests
         fr.Server=oldHost;
         var throughCore=CoreManager.BuildPreparedConfiguration(fr,routing,VpnEngine.SingBox,captured,path);
         Check(throughCore==json);
-        Check(Refuses(()=>CoreManager.BuildPreparedConfiguration(fr,routing,VpnEngine.Reality,captured,path)));
+        var reality = CoreManager.BuildPreparedConfiguration(fr,routing,VpnEngine.Reality,captured,path);
+        var realityConfig = codec.Deserialize<Dictionary<string,object>>(reality);
+        var realityDns = (Dictionary<string,object>)realityConfig["dns"];
+        Check(Equals(realityDns["bootstrap"], "nova-bootstrap-dns") &&
+            Items(realityConfig["outbounds"]).Count(o => ((string)o["tag"]).StartsWith("nova-exit-", StringComparison.Ordinal)) == 2 &&
+            !Items(realityConfig["outbounds"]).Any(o => o.ContainsKey("domain_resolver")));
+        File.WriteAllText(Path.Combine(args[0],"reality-dual-config.json"), reality);
         Check(Refuses(()=>CoreManager.BuildPreparedConfiguration(fr,routing,VpnEngine.SingBox,null,path)));
         Check(Refuses(()=>CoreManager.BuildPreparedConfiguration(fr,routing,VpnEngine.SingBox,captured,null)));
         var legacy=new RoutingSettings();

@@ -17,25 +17,45 @@ concurrency:
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Restore verified public runtime payload
         shell: pwsh
         run: |
           New-Item -ItemType Directory work,outputs -Force | Out-Null
-          $url = 'https://github.com/leoraijin/NOVA-VPN/releases/download/v2.3.36/'
-          Invoke-WebRequest ($url + 'NOVA-VPN-Windows-2.3.36-Portable.zip') -OutFile work/runtime.zip
-          if ((Get-FileHash work/runtime.zip -Algorithm SHA256).Hash -ne 'F6A4A388EEB00127EBAE7AE68D68584C091BEB332EFB150F581BDA0598BE4FDE') { throw 'Runtime archive SHA-256 mismatch' }
+          $url = 'https://github.com/leoraijin/NOVA-VPN/releases/download/v2.6.15/'
+          Invoke-WebRequest ($url + 'NOVA-VPN-Windows-2.6.15-Portable.zip') -OutFile work/runtime.zip
+          if ((Get-FileHash work/runtime.zip -Algorithm SHA256).Hash -ne 'DE568E682D77E166C1615EF362ED6E66CF107783E544FE746CF1C719435A4D57') { throw 'Runtime archive SHA-256 mismatch' }
           Expand-Archive work/runtime.zip work/payload
-          $sources = @{
-            'Reality-Core-source-from-handoff.zip' = '7CFE327A5818958328F007DF9E08104C5D00020E060DC4C7D929B924C6BA0A29'
-            'reality-dependencies.tar.gz' = '111E83C27BDE21F5C4796C14C984055CBDC3A95C29D291BE493662B717651BD4'
-          }
-          foreach ($name in $sources.Keys) {
-            Invoke-WebRequest ($url + $name) -OutFile (Join-Path outputs $name)
-            if ((Get-FileHash (Join-Path outputs $name) -Algorithm SHA256).Hash -ne $sources[$name]) { throw 'Third-party source SHA-256 mismatch' }
-          }
+      - uses: actions/checkout@v4
+        with:
+          repository: leoraijin/vpn-core
+          ref: 16fe5dd518652965fe2c469dc943054fb86f4b9c
+          path: work/reality-core
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: stable
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b
+      - name: Build pinned Reality Core and archive its sources
+        shell: pwsh
+        run: |
+          $revision = git -C work/reality-core rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or !(Select-String -LiteralPath NovaVpn/VpnEngine.cs -SimpleMatch ('"' + $revision + '"') -Quiet)) { throw 'Reality source revision mismatch' }
+          Push-Location work/reality-core
+          try {
+            cargo build --locked --release -p reality-client
+            if ($LASTEXITCODE -ne 0) { throw 'Reality Core build failed' }
+            Copy-Item target/release/reality-client.exe ../payload/core/reality-client.exe -Force
+            Copy-Item LICENSE ../payload/core/LICENSE-reality-core.txt -Force
+            git archive --format=zip --output=../../outputs/Reality-Core-source.zip HEAD
+            if ($LASTEXITCODE -ne 0) { throw 'Reality Core source archive failed' }
+            cargo vendor --locked ../reality-dependencies | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Reality Core dependency source export failed' }
+            tar -czf ../../outputs/reality-dependencies.tar.gz -C .. reality-dependencies
+            if ($LASTEXITCODE -ne 0) { throw 'Reality Core dependency source archive failed' }
+          } finally { Pop-Location }
       - name: Build and test
         shell: pwsh
         run: |
@@ -63,6 +83,8 @@ jobs:
           ./scripts/Run-MultiServerRegressionChecks.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CompilerPath $csc -Cases @('MultiExitHealthDisplayTests','RoutingCardsTests','MultiServerSettingsTests','MultiServerConfigTests','MultiServerEditorTests','MultiServerRoutingHistoryTests','RoutingApplyTransactionTests')
           & 'work/payload/core/sing-box.exe' check -c 'bin/Release/RoutingCardsTests/synthetic-config.json'
           if ($LASTEXITCODE -ne 0) { throw 'Routing-card native core check failed' }
+          & 'work/payload/core/reality-client.exe' --check -c 'bin/Release/MultiServerConfigTests/reality-dual-config.json'
+          if ($LASTEXITCODE -ne 0) { throw 'Reality Core rejected the Windows dual configuration' }
       - name: Verify settings transfer
         shell: pwsh
         run: |
@@ -82,6 +104,20 @@ jobs:
           $stream = $setup.GetManifestResourceStream('NOVA.Payload.zip')
           $portable = [IO.File]::Create((Join-Path $PWD "outputs/NOVA-VPN-Windows-$version-Portable.zip"))
           try { $stream.CopyTo($portable) } finally { $portable.Dispose(); $stream.Dispose() }
+          New-Item -ItemType Directory work/complete -Force | Out-Null
+          Expand-Archive -LiteralPath "outputs/NOVA-VPN-Windows-$version-Portable.zip" -DestinationPath work/complete
+          Copy-Item -LiteralPath "outputs/NOVA.VPN.Setup.$version.exe" -Destination work/complete
+          $complete = "outputs/NOVA-VPN-Windows-$version-Complete.zip"
+          Compress-Archive -Path 'work/complete/*' -DestinationPath $complete
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $complete).Path)
+          try {
+            foreach ($entry in @("NOVA.VPN.Setup.$version.exe", 'NOVA VPN.exe', 'core/reality-client.exe', 'core/sing-box.exe', 'core/wintun.dll')) {
+              if (!$archive.GetEntry($entry) -and !$archive.GetEntry($entry.Replace('/', ''))) { throw "Complete archive is missing $entry" }
+            }
+          } finally { $archive.Dispose() }
+          '{0}  {1}' -f (Get-FileHash -LiteralPath $complete).Hash.ToLowerInvariant(), (Split-Path $complete -Leaf) |
+            Set-Content "$complete.sha256" -Encoding ascii
           git archive --format=zip --output="outputs/NOVA-VPN-Windows-$version-source.zip" HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
           $notes = "docs/WINDOWS-$version-RELEASE-NOTES.md"
@@ -91,7 +127,7 @@ jobs:
           Build commit: $env:GITHUB_SHA
           Routing entry UI: eight lists, independent edits, add/delete, multiline paste, Zapret locks, light/dark and narrow layout checks: PASS.
           Desktop UI, legacy recovery, scroll and installer regressions above: PASS.
-          Runtime payload reused from checksum-pinned public 2.3.36; no core rebuild.
+          Reality Core compiled from the revision pinned in VpnEngine.cs. Remaining runtime payload restored from checksum-pinned 2.6.15.
           Real provider connectivity was not tested for this UI update.
           "@ | Set-Content outputs/VERIFICATION.txt -Encoding utf8
           Get-ChildItem outputs -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {

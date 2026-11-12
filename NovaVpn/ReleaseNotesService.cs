@@ -21,6 +21,8 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 16),
+            "Reality Core поддерживает два VPN-конфига и отдельные назначения сайтов и приложений."),
         new ReleaseNoteEntry(new Version(2, 6, 15),
             "Прямые сайты и распознанные прямые приложения получают обычные DNS-адреса в режиме двух VPN.",
             "Проверка выхода различает отказ DNS и отсутствие HTTPS-связи. Карта быстрее берёт следующую группу конфигов.",

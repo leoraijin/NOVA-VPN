@@ -315,9 +315,10 @@ public sealed partial class CoreManager : IDisposable
         System.Collections.Generic.IEnumerable<VpnProfile> profiles = null, string cachePath = null)
     {
         if (routing?.MultiServer != null) {
-            if (engine != VpnEngine.SingBox) throw new NotSupportedException("Назначения серверов требуют sing-box.");
-            return MultiServerConfigBuilder.Build(routing, profiles ?? throw new InvalidOperationException("Нет снимка серверов."),
+            string config = MultiServerConfigBuilder.Build(routing,
+                profiles ?? throw new InvalidOperationException("Нет снимка серверов."),
                 cachePath ?? throw new InvalidOperationException("Нет приватного пути DNS-кэша."));
+            return engine == VpnEngine.Reality ? RealityConfigBuilder.AdaptMultiServer(config) : config;
         }
         return engine == VpnEngine.Reality ? RealityConfigBuilder.Build(profile,routing) : ConfigBuilder.Build(profile,routing);
     }
@@ -364,7 +365,9 @@ public sealed partial class CoreManager : IDisposable
             var preparedRouting=RoutingOverlayService.Clone(routing);
             var preparedProfiles = preparedRouting.MultiServer == null ? null : MultiServerConfigBuilder.CaptureProfiles(profiles);
             if (preparedProfiles != null) profile = MultiServerStartupSelection.ResolveCatalogIdentity(preparedRouting.MultiServer, preparedProfiles);
-            string preparedConfig=BuildPreparedConfiguration(profile,preparedRouting,preparedEngine,preparedProfiles,Path.Combine(StateStore.DirectoryPath,"multi-server-dns-v2.db"));
+            // Probe setup validates tags against the shared policy before engine-specific adaptation.
+            var configEngine = preparedProfiles == null ? preparedEngine : VpnEngine.SingBox;
+            string preparedConfig=BuildPreparedConfiguration(profile,preparedRouting,configEngine,preparedProfiles,Path.Combine(StateStore.DirectoryPath,"multi-server-dns-v2.db"));
             string preparedProfileKey = SubscriptionManager.ConfigKey(profile);
             bool managedConfiguration = UsesManagedConfiguration(profile,preparedRouting);
             // Multi-exit disabled-IPv6 mode still captures that family for an explicit reject.
@@ -390,8 +393,10 @@ public sealed partial class CoreManager : IDisposable
             if(preparedMonitor!=null)preparedConfig=preparedMonitor.Apply(preparedConfig);
             checkChannel=managedConfiguration?new ActiveCoreProbe():null;
             if(checkChannel!=null)preparedConfig=preparedRouting.MultiServer==null?checkChannel.Apply(preparedConfig):
-                checkChannel.ApplyMulti(preparedConfig,preparedRouting.MultiServer,preparedProfiles);
+                checkChannel.ApplyMulti(preparedConfig,preparedRouting.MultiServer,preparedProfiles, separateListeners: preparedEngine == VpnEngine.Reality);
             var preparedRoutingPlan=preparedRouting.MultiServer==null ? CompiledRoutingPlan.TryCapture(preparedConfig) : CompiledRoutingPlan.TryCaptureWithExits(preparedConfig,MultiServerConfigBuilder.ExitIdentities(preparedRouting.MultiServer,preparedProfiles));
+            if (preparedEngine == VpnEngine.Reality && preparedProfiles != null)
+                preparedConfig = RealityConfigBuilder.AdaptMultiServer(preparedConfig);
             string runtimeDir=Path.Combine(StateStore.DirectoryPath,"runtime");
             preparedPath=PrivateRuntimeFiles.WriteCoreConfig(runtimeDir,preparedConfig);
             if(!TryAdoptPreparedStartup(generation,preparedEngine,preparedPath,preparedMonitor,checkChannel,routeReadiness)){
@@ -458,13 +463,12 @@ public sealed partial class CoreManager : IDisposable
                 if(leaseDenied)throw new TunnelLeaseBusyException();
                 throw new InvalidOperationException(startupError);
 			}
-            // A live sing-box process is not proof that Windows has finished publishing
-            // the recreated TUN address. Starting a game during address detection can
-            // bypass process_path matching because the core still sees a non-local source.
-            if (preparedEngine == VpnEngine.SingBox && managedConfiguration) {
+            // Wait until Windows publishes the TUN addresses before accepting a managed session.
+            // sing-box additionally verifies process ownership with its local readiness channel.
+            if (managedConfiguration && (preparedEngine == VpnEngine.SingBox || preparedRouting.MultiServer != null)) {
                 try {
                     if (!await WaitForWindowsTunnelAsync(generation,startedProcess,tunnelNetwork.Addresses)) { ReleaseProbe(checkChannel); return; }
-                    if (!await routeReadiness.WaitAsync(()=>IsPreparingRuntimeCurrent(generation,startedProcess), captureIpv6)) { ReleaseProbe(checkChannel); return; }
+                    if (routeReadiness != null && !await routeReadiness.WaitAsync(()=>IsPreparingRuntimeCurrent(generation,startedProcess), captureIpv6)) { ReleaseProbe(checkChannel); return; }
                 }
                 catch (Exception ex) {
                     int? failedGeneration=StopRuntime(generation,startedProcess);

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 
 namespace NovaVpn;
@@ -7,7 +7,7 @@ public enum VpnEngine { SingBox = 0, Reality = 1 }
 
 public static class VpnEngines
 {
-    public const string RealitySourceRevision = "998e0a42fd04a022aa008997cd71ba1e2dfab38e";
+    public const string RealitySourceRevision = "16fe5dd518652965fe2c469dc943054fb86f4b9c";
 
     public static string DisplayName(VpnEngine engine) => engine == VpnEngine.Reality
         ? "Reality Core · экспериментальное" : "sing-box · по умолчанию";

@@ -15,7 +15,7 @@ if(!$csc){
 }
 if(!$csc){$csc=Join-Path (Split-Path $repo -Parent) 'handoff-2026-10-28\toolchain\roslyn\csc.exe'}
 if(!(Test-Path -LiteralPath $csc -PathType Leaf)){throw 'Pass -CompilerPath with a Roslyn csc.exe path.'}
-$expected=@{RoutingCardsTests=36;MultiServerGamingTests=27;MultiServerRoutingHistoryTests=70;MultiExitHealthTests=58;MultiExitHealthDisplayTests=19;MultiServerSettingsTests=21;FullStateRestorePlanTests=44;ApplicationBandwidthPolicyTests=96;MultiServerEditorTests=107;RoutingApplyTransactionTests=27;MultiServerConfigTests=59;FakeIpNetworkPreflightTests=2015}
+$expected=@{RoutingCardsTests=36;MultiServerGamingTests=27;MultiServerRoutingHistoryTests=70;MultiExitHealthTests=62;MultiExitHealthDisplayTests=19;MultiServerSettingsTests=21;FullStateRestorePlanTests=44;ApplicationBandwidthPolicyTests=96;MultiServerEditorTests=107;RoutingApplyTransactionTests=27;MultiServerConfigTests=59;FakeIpNetworkPreflightTests=2015}
 if(!$Cases.Count -or @($Cases|Select-Object -Unique).Count -ne $Cases.Count -or @($Cases|Where-Object{!$expected.ContainsKey($_)}).Count){throw 'Unknown or duplicate test selection'}
 $fx=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $refs=@("/reference:$assembly")

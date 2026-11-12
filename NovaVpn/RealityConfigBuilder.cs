@@ -60,6 +60,54 @@ public static class RealityConfigBuilder
         return serializer.Serialize(root);
     }
 
+    // Apply after building the managed policy and inserting the per-exit probe listeners.
+    internal static string AdaptMultiServer(string config)
+    {
+        const string bootstrap = "nova-bootstrap-dns";
+        var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+        var root = serializer.Deserialize<Dictionary<string, object>>(config);
+        var route = (Dictionary<string, object>)root["route"];
+        RemoveManagedResolver(route, "default_domain_resolver", bootstrap);
+        foreach (Dictionary<string, object> outbound in (IEnumerable)root["outbounds"])
+            RemoveManagedResolver(outbound, "domain_resolver", bootstrap);
+        var dns = (Dictionary<string, object>)root["dns"];
+        foreach (Dictionary<string, object> server in (IEnumerable)dns["servers"])
+        {
+            RemoveManagedResolver(server, "domain_resolver", bootstrap);
+            if (Equals(server["tag"], bootstrap))
+            {
+                if (!Equals(server["type"], "local"))
+                    throw new NotSupportedException("Неизвестный тип начального DNS Reality Core.");
+                server["type"] = "udp";
+                server["server"] = "1.1.1.1";
+                server["server_port"] = 53;
+                server["detour"] = "nova-direct";
+                continue;
+            }
+            if (!Equals(server["type"], "https")) continue;
+            var tls = (Dictionary<string, object>)server["tls"];
+            if (!tls.TryGetValue("enabled", out object enabled) || !Equals(enabled, true) ||
+                tls.TryGetValue("insecure", out object insecure) && !Equals(insecure, false))
+                throw new NotSupportedException("Reality Core требует проверку сертификата DNS.");
+            var uri = new UriBuilder("https", (string)tls["server_name"],
+                server.TryGetValue("server_port", out object port) ? Convert.ToInt32(port) : 443,
+                server.TryGetValue("path", out object path) ? Convert.ToString(path) : "/dns-query");
+            server["address"] = uri.Uri.AbsoluteUri;
+            foreach (string key in new[] { "type", "server", "server_port", "path", "tls" })
+                server.Remove(key);
+        }
+        dns["bootstrap"] = bootstrap;
+        return serializer.Serialize(root);
+    }
+
+    private static void RemoveManagedResolver(Dictionary<string, object> item, string key, string expected)
+    {
+        if (!item.TryGetValue(key, out object value)) return;
+        if (!Equals(value, expected))
+            throw new NotSupportedException("Неизвестный начальный DNS в конфигурации Reality Core.");
+        item.Remove(key);
+    }
+
     private static bool ContainsDomainPolicy(object value)
     {
         if (value is Dictionary<string, object> item)

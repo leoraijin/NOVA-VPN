@@ -25,7 +25,7 @@ public sealed partial class ActiveCoreProbe
         if(value is IEnumerable sequence&&!(value is string))return sequence.Cast<object>().Select(Canonical).ToArray();
         return value;
     }
-    public string ApplyMulti(string json,MultiServerSettings settings,IEnumerable<VpnProfile> profiles)
+    public string ApplyMulti(string json,MultiServerSettings settings,IEnumerable<VpnProfile> profiles, bool separateListeners = false)
     {
         lock(sync) {
             if(disposed)throw new ObjectDisposedException(nameof(ActiveCoreProbe));
@@ -54,6 +54,7 @@ public sealed partial class ActiveCoreProbe
             for(int attempt=0;used.Contains(endpoint.Port)&&attempt<16;attempt++)endpoint.Port=FreePort();
             if(used.Contains(endpoint.Port))throw new IOException("Не найден свободный порт проверки.");
             var targets=new List<ExitProbeTarget>();var channels=new Dictionary<string,LocalProxyEndpoint>(StringComparer.Ordinal);
+            var listeners = new List<object>();
             var users=new List<object>();var rules=new List<object>();var usernames=new HashSet<string>(StringComparer.Ordinal);
             foreach(string id in ids.OrderBy(i=>i,StringComparer.Ordinal)) {
                 var profile=catalog.SingleOrDefault(p=>p.Id==id);
@@ -75,13 +76,37 @@ public sealed partial class ActiveCoreProbe
                 for(int attempt=0;usernames.Contains(channel.Username)&&attempt<16;attempt++)channel.Username="nova-"+Guid.NewGuid().ToString("N");
                 if(!usernames.Add(channel.Username))throw new IOException("Не создан уникальный канал проверки.");
                 channels.Add(id,channel);
-                users.Add(Obj("username",channel.Username,"password",channel.Password));
-                rules.Add(Obj("inbound",new[]{Tag},"auth_user",new[]{channel.Username},"action","resolve","server",dnsTag,"strategy","ipv4_only","disable_cache",true));
-                rules.Add(Obj("inbound",new[]{Tag},"auth_user",new[]{channel.Username},"action","route","outbound",tag));
+                var credential = Obj("username", channel.Username, "password", channel.Password);
+                if (separateListeners)
+                {
+                    string probeTag = Tag + "-" + listeners.Count;
+                    if (inbounds.Any(input => input.TryGetValue("tag", out object value) && Equals(value, probeTag)))
+                        throw new InvalidDataException("Занят тег канала проверки.");
+                    for (int attempt = 0; used.Contains(channel.Port) && attempt < 16; attempt++) channel.Port = FreePort();
+                    if (!used.Add(channel.Port)) throw new IOException("Не найден отдельный порт проверки.");
+                    listeners.Add(Obj("type", "http", "tag", probeTag, "listen", "127.0.0.1",
+                        "listen_port", channel.Port, "users", new[] {credential}));
+                    rules.Add(Obj("inbound", new[] {probeTag}, "action", "resolve",
+                        "server", dnsTag, "strategy", "ipv4_only", "disable_cache", true));
+                    rules.Add(Obj("inbound", new[] {probeTag}, "action", "route", "outbound", tag));
+                }
+                else
+                {
+                    users.Add(credential);
+                    rules.Add(Obj("inbound",new[]{Tag},"auth_user",new[]{channel.Username},"action","resolve","server",dnsTag,"strategy","ipv4_only","disable_cache",true));
+                    rules.Add(Obj("inbound",new[]{Tag},"auth_user",new[]{channel.Username},"action","route","outbound",tag));
+                }
                 targets.Add(new ExitProbeTarget(id,profile.Name,fingerprint,ExitProbePhase.Queued));
             }
-            rules.Add(Obj("inbound",new[]{Tag},"action","reject"));
-            if(users.Count>0)root["inbounds"]=inbounds.Cast<object>().Concat(new[]{Obj("type","http","tag",Tag,"listen","127.0.0.1","listen_port",endpoint.Port,"users",users.ToArray())}).ToArray();
+            if (separateListeners)
+            {
+                if (listeners.Count > 0)
+                    rules.Add(Obj("inbound", listeners.Cast<Dictionary<string,object>>()
+                        .Select(listener => (string)listener["tag"]).ToArray(), "action", "reject"));
+            }
+            else rules.Add(Obj("inbound",new[]{Tag},"action","reject"));
+            if (users.Count > 0) listeners.Add(Obj("type","http","tag",Tag,"listen","127.0.0.1","listen_port",endpoint.Port,"users",users.ToArray()));
+            if (listeners.Count > 0) root["inbounds"] = inbounds.Cast<object>().Concat(listeners).ToArray();
             // Even with no available channels no ordinary route can certify an unavailable exit.
             route["rules"]=rules.Concat(oldRules.Cast<object>()).ToArray();
             string result=codec.Serialize(root);
