@@ -170,15 +170,16 @@ public sealed class MultiServerRoutingWindow : Window
    try
    {
     var host = MultiServerRule.NormalizeDomainSelector(domain.Text);
-    if (rules.Any(rule => rule.Domain == host)) throw new ArgumentException("Этот домен уже добавлен.");
+    var existing = rules.Where(rule => rule.Domain == host).ToArray();
     var chosen = Choice() ?? throw new ArgumentException("Выберите назначение.");
+    foreach (var rule in existing) { rules.Remove(rule); unbound.Remove(rule); }
     rules.Add(new MultiServerRuleRecord
     {
      Domain = host, IncludeSubdomains = !host.StartsWith(".", StringComparison.Ordinal) && subdomains.IsChecked == true,
      Target = chosen.Kind.ToString(), ProfileId = chosen.ProfileId
     });
     domain.Text = "";
-    error.Text = "";
+    error.Text = existing.Length > 0 ? "Этот домен уже был в списке. Назначение обновлено." : "";
     Render();
    }
    catch (ArgumentException ex) { error.Text = ex.Message; }

@@ -59,6 +59,36 @@ try {
  $editor=Editor (Card $values 'proxy-domains');$cell=(Rows $editor)[0].Children[0]
  $cell.Select(6,3);Paste $cell "ONE`r`nTWO"
  Assert (($values -join '|') -eq 'prefixONE|TWOsuffix|keep.test') 'Paste discarded text outside the selection'
+ # Finishing a domain or path entry moves the same rule out of the previous card.
+ $complete=$type.GetMethod('CompleteOrdinaryRouteEntry',$flags)
+ $state.Routing.ProxyDomains.Clear();$state.Routing.DirectDomains.Clear();$state.Routing.BlockDomains.Clear()
+ $state.Routing.DirectDomains.Add('EXAMPLE.test.');$state.Routing.ProxyDomains.Add('example.test')
+ $complete.Invoke($window,@($state.Routing,$state.Routing.ProxyDomains,'VPN','example.test'))
+ Assert ($state.Routing.DirectDomains.Count -eq 0 -and $state.Routing.ProxyDomains.Count -eq 1) 'Duplicate domain remained in ordinary cards'
+ $state.Routing.DirectProcessPaths.Add('C:\Fixture\Client.exe');$state.Routing.ProxyProcessPaths.Add('c:\fixture\client.exe')
+ $complete.Invoke($window,@($state.Routing,$state.Routing.ProxyProcessPaths,'VPN','c:\fixture\client.exe'))
+ Assert ($state.Routing.DirectProcessPaths.Count -eq 0 -and $state.Routing.ProxyProcessPaths.Count -eq 1) 'Duplicate executable path remained in ordinary cards'
+
+ # Existing assigned rules and legacy blocks must be replaced, not copied.
+ $candidate=[Activator]::CreateInstance($assembly.GetType('NovaVpn.RoutingSettings'))
+ $settings=[Activator]::CreateInstance($assembly.GetType('NovaVpn.MultiServerSettings'))
+ $settings.DefaultProfileId='primary';$settings.SecondaryProfileId='secondary';$candidate.MultiServer=$settings
+ $ruleType=$assembly.GetType('NovaVpn.MultiServerRuleRecord')
+ $old=[Activator]::CreateInstance($ruleType);$old.Domain='move.example.test';$old.Target='Direct';$old.IncludeSubdomains=$true
+ $settings.Rules.Add($old);$candidate.BlockDomains.Add('MOVE.example.test.')
+ $next=[Activator]::CreateInstance($ruleType);$next.Domain=$old.Domain;$next.Target='Profile';$next.ProfileId='secondary'
+ $place=$type.GetMethod('PlaceAssignedRoute',[Reflection.BindingFlags]'Static,NonPublic')
+ $args=[object[]]@($candidate,$next,$false)
+ Assert ($place.Invoke($null,$args) -and $args[2]) 'Duplicate site move was rejected or unreported'
+ Assert ($settings.Rules.Count -eq 1 -and $settings.Rules[0].ProfileId -eq 'secondary' -and $settings.Rules[0].IncludeSubdomains -and $candidate.BlockDomains.Count -eq 0) 'Moved site retained a conflicting assignment or lost its scope'
+ Assert (-not $place.Invoke($null,$args)) 'Re-adding the same site created a second entry'
+ $old=[Activator]::CreateInstance($ruleType);$old.ApplicationPath='C:\Fixture\Client.exe';$old.Target='Profile';$old.ProfileId='secondary';$settings.Rules.Add($old)
+ $next=[Activator]::CreateInstance($ruleType);$next.ApplicationPath='c:\fixture\client.exe';$next.Target='Default'
+ $args=[object[]]@($candidate,$next,$false)
+ Assert ($place.Invoke($null,$args) -and $args[2]) 'Duplicate application move was rejected or unreported'
+ $appRules=@($settings.Rules|Where-Object ApplicationPath)
+ Assert ($appRules.Count -eq 1 -and $appRules[0].Target -eq 'Default') 'Moved application retained two destinations'
+ $settings.Validate()
  # All protected lists remain locked while Zapret has temporarily moved routes.
  $state.Zapret.RoutingChangesApplied=$true
  foreach($key in @('proxy-domains','direct-domains','proxy-apps','direct-apps','proxy-paths','direct-paths')){

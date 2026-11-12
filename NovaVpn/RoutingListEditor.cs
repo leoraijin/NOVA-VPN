@@ -19,6 +19,7 @@ public sealed class RoutingListEditor : StackPanel
     private readonly StackPanel rows = new StackPanel();
     private readonly List<TextBox> inputs = new List<TextBox>();
     private bool updating;
+    internal Action<string> EntryCompleted { get; set; }
 
     public RoutingListEditor(List<string> values, Action save, Func<TextBox> createInput,
         Func<string, Button> createButton, string itemLabel, bool readOnly)
@@ -90,6 +91,22 @@ public sealed class RoutingListEditor : StackPanel
         rows.Children.Insert(index, row);
         inputs.Insert(index, input);
         input.TextChanged += delegate { Commit(); };
+        string lastCompleted = input.Text.Trim();
+        void CompleteEntry()
+        {
+            if (readOnly || updating || !inputs.Contains(input)) return;
+            string current = input.Text.Trim();
+            if (current == lastCompleted) return;
+            lastCompleted = current;
+            if (current.Length > 0) EntryCompleted?.Invoke(current);
+        }
+        input.LostKeyboardFocus += delegate { CompleteEntry(); };
+        input.KeyDown += (sender, args) =>
+        {
+            if (args.Key != System.Windows.Input.Key.Enter) return;
+            args.Handled = true;
+            CompleteEntry();
+        };
         remove.Click += delegate
         {
             if (readOnly) return;
@@ -131,6 +148,7 @@ public sealed class RoutingListEditor : StackPanel
         Commit();
         FocusInput(last);
         last.CaretIndex = last.Text.Length;
+        foreach (string part in parts) EntryCompleted?.Invoke(part);
     }
 
     private void Commit()

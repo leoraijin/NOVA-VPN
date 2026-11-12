@@ -131,9 +131,28 @@ try {
  Assert (-not ($labels -contains 'ПРИЛОЖЕНИЯ')) 'Removed legacy application section remains'
  Assert (-not @($labels|Where-Object {$_ -like 'Перетащите переключатель:*'}).Count) 'Removed application instructions remain'
  $edit=Named 'EditMultiServerRouting';Assert ($null -ne $edit) 'Multi-server editor entry removed with legacy block'
+ foreach($name in @('Vpn2SitesCard','Vpn2ApplicationsCard')){
+  $card=Named $name
+  Assert ($null -ne $card) "Missing VPN-2 card: $name"
+  Assert (-not @(Nodes $card | Where-Object {$_ -is [Windows.Controls.Button] -and $_.IsEnabled}).Count) 'VPN-2 rule editing enabled without assigned server'
+ }
  Save-Image 'routing'
  $state.Routing.MultiServer=$settings
+ $ruleType=$assembly.GetType('NovaVpn.MultiServerRuleRecord')
+ $domain=[Activator]::CreateInstance($ruleType)
+ $domain.Domain='vpn2.example.test';$domain.Target='Profile';$domain.ProfileId=$settings.SecondaryProfileId
+ $application=[Activator]::CreateInstance($ruleType)
+ $application.ApplicationPath='C:\Fixture\Chat.exe';$application.Target='Profile';$application.ProfileId=$settings.SecondaryProfileId
+ $ordinary=[Activator]::CreateInstance($ruleType)
+ $ordinary.Domain='direct.example.test';$ordinary.Target='Direct'
+ $settings.Rules.Add($domain);$settings.Rules.Add($application);$settings.Rules.Add($ordinary)
  $window.ShowPageForSnapshot('routing');Layout
  Assert ($null -ne (Named 'EditMultiServerRouting')) 'Active multi-server routing editor missing'
+ $sites=Named 'Vpn2SitesCard';$apps=Named 'Vpn2ApplicationsCard'
+ $siteLabels=@(Nodes $sites | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)
+ $appLabels=@(Nodes $apps | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)
+ Assert ($siteLabels -contains 'vpn2.example.test' -and $siteLabels -notcontains 'Chat.exe' -and $siteLabels -notcontains 'direct.example.test') 'VPN-2 site card contains the wrong rules'
+ Assert ($appLabels -contains 'Chat.exe' -and $appLabels -notcontains 'vpn2.example.test') 'VPN-2 application card contains the wrong rules'
+ Save-Image 'routing-vpn2'
  Write-Output "PASS: $checks desktop UI checks; seven window/theme/mode variants. Synthetic profiles only."
 } finally {$window.Close();$app.Shutdown()}

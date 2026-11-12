@@ -21,6 +21,8 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 9),
+            "В маршрутизации появились отдельные карточки сайтов и приложений через VPN-2. При повторном добавлении правило переносится в выбранную карточку."),
         new ReleaseNoteEntry(new Version(2, 6, 8),
             "Тумблер включает возможность назначить VPN-2. Кнопка сразу открывает список, а карта предлагает роль даже до назначения второго сервера."),
         new ReleaseNoteEntry(new Version(2, 6, 7),
