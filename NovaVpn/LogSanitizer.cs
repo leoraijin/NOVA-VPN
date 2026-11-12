@@ -14,6 +14,16 @@ public static class LogSanitizer
     private static readonly Regex ProxyAuthorization = new Regex(@"(?im)(proxy-authorization\s*:\s*)[^\r\n]+", RegexOptions.Compiled);
 	private static readonly Regex UriUserInfo = new Regex(@"(?i)(vless|vmess|trojan|ss|hysteria2|hy2|tuic|http|https|socks|socks5)://[^@\s]+@", RegexOptions.Compiled);
 
+    private static readonly Regex ReportLinks = new Regex(
+        @"(?i)\b(?:https?|vless|vmess|trojan|ss|ssr|hysteria2?|hy2|tuic|socks5?)://[^\s""<>]+",
+        RegexOptions.Compiled);
+    private static readonly Regex ReportTokens = new Regex(
+        @"(?im)(\b(?:authorization|token|api[_-]?key|secret)\b""?\s*[:=]\s*)[^\r\n]+",
+        RegexOptions.Compiled);
+
+    internal static string SanitizeForReport(string value) =>
+        ReportTokens.Replace(ReportLinks.Replace(Sanitize(value), "[ссылка скрыта]"), "$1***");
+
 	public static string Sanitize(string value)
 	{
 		if (string.IsNullOrEmpty(value))

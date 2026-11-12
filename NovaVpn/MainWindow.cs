@@ -454,6 +454,7 @@ public sealed partial class MainWindow : Window
         links.Children.Add(Nav("diagnostics", "diagnostics", "Диагностика"));
         links.Children.Add(Nav("engine", "shield", "VPN-ядро"));
         links.Children.Add(Nav("workloads", "routing", "Локальные прокси"));
+        links.Children.Add(Nav("error-report", "list", "Отчёт об ошибках"));
         Grid.SetRow(links,1);root.Children.Add(links);
         var footer = new StackPanel();
         footer.Children.Add(Nav("settings", "settings", "Настройки"));
@@ -781,6 +782,7 @@ public sealed partial class MainWindow : Window
 			"servers" => BuildServersPage(),
 			"routing" => BuildRoutingPage(),
 			"diagnostics" => BuildDiagnosticsPage(),
+            "error-report" => BuildErrorReportPage(),
 			"settings" => BuildSettingsPage(),
             "engine" => BuildEnginePage(),
             "workloads" => BuildWorkloadsPage(),
@@ -3721,6 +3723,30 @@ public sealed partial class MainWindow : Window
             CornerRadius = Radius(8) };
     }
 
+    private UIElement BuildErrorReportPage()
+    {
+        var page = new StackPanel();
+        page.Children.Add(PageHeader("Отчёт об ошибках",
+            "Журнал клиента и VPN-ядра за текущий запуск. Ссылки и секреты скрываются.", null, null));
+        var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
+        foreach (bool recent in new[] { false, true })
+        {
+            var copy = SmallButton(recent ? "Копировать логи за 10 минут" : "Копировать все логи с запуска");
+            copy.Margin = new Thickness(0, 0, 8, 8);
+            copy.Click += delegate
+            {
+                string report = core.GetReportLog(recent ? DateTime.UtcNow.AddMinutes(-10) : (DateTime?)null);
+                if (report.Length == 0) { Toast("За последние 10 минут записей нет.", Muted); return; }
+                try { Clipboard.SetText(report); Toast("Логи скопированы.", Green); }
+                catch (System.Runtime.InteropServices.ExternalException)
+                { Toast("Не удалось открыть буфер обмена. Попробуйте ещё раз.", Warning); }
+            };
+            actions.Children.Add(copy);
+        }
+        page.Children.Add(actions);
+        return TouchScrollViewer(new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+    }
+
 	private UIElement BuildDiagnosticsPage()
 	{
 		Grid page = new Grid();
@@ -5089,6 +5115,7 @@ public sealed partial class MainWindow : Window
 
 	private void RecordHistory(string status, string details)
 	{
+        core.RecordReportLog(status + ": " + details);
 		VpnProfile profile = SelectedProfile();
 		int duration = currentSessionStartedUtc == default(DateTime) ? 0 : (int)Math.Max(0.0, (DateTime.UtcNow - currentSessionStartedUtc).TotalSeconds);
 		state.ConnectionHistory.Add(new ConnectionHistoryItem

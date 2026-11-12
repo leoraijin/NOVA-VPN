@@ -21,6 +21,8 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 14),
+            "В боковом меню появился отчёт об ошибках. Можно скопировать журнал с запуска клиента или за последние 10 минут."),
         new ReleaseNoteEntry(new Version(2, 6, 13),
             "На главной показаны сервер VPN-2, состояние его HTTPS-проверки, задержка и количество назначенных правил.",
             "Кнопки маршрутизации получили одинаковые отступы. Прокручиваемые правила больше не перекрывают верхнюю панель."),

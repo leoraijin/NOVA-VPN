@@ -51,6 +51,27 @@ public sealed partial class CoreManager : IDisposable
     }
 
 	private readonly StringBuilder log = new StringBuilder();
+    private readonly System.Collections.Generic.List<(DateTime Time, string Text)> reportLog =
+        new System.Collections.Generic.List<(DateTime Time, string Text)> { (DateTime.UtcNow, "Запуск NOVA VPN") };
+
+    internal void RecordReportLog(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+        string safe = LogSanitizer.SanitizeForReport(message);
+        lock (reportLog) reportLog.Add((DateTime.UtcNow, safe));
+    }
+
+    internal string GetReportLog(DateTime? sinceUtc)
+    {
+        var output = new StringBuilder();
+        lock (reportLog)
+        {
+            foreach (var entry in reportLog)
+                if (!sinceUtc.HasValue || entry.Time >= sinceUtc.Value)
+                    output.Append(entry.Time.ToString("yyyy-MM-dd HH:mm:ss.fff 'UTC'")).Append("  ").AppendLine(entry.Text);
+        }
+        return output.ToString();
+    }
 
 	private string configPath;
     private CompiledRoutingPlan activeRoutingPlan;
@@ -876,6 +897,7 @@ public sealed partial class CoreManager : IDisposable
 				log.Remove(0, 40000);
 			}
 		}
+		RecordReportLog(e.Data);
 		this.LogReceived?.Invoke(LogSanitizer.Sanitize(e.Data));
 	}
 
