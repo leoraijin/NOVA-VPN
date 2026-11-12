@@ -2625,7 +2625,6 @@ public sealed partial class MainWindow : Window
 
 	private UIElement BuildRoutingPage()
 	{
-        if (state.Routing.MultiServer != null) return BuildMultiServerRoutingPage();
 		Grid grid = new Grid();
 		grid.RowDefinitions.Add(new RowDefinition
 		{
@@ -2698,8 +2697,6 @@ public sealed partial class MainWindow : Window
                 } catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
             }; migration.Children.Add(undo); stackPanel.Children.Add(migration);
         }
-        stackPanel.Children.Add(BuildAssignedRouteCard(false, "Profile"));
-        stackPanel.Children.Add(BuildAssignedRouteCard(true, "Profile"));
         if (migratedRouting) importRules.IsEnabled = false;
 		stackPanel.Children.Add(SectionTitle("РЕЖИМ"));
 		Grid grid2 = new Grid();
@@ -3096,12 +3093,7 @@ public sealed partial class MainWindow : Window
         disable.ToolTip="Назначения сохранятся для повторного включения. Активное подключение будет переподключено после проверки.";
         disable.Click+=async delegate{try{await ApplyServerAssignmentsAsync(state,null,true);}catch(Exception error){Toast(LogSanitizer.Sanitize(error.Message),Warning);}};actions.Children.Add(disable);
         var inspect=SmallButton("Проверить маршрут");inspect.Click+=delegate{Navigate("diagnostics");};actions.Children.Add(inspect);
-        var header = new StackPanel();
-        header.Children.Add(PageHeader("Маршрутизация", "Сайты → приложения → основной сервер", null, null));
-        actions.Margin = new Thickness(0, 10, 0, 0);
-        header.Children.Add(actions);
-        DockPanel.SetDock(header, Dock.Top);
-        layout.Children.Add(header);
+        var header=PageHeader("Маршрутизация","Сайты → приложения → основной сервер",actions,null);DockPanel.SetDock(header,Dock.Top);layout.Children.Add(header);
         var content=new StackPanel{Margin=new Thickness(0,18,0,0)};var settings=state.Routing.MultiServer;
         var primary=state.Profiles.FirstOrDefault(p=>p.Id==settings.DefaultProfileId);
         content.Children.Add(T("Основной сервер: "+(primary==null?"Недоступен — назначьте другой":primary.Name+(primary.RetiredFromSubscription?" · удалён из подписки — трафик блокируется":"")),16,TextColor));
@@ -3125,32 +3117,11 @@ public sealed partial class MainWindow : Window
             content.Children.Add(nameHint);
         }
         multiExitHealthPanel=new StackPanel{Margin=new Thickness(0,12,0,8)};content.Children.Add(multiExitHealthPanel);UpdateMultiExitHealthPanel();
-        if (state.MultiServerRoutingHistory?.SingleServerRouting == null)
-        {
-            var note = T("Прежняя схема не сохранена. При отключении назначения останутся для повторного включения.", 12, Warning);
-            note.TextWrapping = TextWrapping.Wrap;
-            note.Margin = new Thickness(0, 0, 0, 8);
-            content.Children.Add(note);
-        }
+        if(state.MultiServerRoutingHistory?.SingleServerRouting==null)content.Children.Add(T("Прежняя схема не сохранена: отключение использует обычную маршрутизацию с текущими настройками. Назначения останутся для повторного включения.",12,Warning));
         if(settings.RequiresRebinding)content.Children.Add(T("Импортированные назначения требуют привязки к серверам этого компьютера.",12,Warning));
-        content.Children.Add(BuildAssignedRouteCard(false, "Profile"));
-        content.Children.Add(BuildAssignedRouteCard(true, "Profile"));
-        foreach (string target in new[] { "Default", "Direct", "Block" })
-        {
-            content.Children.Add(BuildAssignedRouteCard(false, target));
-            content.Children.Add(BuildAssignedRouteCard(true, target));
-        }
-        content.Children.Add(RouteEditorCard("Расширенные правила", "Формат: proxy|tcp|443 или block|udp|443,1000:2000",
-            state.Routing.AdvancedRules, Warning, "advanced"));
-        TourAnchor("routing.domains", content);
-        foreach (var rule in settings.Rules.Where(rule => rule.Target == "Profile" && rule.ProfileId != settings.SecondaryProfileId))
-        {
-            string destination = rule.Domain == null ? System.IO.Path.GetFileName(rule.ApplicationPath) : rule.DomainLabel;
-            string target = state.Profiles.FirstOrDefault(profile => profile.Id == rule.ProfileId)?.Name ?? "Сервер недоступен";
-            var row = T(destination + " → " + target, 13, TextColor);
-            row.TextWrapping = TextWrapping.Wrap;
-            row.ToolTip = rule.ApplicationPath;
-            content.Children.Add(row);
+        foreach(var rule in settings.Rules){string destination=rule.Domain==null?System.IO.Path.GetFileName(rule.ApplicationPath):rule.DomainLabel;
+            string target=rule.Target=="Profile"?state.Profiles.FirstOrDefault(p=>p.Id==rule.ProfileId)?.Name??"Сервер недоступен":rule.Target=="Direct"?"Напрямую":rule.Target=="Block"?"Блокировать":"Основной сервер";
+            var row=T(destination+" → "+target,13,TextColor);row.Margin=new Thickness(0,8,0,0);row.TextWrapping=TextWrapping.Wrap;row.ToolTip=rule.ApplicationPath;content.Children.Add(row);
         }
         layout.Children.Add(TouchScrollViewer(new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}));return layout;
     }
@@ -3192,7 +3163,7 @@ public sealed partial class MainWindow : Window
     private bool multiServerApplyBusy;
     private bool CanEditServerAssignments(bool owner=false) => !snapshotMode&&!closing&&(owner||!profileAliasEditorBusy)&&(owner||!multiServerApplyBusy)&&!subscriptionReviewBusy&&!SubscriptionManager.IsUpdating&&!configuredFallbackBusy&&!profileSwitchInProgress&&!startupConnecting&&!startupSettingsBusy&&gamingSession==null&&gamingCancellation==null&&
         (core.CanSelectEngine||core.Status==CoreStatus.Connected)&&core.Engine==VpnEngine.SingBox;
-    private async Task<bool> ApplyServerAssignmentsAsync(AppState opened,RoutingSettings accepted,bool restorePrevious=false)
+    private async Task ApplyServerAssignmentsAsync(AppState opened,RoutingSettings accepted,bool restorePrevious=false)
     {
         await trafficModeGate.WaitAsync();
         bool previousSwitch=profileSwitchInProgress;
@@ -3234,7 +3205,7 @@ public sealed partial class MainWindow : Window
                 RequireCandidateCatalog();
                 var commit=restorePrevious?MultiServerRoutingCommitPlan.PrepareDisable(opened):MultiServerRoutingCommitPlan.Prepare(opened,candidate);
                 commit.Apply(()=>ReferenceEquals(opened,state)&&CanEditServerAssignments(true)&&core.CanSelectEngine,StateStore.Save);
-                Toast(restorePrevious?(primary==null?"Прежние правила восстановлены. Выберите доступный сервер перед подключением.":"Прежняя маршрутизация восстановлена. Назначения сохранены."):"Назначения проверены и сохранены. Подключите VPN.",Green);return true;
+                Toast(restorePrevious?(primary==null?"Прежние правила восстановлены. Выберите доступный сервер перед подключением.":"Прежняя маршрутизация восстановлена. Назначения сохранены."):"Назначения проверены и сохранены. Подключите VPN.",Green);return;
             }
             var previousRouting=RoutingOverlayService.Clone(core.LastConnectedRouting??opened.Routing);
             var previousCatalog=core.CaptureActiveProfiles();
@@ -3269,7 +3240,6 @@ public sealed partial class MainWindow : Window
             else if(result.Cancelled)Toast("Применение отменено. Новые настройки не подтверждены.",Warning);
             else if(result.PreviousRestored&&result.PersistenceRollbackError==null)Toast("Изменение не применено. Предыдущее подключение восстановлено.",Warning);
             else Toast("Не удалось применить назначения: "+LogSanitizer.Sanitize((result.RestoreError??result.PersistenceRollbackError??result.Error)?.Message),Danger);
-            return result.Applied;
         }finally{multiServerApplyBusy=false;profileSwitchInProgress=previousSwitch;trafficModeGate.Release();if(!closing&&currentPage=="routing")RefreshCurrentPage();}
     }
     private async Task EditMultiServerRoutingAsync(bool resume=false)
@@ -3462,100 +3432,6 @@ public sealed partial class MainWindow : Window
 
 	private Border RouteEditorCard(string title, string caption, List<string> values, Color accent, string key)
 	{
-		bool zapretTransitionActive = state.Zapret?.RoutingChangesApplied == true;
-		bool routingListLocked = zapretTransitionActive && (key == "proxy-domains" || key == "direct-domains"
-			|| key == "proxy-apps" || key == "direct-apps" || key == "proxy-paths" || key == "direct-paths");
-		string itemLabel = key.EndsWith("domains", StringComparison.Ordinal) ? "домен"
-			: key.EndsWith("apps", StringComparison.Ordinal) ? "приложение"
-			: key.EndsWith("paths", StringComparison.Ordinal) ? "путь" : "правило";
-		var editor = new RoutingListEditor(values, () =>
-		{
-			if (!snapshotMode) StateStore.Save(state);
-		}, () => new TextBox
-		{
-			Background = new SolidColorBrush(palette.Input),
-			Foreground = new SolidColorBrush(TextColor),
-			CaretBrush = new SolidColorBrush(AccentLight),
-			BorderBrush = new SolidColorBrush(BorderColor),
-			BorderThickness = new Thickness(1),
-			FontFamily = new FontFamily("Consolas"),
-			FontSize = 13 * state.Visual.TextScale,
-			MinHeight = Math.Max(36, 36 * state.Visual.TextScale),
-			VerticalContentAlignment = VerticalAlignment.Center,
-			Padding = new Thickness(8, 6, 8, 6),
-			ToolTip = caption
-		}, text =>
-		{
-			Button button = SmallButton(text);
-			button.Foreground = new SolidColorBrush(TextColor);
-			return button;
-		}, itemLabel, routingListLocked);
-		if (routingListLocked)
-			editor.ToolTip = "Выключите Zapret, чтобы редактировать списки маршрутов. Исходные VPN-маршруты временно сохранены и вернутся автоматически.";
-		AutomationProperties.SetName(editor, title);
-        if (!routingListLocked)
-        {
-            var routing = state.Routing;
-            editor.EntryCompleted = value => CompleteOrdinaryRouteEntry(routing, values, title, value);
-        }
-        return RouteCard(title, caption, accent, editor);
-    }
-
-    private void CompleteOrdinaryRouteEntry(RoutingSettings routing, List<string> destination, string title, string value)
-    {
-        if (closing || !ReferenceEquals(routing, state.Routing) || routing.MultiServer != null) return;
-        var domains = new[] { routing.ProxyDomains, routing.DirectDomains, routing.BlockDomains };
-        var paths = new[] { routing.ProxyProcessPaths, routing.DirectProcessPaths };
-        bool isDomain = domains.Contains(destination);
-        var group = isDomain ? domains : paths;
-        if (!group.Contains(destination)) return;
-
-        string Key(string entry) => isDomain ? RouteDomainKey(entry) : ApplicationRoutingService.NormalizePath(entry);
-        string key = Key(value);
-        if (key.Length == 0) return;
-        bool Matches(string entry) => string.Equals(Key(entry), key, StringComparison.OrdinalIgnoreCase);
-        var otherLists = group.Where(list => !ReferenceEquals(list, destination) && list.Any(Matches)).ToArray();
-        bool repeated = destination.Count(Matches) > 1;
-        if (!repeated && otherLists.Length == 0) return;
-
-        // Zapret temporarily owns its routing lists. Keep those saved rules intact.
-        if (state.Zapret?.RoutingChangesApplied == true && otherLists.Length != 0)
-        {
-            Toast("Такое правило уже есть. Список Zapret изменится после отключения Zapret.", Warning);
-            return;
-        }
-        var changedLists = otherLists.Concat(new[] { destination }).ToArray();
-        var previous = changedLists.Select(list => list.ToArray()).ToArray();
-        foreach (var list in otherLists) list.RemoveAll(Matches);
-        bool kept = false;
-        destination.RemoveAll(entry =>
-        {
-            if (!Matches(entry)) return false;
-            if (kept) return true;
-            kept = true;
-            return false;
-        });
-        try { if (!snapshotMode) StateStore.Save(state); }
-        catch (Exception error)
-        {
-            for (int i = 0; i < changedLists.Length; i++)
-            {
-                changedLists[i].Clear();
-                changedLists[i].AddRange(previous[i]);
-            }
-            Toast(LogSanitizer.Sanitize(error.Message), Warning);
-            return;
-        }
-        Toast(otherLists.Length == 0 ? "Это правило уже есть в этой карточке." :
-            "Правило уже было в маршрутизации и перенесено в «" + title + "».", Warning);
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (!closing && currentPage == "routing" && ReferenceEquals(routing, state.Routing)) RefreshCurrentPage();
-        }), DispatcherPriority.Background);
-    }
-
-    private Border RouteCard(string title, string caption, Color accent, UIElement editor)
-    {
 		Border border = new Border();
 		border.Margin = new Thickness(0.0, 0.0, 0.0, 10.0);
 		border.Padding = new Thickness(17.0, 14.0, 14.0, 14.0);
@@ -3599,6 +3475,37 @@ public sealed partial class MainWindow : Window
 		Grid.SetColumn(stackPanel, 1);
 		grid2.Children.Add(stackPanel);
 		grid.Children.Add(grid2);
+		bool zapretTransitionActive = state.Zapret?.RoutingChangesApplied == true;
+		bool routingListLocked = zapretTransitionActive && (key == "proxy-domains" || key == "direct-domains"
+			|| key == "proxy-apps" || key == "direct-apps" || key == "proxy-paths" || key == "direct-paths");
+		string itemLabel = key.EndsWith("domains", StringComparison.Ordinal) ? "домен"
+			: key.EndsWith("apps", StringComparison.Ordinal) ? "приложение"
+			: key.EndsWith("paths", StringComparison.Ordinal) ? "путь" : "правило";
+		var editor = new RoutingListEditor(values, () =>
+		{
+			if (!snapshotMode) StateStore.Save(state);
+		}, () => new TextBox
+		{
+			Background = new SolidColorBrush(palette.Input),
+			Foreground = new SolidColorBrush(TextColor),
+			CaretBrush = new SolidColorBrush(AccentLight),
+			BorderBrush = new SolidColorBrush(BorderColor),
+			BorderThickness = new Thickness(1),
+			FontFamily = new FontFamily("Consolas"),
+			FontSize = 13 * state.Visual.TextScale,
+			MinHeight = Math.Max(36, 36 * state.Visual.TextScale),
+			VerticalContentAlignment = VerticalAlignment.Center,
+			Padding = new Thickness(8, 6, 8, 6),
+			ToolTip = caption
+		}, text =>
+		{
+			Button button = SmallButton(text);
+			button.Foreground = new SolidColorBrush(TextColor);
+			return button;
+		}, itemLabel, routingListLocked);
+		if (routingListLocked)
+			editor.ToolTip = "Выключите Zapret, чтобы редактировать списки маршрутов. Исходные VPN-маршруты временно сохранены и вернутся автоматически.";
+		AutomationProperties.SetName(editor, title);
 		Grid.SetRow(editor, 2);
 		grid.Children.Add(editor);
 		border2.Child = grid;
@@ -3606,189 +3513,6 @@ public sealed partial class MainWindow : Window
 		EnableCardMotion(border2);
 		return border2;
 	}
-
-    private static string RouteDomainKey(string value)
-    {
-        string normalized = RoutingInspector.NormalizeDomainRule(value).TrimStart('*');
-        try { return MultiServerRule.NormalizeDomainSelector(normalized); }
-        catch (ArgumentException) { return normalized; }
-    }
-
-    private static bool PlaceAssignedRoute(RoutingSettings routing, MultiServerRuleRecord destination, out bool repeated)
-    {
-        bool Matches(MultiServerRuleRecord rule) => destination.Domain != null
-            ? rule.Domain == destination.Domain
-            : rule.ApplicationPath != null && ApplicationRoutingService.SamePath(rule.ApplicationPath, destination.ApplicationPath);
-        bool MatchesLegacyBlock(string domain) => RouteDomainKey(domain) == destination.Domain;
-        var rules = routing.MultiServer.Rules;
-        var existing = rules.Where(Matches).ToArray();
-        bool legacyBlock = destination.Domain != null && routing.BlockDomains.Any(MatchesLegacyBlock);
-        repeated = existing.Length != 0 || legacyBlock;
-        if ((!legacyBlock && existing.Length == 1 && existing[0].Target == destination.Target &&
-             existing[0].ProfileId == destination.ProfileId) ||
-            (destination.Target == "Block" && existing.Length == 0 && legacyBlock)) return false;
-
-        destination.IncludeSubdomains = destination.Domain != null && existing.Any(rule => rule.IncludeSubdomains);
-        rules.RemoveAll(Matches);
-        if (legacyBlock) routing.BlockDomains.RemoveAll(MatchesLegacyBlock);
-        rules.Add(destination);
-        return true;
-    }
-
-    private Border BuildAssignedRouteCard(bool applications, string target)
-    {
-        var assignments = state.Routing.MultiServer;
-        bool secondary = target == "Profile";
-        string profileId = secondary ? assignments?.SecondaryProfileId : null;
-        var server = secondary ? state.Profiles.FirstOrDefault(profile => profile.Id == profileId &&
-            MultiServerRoutingWindow.Compatible(profile)) : null;
-        string destination = secondary ? "через VPN-2" : target == "Direct" ? "напрямую" :
-            target == "Block" ? "блокировать" : "через основной VPN";
-        string title = (applications ? "Приложения " : "Сайты ") + destination;
-        string instructions = applications ? "Выберите файл приложения .exe" : "example.com или *.example.com";
-        string caption = assignments?.RequiresRebinding == true
-            ? "Привяжите импортированные правила в «Назначениях серверов»."
-            : secondary && server == null ? "Назначьте сервер как VPN-2 в списке «Серверы»."
-            : server == null ? instructions : server.Name + " · " + instructions;
-        var editor = new StackPanel();
-        bool canEdit = assignments?.RequiresRebinding == false && (!secondary || server != null) && CanEditServerAssignments();
-        bool InCard(MultiServerRuleRecord rule) => rule.Target == target && rule.ProfileId == profileId &&
-            (applications ? rule.ApplicationPath != null : rule.Domain != null);
-        bool SameEntry(MultiServerRuleRecord rule, string value) => applications
-            ? rule.ApplicationPath != null && ApplicationRoutingService.SamePath(rule.ApplicationPath, value)
-            : rule.Domain == value;
-        bool SameLegacyBlock(string value, string domain) => RouteDomainKey(value) == domain;
-
-        async Task ApplyAsync(string value, bool remove)
-        {
-            if (!canEdit || !CanEditServerAssignments() || !ReferenceEquals(assignments, state.Routing.MultiServer) ||
-                (secondary && !state.Profiles.Any(profile => profile.Id == profileId && MultiServerRoutingWindow.Compatible(profile))))
-            {
-                Toast("Назначения изменились. Повторите действие.", Warning);
-                return;
-            }
-            editor.IsEnabled = false;
-            try
-            {
-                var opened = state;
-                var candidate = RoutingOverlayService.Clone(opened.Routing);
-                var next = candidate.MultiServer;
-                bool repeated = false;
-                if (remove)
-                {
-                    next.Rules.RemoveAll(rule => InCard(rule) && SameEntry(rule, value));
-                    if (!applications && target == "Block")
-                        candidate.BlockDomains.RemoveAll(domain => SameLegacyBlock(domain, value));
-                }
-                else if (!PlaceAssignedRoute(candidate, new MultiServerRuleRecord
-                {
-                    ApplicationPath = applications ? value : null,
-                    Domain = applications ? null : value,
-                    Target = target,
-                    ProfileId = profileId
-                }, out repeated))
-                {
-                    Toast("Это правило уже есть в этой карточке.", Warning);
-                    return;
-                }
-                next.Revision++;
-                next.Validate();
-                if (await ApplyServerAssignmentsAsync(opened, candidate) && !remove && repeated)
-                    Toast("Правило уже было в маршрутизации и перенесено в «" + title + "».", Warning);
-            }
-            catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
-            finally { editor.IsEnabled = true; }
-        }
-
-        Button ActionButton(string label)
-        {
-            var button = SmallButton(label);
-            button.Foreground = new SolidColorBrush(TextColor);
-            button.IsEnabled = canEdit;
-            return button;
-        }
-
-        var rows = new StackPanel();
-        void AddRow(string value, string label)
-        {
-            var row = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
-            var remove = ActionButton("×");
-            remove.MinWidth = 36;
-            remove.Padding = new Thickness(8, 0, 8, 0);
-            remove.Margin = new Thickness(6, 0, 0, 0);
-            AutomationProperties.SetName(remove, "Удалить правило: " + label);
-            remove.Click += async delegate { await ApplyAsync(value, true); };
-            DockPanel.SetDock(remove, Dock.Right);
-            row.Children.Add(remove);
-            var name = T(label, 12, TextColor);
-            name.TextWrapping = TextWrapping.Wrap;
-            row.Children.Add(new Border { Child = name, Padding = new Thickness(9, 7, 9, 7),
-                Background = new SolidColorBrush(palette.Input), BorderBrush = new SolidColorBrush(BorderColor),
-                BorderThickness = new Thickness(1), ToolTip = value });
-            rows.Children.Add(row);
-        }
-        var rules = assignments?.Rules.Where(InCard).ToArray() ?? Array.Empty<MultiServerRuleRecord>();
-        foreach (var rule in rules)
-            AddRow(applications ? rule.ApplicationPath : rule.Domain,
-                applications ? System.IO.Path.GetFileName(rule.ApplicationPath) : rule.DomainLabel);
-        if (!applications && target == "Block")
-            foreach (string blocked in state.Routing.BlockDomains.Select(RoutingInspector.NormalizeDomainRule)
-                .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase))
-                if (!rules.Any(rule => SameLegacyBlock(blocked, rule.Domain)))
-                    AddRow(RouteDomainKey(blocked), blocked);
-
-        if (rows.Children.Count != 0)
-        {
-            var scroll = new ScrollViewer { Content = rows, MaxHeight = 220 * state.Visual.TextScale,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            scroll.PreviewMouseWheel += (sender, args) => SmoothScrollBehavior.ForwardToPage(scroll, args);
-            editor.Children.Add(scroll);
-        }
-        else if (canEdit)
-            editor.Children.Add(T("Пока нет правил.", 11, Muted));
-
-        var add = ActionButton(applications ? "+ Добавить приложение" : "+ Добавить домен");
-        add.HorizontalAlignment = HorizontalAlignment.Left;
-        add.Margin = new Thickness(0, 8, 0, 0);
-        if (applications)
-        {
-            add.Click += async delegate
-            {
-                var picker = new OpenFileDialog { Filter = "Приложения (*.exe)|*.exe", CheckFileExists = true };
-                if (picker.ShowDialog(this) != true) return;
-                string path = ApplicationRoutingService.NormalizePath(picker.FileName);
-                if (path.Length == 0) { Toast("Выберите файл приложения .exe.", Warning); return; }
-                await ApplyAsync(path, false);
-            };
-        }
-        else
-        {
-            var input = new TextBox { Background = new SolidColorBrush(palette.Input),
-                Foreground = new SolidColorBrush(TextColor), BorderBrush = new SolidColorBrush(BorderColor),
-                CaretBrush = new SolidColorBrush(AccentLight), FontSize = 13 * state.Visual.TextScale,
-                Padding = new Thickness(8, 6, 8, 6), Margin = new Thickness(0, 8, 0, 0),
-                ToolTip = instructions, IsEnabled = canEdit };
-            AutomationProperties.SetName(input, "Домен " + destination);
-            editor.Children.Add(input);
-            add.Click += async delegate
-            {
-                string domain;
-                try { domain = MultiServerRule.NormalizeDomainSelector(input.Text); }
-                catch (ArgumentException) { Toast("Введите домен, например example.com или *.example.com.", Warning); return; }
-                await ApplyAsync(domain, false);
-            };
-            input.KeyDown += delegate(object sender, KeyEventArgs args)
-            {
-                if (args.Key != Key.Enter) return;
-                args.Handled = true;
-                add.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            };
-        }
-        editor.Children.Add(add);
-        var card = RouteCard(title, caption, target == "Direct" ? Teal : target == "Block" ? Danger : Accent, editor);
-        if (secondary) card.Name = applications ? "Vpn2ApplicationsCard" : "Vpn2SitesCard";
-        return card;
-    }
 
     private UIElement BuildConnectionJournal()
     {
