@@ -57,6 +57,14 @@ public sealed class RoutingListEditor : StackPanel
         Children.Add(add);
     }
 
+    internal void AppendValue(string value)
+    {
+        if (readOnly || string.IsNullOrWhiteSpace(value)) return;
+        var empty = inputs.FirstOrDefault(input => string.IsNullOrWhiteSpace(input.Text));
+        if (empty != null) empty.Text = value;
+        else { InsertRow(inputs.Count, value); Commit(); }
+    }
+
     private TextBox InsertRow(int index, string value)
     {
         var row = new Grid { Margin = new Thickness(0, 0, 0, 6) };

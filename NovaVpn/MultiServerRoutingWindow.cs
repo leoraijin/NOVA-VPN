@@ -314,12 +314,12 @@ public sealed class MultiServerRoutingWindow : Window
  void Render(){apps.Items.Clear();sites.Items.Clear();secondaryApps.Items.Clear();foreach(var entry in catalog.GroupBy(a=>a.ExecutablePath,StringComparer.OrdinalIgnoreCase).Select(g=>g.First()).OrderBy(a=>a.Name)){var rule=rules.FirstOrDefault(r=>r.ApplicationPath!=null&&ApplicationRoutingService.SamePath(r.ApplicationPath,entry.ExecutablePath));apps.Items.Add(new ListBoxItem{Content=new TextBlock{Text=entry.Name+" — "+Label(rule),TextWrapping=TextWrapping.Wrap},Tag=entry,ToolTip=entry.ExecutablePath,Padding=new Thickness(7)});
   secondaryApps.Items.Add(new ListBoxItem{Content=new TextBlock{Text=entry.Name+" — "+Label(rule),
    TextWrapping=TextWrapping.Wrap},Tag=entry,ToolTip=entry.ExecutablePath,Padding=new Thickness(7)});
-  }foreach(var rule in rules.Where(r=>r.Domain!=null))sites.Items.Add(new ListBoxItem{Content=new TextBlock{Text=rule.DomainLabel+" — "+Label(rule),TextWrapping=TextWrapping.Wrap},Tag=rule,Padding=new Thickness(7)});}
+  }foreach(var rule in rules.Where(r=>r.Domain!=null || r.ApplicationName!=null))sites.Items.Add(new ListBoxItem{Content=new TextBlock{Text=(rule.ApplicationName ?? rule.DomainLabel)+" — "+Label(rule),TextWrapping=TextWrapping.Wrap},Tag=rule,Padding=new Thickness(7)});}
  internal static List<MultiServerRuleRecord> InitialRules(RoutingSettings source)
  {
    var rules = new List<MultiServerRuleRecord>();
    foreach(var path in source.DirectProcessPaths)rules.Add(new MultiServerRuleRecord{ApplicationPath=path,Target="Direct"});
-   foreach(var path in source.ProxyProcessPaths.Where(p=>!source.DirectProcessPaths.Any(d=>ApplicationRoutingService.SamePath(d,p))))rules.Add(new MultiServerRuleRecord{ApplicationPath=path,Target="Default"});
+   foreach(var path in source.ProxyProcessPaths)rules.Add(new MultiServerRuleRecord{ApplicationPath=path,Target="Default"});
    var seen = new HashSet<string>(StringComparer.Ordinal);
    void ImportSites(IEnumerable<string> values, string targetKind)
    {
@@ -328,7 +328,7 @@ public sealed class MultiServerRoutingWindow : Window
      string trimmed = (value ?? "").Trim();
      if (trimmed.Length == 0 || trimmed.StartsWith("#", StringComparison.Ordinal)) continue;
      string selector = MultiServerRule.NormalizeDomainSelector(RoutingInspector.NormalizeDomainRule(trimmed));
-     if (seen.Add(selector)) rules.Add(new MultiServerRuleRecord { Domain = selector, Target = targetKind });
+     if (seen.Add(targetKind + ":" + selector)) rules.Add(new MultiServerRuleRecord { Domain = selector, Target = targetKind });
     }
    }
    ImportSites(source.DirectDomains, "Direct");

@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 12),
+            "Отдельные редактируемые окна сайтов и приложений через VPN-2. Старые правила видны и сохраняются.",
+            "Совпадения в других окнах вызывают предупреждение, но не запрещают добавление и не удаляют записи. Изменения двух VPN применяются отдельной кнопкой."),
         new ReleaseNoteEntry(new Version(2, 6, 11),
             "В режиме двух VPN страница маршрутизации показывает сохранённые правила сайтов и приложений. В каждой группе порядок: напрямую, основной VPN, VPN-2."),
         new ReleaseNoteEntry(new Version(2, 6, 10),

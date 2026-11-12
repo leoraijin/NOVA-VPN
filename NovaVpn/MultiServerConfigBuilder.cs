@@ -105,12 +105,12 @@ public static class MultiServerConfigBuilder
         {
             // sing-box's literal process_path matcher is case-sensitive on Windows.
             var match = rule.Domain == null
-                ? Obj("process_path_regex", new[] { ApplicationRoutingService.ExactPathRegex(rule.ApplicationPath) })
+                ? (rule.ApplicationName != null ? Obj("process_path_regex", new[] {ApplicationRoutingService.ExactNameRegex(rule.ApplicationName)}) : Obj("process_path_regex", new[] { ApplicationRoutingService.ExactPathRegex(rule.ApplicationPath) }))
                 : rule.SubdomainsOnly ? Obj("domain_suffix", new[] { rule.Domain }) : Obj("domain", new[] { rule.Domain });
             if (rule.IncludeSubdomains) match["domain_suffix"] = new[] { "." + rule.Domain };
             return match;
         }
-        var ordered=settings.Rules.Select(r=>r.ToRule()).OrderBy(r=>r.Target.Kind==ServerRouteKind.Block?0:r.Domain!=null?1:2).ThenByDescending(r=>r.Domain?.Length??0).ThenBy(r=>r.IncludeSubdomains).ToArray();
+        var ordered=settings.EffectiveRules().OrderBy(r=>r.Target.Kind==ServerRouteKind.Block?0:r.Domain!=null?1:r.ApplicationPath!=null?2:3).ThenByDescending(r=>r.Domain?.Length??0).ThenBy(r=>r.IncludeSubdomains).ToArray();
         var dnsRules=new List<object>();
         // Reject explicit blocks before local resolution or FakeIP allocation.
         foreach (var rule in ordered.Where(rule => rule.Target.Kind == ServerRouteKind.Block))
@@ -179,7 +179,7 @@ public static class MultiServerConfigBuilder
         foreach (var rule in ordered.Where(rule => rule.ApplicationPath != null && rule.Target.Kind != ServerRouteKind.Block))
             AppendAssignment(rule);
 
-        if (ordered.Any(rule => rule.ApplicationPath != null))
+        if (ordered.Any(rule => rule.ApplicationPath != null || rule.ApplicationName != null))
         {
             var unknownOwner = Obj("process_path_regex", new[] { ".+" }, "invert", true, "action", "reject");
             rules.Add(unknownOwner);
@@ -205,6 +205,8 @@ public static class MultiServerConfigBuilder
             AppendForwardedDns(match, target);
         }
         AppendProcessNames(routing.DirectProcesses, ServerRouteKind.Direct);
+        foreach (var rule in ordered.Where(rule => rule.ApplicationName != null && rule.Target.Kind != ServerRouteKind.Block))
+            AppendAssignment(rule);
         AppendProcessNames(routing.ProxyProcesses, ServerRouteKind.Default);
         Append(Obj(),new ServerRouteTarget(ServerRouteKind.Default));
         string final=Exit(new ServerRouteTarget(ServerRouteKind.Default));

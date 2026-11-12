@@ -29,7 +29,7 @@ class MultiServerSettingsTests
         Check(Roundtrip(new RoutingSettings()).MultiServer==null);
         var invalid=clone.MultiServer.Copy();invalid.Schema=9;Check(Refuses(()=>Roundtrip(invalid)));
         invalid=clone.MultiServer.Copy();invalid.Rules[0].Target="1";Check(Refuses(()=>invalid.Validate()));
-        invalid=clone.MultiServer.Copy();invalid.Rules.Add(invalid.Rules[0].Copy());Check(Refuses(()=>invalid.Validate()));
+        invalid=clone.MultiServer.Copy();invalid.Rules.Add(invalid.Rules[0].Copy());Check(Roundtrip(invalid).Rules.Count == 3 && invalid.Compile(new[]{"fr","us"}).Decide(@"C:\Apps\ChatGPT.exe", null).Effective.ProfileId == "us");
         invalid=clone.MultiServer.Copy();invalid.RequiresRebinding=true;Check(Refuses(()=>Roundtrip(invalid).Compile(new[]{"fr","us"})));
         var fixture=Path.Combine(args[0],"settings-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(fixture);
         var state=new AppState {Routing=clone};

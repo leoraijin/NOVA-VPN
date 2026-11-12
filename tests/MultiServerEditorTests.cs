@@ -202,8 +202,9 @@ class MultiServerEditorTests {
     policy.Decide(null,"local").Effective.ProfileId=="fr");
    Check(policy.Decide(null,"exact.example.test").Effective.Kind==ServerRouteKind.Direct &&
     policy.Decide(null,"child.exact.example.test").Effective.ProfileId=="fr");
-   Check(candidate.MultiServer.Rules.Count(rule=>rule.Domain==".local")==1 &&
-    candidate.MultiServer.Rules.Single(rule=>rule.Domain==".local").Target=="Direct");
+   Check(candidate.MultiServer.Rules.Count(rule=>rule.Domain==".local")==2 &&
+    candidate.MultiServer.Rules.Any(rule=>rule.Domain==".local" && rule.Target=="Direct") &&
+    candidate.MultiServer.Rules.Any(rule=>rule.Domain==".local" && rule.Target=="Default"));
    Check(candidate.AdvancedRules.SequenceEqual(defaultState.Routing.AdvancedRules));
    const string pinnedApp = @"C:\Apps\Pinned.exe";
    candidate.MultiServer.Rules.Add(new MultiServerRuleRecord{ApplicationPath=pinnedApp,Target="Profile",ProfileId="us"});

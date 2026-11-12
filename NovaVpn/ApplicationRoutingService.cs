@@ -88,6 +88,20 @@ public static class ApplicationRoutingService
 		return NormalizePath(path).Length > 0 && ExactPathRegex(path) == pattern ? path : null;
 	}
 
+    private const string NamePrefix = @"(?i)(?:\A|[\\/])";
+    internal static string ExactNameRegex(string name) => NamePrefix + ExactPathRegex(name).Substring(ExactPathPrefix.Length);
+    internal static string DecodeExactNameRegex(string pattern)
+    {
+        if (!pattern.StartsWith(NamePrefix, StringComparison.Ordinal) || !pattern.EndsWith(ExactPathSuffix, StringComparison.Ordinal)) return null;
+        try
+        {
+            string name = Regex.Unescape(pattern.Substring(NamePrefix.Length, pattern.Length - NamePrefix.Length - ExactPathSuffix.Length));
+            if (name.Length == 0 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return null;
+            return ExactNameRegex(name) == pattern ? name : null;
+        }
+        catch (ArgumentException) { return null; }
+    }
+
 	private static bool Contains(IEnumerable<string> values, string path)
 	{
 		return values != null && values.Any(item => SamePath(item, path));

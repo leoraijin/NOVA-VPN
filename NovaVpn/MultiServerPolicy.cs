@@ -25,13 +25,19 @@ public sealed class ServerRouteTarget
 public sealed class MultiServerRule
 {
     public string ApplicationPath { get; }
+    public string ApplicationName { get; }
     public string Domain { get; }
     public bool IncludeSubdomains { get; }
     internal bool SubdomainsOnly => Domain?.StartsWith(".", StringComparison.Ordinal) == true;
     public ServerRouteTarget Target { get; }
-    public MultiServerRule(string applicationPath, string domain, bool includeSubdomains, ServerRouteTarget target)
+    public MultiServerRule(string applicationPath, string domain, bool includeSubdomains, ServerRouteTarget target, string applicationName = null)
     {
-        if ((applicationPath == null) == (domain == null)) throw new ArgumentException("Choose application or domain");
+        if ((applicationPath != null ? 1 : 0) + (domain != null ? 1 : 0) + (applicationName != null ? 1 : 0) != 1)
+            throw new ArgumentException("Choose application or domain");
+        if (applicationName != null && (string.IsNullOrWhiteSpace(applicationName) || applicationName != applicationName.Trim() ||
+            applicationName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !applicationName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("Expected executable name");
+        ApplicationName = applicationName;
         if (applicationPath != null && (( !Path.IsPathRooted(applicationPath) || Path.GetPathRoot(applicationPath).Length < 3) || applicationPath.IndexOfAny(new[] {'*', '?'}) >= 0))
             throw new ArgumentException("Application requires an absolute executable path");
         ApplicationPath = applicationPath == null ? null : Path.GetFullPath(applicationPath);
@@ -61,7 +67,7 @@ public sealed class MultiServerRule
     internal bool Matches(string app, string domain) => Domain != null
         ? domain != null && (SubdomainsOnly ? domain.EndsWith(Domain, StringComparison.Ordinal)
             : domain == Domain || IncludeSubdomains && domain.EndsWith("." + Domain, StringComparison.Ordinal))
-        : app != null && string.Equals(ApplicationPath, app, StringComparison.OrdinalIgnoreCase);
+        : app != null && string.Equals(ApplicationName ?? ApplicationPath, ApplicationName == null ? app : Path.GetFileName(app), StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class MultiServerDecision
@@ -88,7 +94,7 @@ public sealed class MultiServerPolicy
         Revision = revision; DefaultProfileId = defaultProfileId;
         this.rules = (rules ?? throw new ArgumentNullException(nameof(rules))).ToArray();
         if (this.rules.Length > 12000 || this.rules.Any(r => r == null)) throw new ArgumentException("Invalid rules");
-        var duplicate = this.rules.GroupBy(r => r.Domain != null ? "d:" + r.Domain + ":" + r.IncludeSubdomains : "a:" + r.ApplicationPath.ToUpperInvariant())
+        var duplicate = this.rules.GroupBy(r => r.Domain != null ? "d:" + r.Domain + ":" + r.IncludeSubdomains : (r.ApplicationName != null ? "n:" + r.ApplicationName.ToUpperInvariant() : "a:" + r.ApplicationPath.ToUpperInvariant()))
             .Any(g => g.Count() > 1);
         if (duplicate) throw new ArgumentException("Duplicate route assignment");
         profiles = new HashSet<string>(availableProfileIds ?? throw new ArgumentNullException(nameof(availableProfileIds)), StringComparer.Ordinal);
@@ -98,10 +104,10 @@ public sealed class MultiServerPolicy
         string host = null;
         if (domain != null) { try { host = MultiServerRule.NormalizeDomain(domain); } catch (ArgumentException) { } }
         var matched = rules.Where(r => r.Matches(applicationPath, host))
-            .OrderBy(r => r.Target.Kind == ServerRouteKind.Block ? 0 : r.Domain != null ? 1 : 2)
+            .OrderBy(r => r.Target.Kind == ServerRouteKind.Block ? 0 : r.Domain != null ? 1 : r.ApplicationPath != null ? 2 : 3)
             .ThenByDescending(r => r.Domain?.Length ?? 0).ThenBy(r => r.IncludeSubdomains).FirstOrDefault();
         var requested = matched?.Target ?? new ServerRouteTarget(ServerRouteKind.Default);
-        if (matched == null && !ownerKnown && rules.Any(r => r.ApplicationPath != null))
+        if (matched == null && !ownerKnown && rules.Any(r => r.ApplicationPath != null || r.ApplicationName != null))
             return new MultiServerDecision(requested, new ServerRouteTarget(ServerRouteKind.Block), "unknown-owner");
         var resolved = requested.Kind == ServerRouteKind.Default ? new ServerRouteTarget(ServerRouteKind.Profile, DefaultProfileId) : requested;
         if (resolved.Kind == ServerRouteKind.Profile && !profiles.Contains(resolved.ProfileId))

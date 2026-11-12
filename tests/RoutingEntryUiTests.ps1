@@ -69,6 +69,22 @@ try {
   Assert ($values.Count -eq 1 -and $values[0] -eq 'locked.test') "$key protected list modified"
  }
  $state.Zapret.RoutingChangesApplied=$false
+ # Duplicate warnings are informational and never remove entries from either list.
+ $state.Routing.DirectDomains.Clear();$state.Routing.DirectDomains.Add('same.test')
+ $state.Routing.ProxyDomains.Clear()
+ $editor=Editor (Card $state.Routing.ProxyDomains 'proxy-domains')
+ (Rows $editor)[0].Children[0].Text='https://SAME.test/path'
+ $warning=$type.GetField('lastRoutingDuplicateWarning',$flags).GetValue($window)
+ Assert ($warning.Contains('Сайты напрямую')) 'Missing domain duplicate warning'
+ Assert ($state.Routing.DirectDomains.Count -eq 1 -and $state.Routing.ProxyDomains.Count -eq 1) 'Domain conflict deleted a rule'
+ $state.Routing.DirectProcessPaths.Clear();$state.Routing.DirectProcessPaths.Add('C:\Apps\ChatGPT.exe')
+ $state.Routing.ProxyProcesses.Clear()
+ $editor=Editor (Card $state.Routing.ProxyProcesses 'proxy-apps')
+ (Rows $editor)[0].Children[0].Text='CHATGPT.exe'
+ $warning=$type.GetField('lastRoutingDuplicateWarning',$flags).GetValue($window)
+ Assert ($warning.Contains('Пути напрямую')) 'Missing executable name/path warning'
+ Assert ($state.Routing.DirectProcessPaths.Count -eq 1 -and $state.Routing.ProxyProcesses.Count -eq 1) 'App conflict deleted a rule'
+ (Rows $editor)[0].Children[0].Text='bad|name'
  # Render realistic domain/app cards in both palettes, normal and enlarged/narrow.
  foreach($dark in @($false,$true)){
   foreach($scale in @(1.0,1.4)){

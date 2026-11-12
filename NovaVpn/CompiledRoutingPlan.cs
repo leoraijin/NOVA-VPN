@@ -243,6 +243,8 @@ public sealed class CompiledRoutingPlan
                 ApplicationRoutingService.DecodeExactPathRegex(Convert.ToString(value))).Where(path => path != null).Take(4);
             var displayedPaths = exactPaths.Select(path => path.Length > 80 ? path.Substring(0, 80) + "…" : path).ToArray();
             if (displayedPaths.Length > 0) parts.Add("путь приложения = " + string.Join(", ", displayedPaths));
+            var names = Values(rule, "process_path_regex").Select(value => ApplicationRoutingService.DecodeExactNameRegex(Convert.ToString(value))).Where(name => name != null).Take(4);
+            if (names.Any()) parts.Add("приложение = " + string.Join(", ", names));
             text=string.Join(" · ",parts);
         }
         if(text==""&&depth>0)text="любое назначение";if(text.Length>800)text=text.Substring(0,800)+"…";
@@ -337,10 +339,12 @@ public sealed class CompiledRoutingPlan
             if (string.IsNullOrEmpty(process)) unknown = true;
             else if (!pathPatterns.Contains(".+"))
             {
-                // Only interpret the generated exact paths. Other Go expressions stay unknown.
+                // Interpret only canonical expressions emitted by our compiler.
                 var paths = pathPatterns.Select(ApplicationRoutingService.DecodeExactPathRegex).ToArray();
-                if (paths.Any(path => path == null)) return null;
-                if (!paths.Any(path => ApplicationRoutingService.SamePath(path, process))) return false;
+                var names = pathPatterns.Select(ApplicationRoutingService.DecodeExactNameRegex).ToArray();
+                if (paths.Where((path, index) => path == null && names[index] == null).Any()) return null;
+                if (!paths.Any(path => path != null && ApplicationRoutingService.SamePath(path, process)) &&
+                    !names.Any(name => name != null && string.Equals(name, Path.GetFileName(process), StringComparison.OrdinalIgnoreCase))) return false;
             }
         }
         bool? matched = unknown ? (bool?)null : true;

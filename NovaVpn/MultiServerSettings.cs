@@ -16,7 +16,7 @@ public sealed class MultiServerSettings
     [DataMember] public bool RequiresRebinding;
     [DataMember(EmitDefaultValue=false)] public string SecondaryProfileId;
 
-    public string[] ReferencedProfileIds { get { Validate();return new MultiServerPolicy(Revision,DefaultProfileId,Rules.Select(r=>r.ToRule()),Array.Empty<string>()).ReferencedProfileIds; } }
+    public string[] ReferencedProfileIds { get { Validate();return Rules.Select(rule => rule.ProfileId).Concat(new[] {DefaultProfileId}).Where(id => id != null).Distinct(StringComparer.Ordinal).ToArray(); } }
     public static string[] ProfileReferences(AppState state) => new[]{state?.Routing?.MultiServer,state?.RoutingMigrationBackup?.MultiServer,state?.MultiServerRoutingHistory?.SavedAssignments}
         .Where(s=>s!=null).SelectMany(s=>s.ReferencedProfileIds.Concat(!s.RequiresRebinding && s.SecondaryProfileId != null
             ? new[]{s.SecondaryProfileId} : Array.Empty<string>())).Concat(new[]{state?.MultiServerRoutingHistory?.SelectedProfileId,state?.MultiServerRoutingHistory?.FallbackRootProfileId}.Where(id=>!String.IsNullOrEmpty(id)))
@@ -28,7 +28,7 @@ public sealed class MultiServerSettings
         if (SecondaryProfileId != null && (String.IsNullOrWhiteSpace(SecondaryProfileId) ||
             SecondaryProfileId.Length > 128 || SecondaryProfileId == DefaultProfileId))
             throw new SerializationException("Выберите разные конфиги для основного VPN и VPN-2.");
-        new MultiServerPolicy(Revision,DefaultProfileId,Rules.Select(r => r.ToRule()),Array.Empty<string>());
+        new MultiServerPolicy(Revision,DefaultProfileId,EffectiveRules(),Array.Empty<string>());
     }
     [OnDeserialized] private void Read(StreamingContext context) { Validate(); }
     public MultiServerSettings Copy()
@@ -49,11 +49,25 @@ public sealed class MultiServerSettings
         SecondaryProfileId = profileId;
     }
 
+    // Keep all user entries in the document; resolve identical selectors only for the core.
+    // Blocks win, then direct, VPN-2, other assigned servers, and the default VPN.
+    internal IEnumerable<MultiServerRule> EffectiveRules()
+    {
+        return Rules.Select(record => record.ToRule())
+            .OrderBy(rule => rule.Target.Kind == ServerRouteKind.Block ? 0 :
+                rule.Target.Kind == ServerRouteKind.Direct ? 1 :
+                rule.Target.Kind == ServerRouteKind.Profile && rule.Target.ProfileId == SecondaryProfileId ? 2 :
+                rule.Target.Kind == ServerRouteKind.Profile && rule.Target.ProfileId != DefaultProfileId ? 3 : 4)
+            .GroupBy(rule => rule.Domain != null ? "d:" + rule.Domain + ":" + rule.IncludeSubdomains :
+                (rule.ApplicationName != null ? "n:" + rule.ApplicationName.ToUpperInvariant() : "a:" + rule.ApplicationPath.ToUpperInvariant()), StringComparer.Ordinal)
+            .Select(group => group.First());
+    }
+
     public MultiServerPolicy Compile(IEnumerable<string> availableProfileIds)
     {
         Validate();
         if (RequiresRebinding) throw new InvalidOperationException("Назначьте серверы для импортированных правил маршрутизации.");
-        return new MultiServerPolicy(Revision,DefaultProfileId,Rules.Select(r => r.ToRule()),availableProfileIds);
+        return new MultiServerPolicy(Revision,DefaultProfileId,EffectiveRules(),availableProfileIds);
     }
 }
 
@@ -61,6 +75,7 @@ public sealed class MultiServerSettings
 public sealed class MultiServerRuleRecord
 {
     [DataMember] public string ApplicationPath;
+    [DataMember(EmitDefaultValue=false)] public string ApplicationName;
     [DataMember] public string Domain;
     [DataMember] public bool IncludeSubdomains;
     [DataMember(IsRequired=true)] public string Target;
@@ -72,10 +87,10 @@ public sealed class MultiServerRuleRecord
     {
         if (!Enum.GetNames(typeof(ServerRouteKind)).Contains(Target)) throw new SerializationException("Неизвестное назначение маршрута.");
         var rule = new MultiServerRule(ApplicationPath,Domain,IncludeSubdomains,
-            new ServerRouteTarget((ServerRouteKind)Enum.Parse(typeof(ServerRouteKind),Target),ProfileId));
+            new ServerRouteTarget((ServerRouteKind)Enum.Parse(typeof(ServerRouteKind),Target),ProfileId),ApplicationName);
         if (Domain != null && Domain != rule.Domain) throw new SerializationException("Домен должен быть нормализован.");
         return rule;
     }
-    public MultiServerRuleRecord Copy() => new MultiServerRuleRecord { ApplicationPath=ApplicationPath,Domain=Domain,
+    public MultiServerRuleRecord Copy() => new MultiServerRuleRecord { ApplicationPath=ApplicationPath,ApplicationName=ApplicationName,Domain=Domain,
         IncludeSubdomains=IncludeSubdomains,Target=Target,ProfileId=ProfileId };
 }

@@ -136,7 +136,7 @@ try {
  $ruleType=$assembly.GetType('NovaVpn.MultiServerRuleRecord')
  function Add-Route($domain,$path,$target,$id){
   $rule=[Activator]::CreateInstance($ruleType)
-  $rule.Domain=$domain;$rule.ApplicationPath=$path;$rule.Target=$target;$rule.ProfileId=$id
+  if($null -ne $domain){$rule.Domain=$domain};if($null -ne $path){$rule.ApplicationPath=$path};$rule.Target=$target;if($null -ne $id){$rule.ProfileId=$id}
   $settings.Rules.Add($rule)
  }
  for($i=0;$i -lt 13;$i++){Add-Route "direct-$i.example.test" $null 'Direct' $null}
@@ -153,7 +153,7 @@ try {
  $expected=@('RoutingSitesDirect','RoutingSitesPrimary','RoutingSitesSecondary','RoutingAppsDirect','RoutingAppsPrimary','RoutingAppsSecondary')
  $cards=@(Nodes $root | Where-Object {$_ -is [Windows.Controls.Border] -and $_.Name -in $expected})
  Assert (($cards.Name -join '|') -eq ($expected -join '|')) 'Routing card order changed'
- function CardText($card){@(Nodes $card | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)}
+ function CardText($card){@(Nodes $card | Where-Object {$_ -is [Windows.Controls.TextBlock] -or $_ -is [Windows.Controls.TextBox]} | ForEach-Object Text)}
  Assert (@(CardText $cards[0] | Where-Object {$_ -like 'direct-*.example.test'}).Count -eq 13) 'Direct sites missing from routing page'
  Assert (@(CardText $cards[1] | Where-Object {$_ -like 'primary-*.example.test'}).Count -eq 72) 'Primary sites missing from routing page'
  Assert ((CardText $cards[2]) -contains 'secondary.example.test') 'VPN-2 site missing'
@@ -162,5 +162,18 @@ try {
  Assert ((CardText $cards[5]) -contains 'C:\Fixture\Secondary.exe') 'VPN-2 app missing'
  Assert ($settings.Rules.Count -eq 89 -and $state.Routing.DirectDomains.Count -eq 0 -and $state.Routing.ProxyDomains.Count -eq 0) 'Routing page modified saved rules'
  Save-Image 'routing-active'
+ $secondaryInput=@(Nodes $cards[2] | Where-Object {$_ -is [Windows.Controls.TextBox] -and $_.Name -eq 'RoutingEntry'})[0]
+ $secondaryInput.Text='DIRECT-0.example.test'
+ Layout
+ $warning=@(Nodes $cards[2] | Where-Object {$_ -is [Windows.Controls.TextBlock] -and $_.Text -like '*уже есть в*'})
+ Assert ($warning.Count -eq 1 -and $warning[0].Text.Contains('Сайты напрямую')) 'Duplicate warning absent or missing other card'
+ Assert ($settings.Rules.Count -eq 89 -and $settings.Rules[85].Domain -eq 'secondary.example.test') 'Typing duplicate mutated live state'
+ Assert ((CardText $cards[0]) -contains 'direct-0.example.test') 'Typing duplicate removed other visible entry'
+ Assert (-not $secondaryInput.IsReadOnly) 'Duplicate blocks editing'
+ $window.ShowPageForSnapshot('servers');Layout
+ $window.ShowPageForSnapshot('routing');Layout
+ $secondaryInput=@(Nodes (Named 'RoutingSitesSecondary') | Where-Object {$_ -is [Windows.Controls.TextBox] -and $_.Name -eq 'RoutingEntry'})[0]
+ Assert ($secondaryInput.Text -eq 'DIRECT-0.example.test') 'Navigation lost unsaved draft'
+
  Write-Output "PASS: $checks desktop UI checks; seven window/theme/mode variants. Synthetic profiles only."
 } finally {$window.Close();$app.Shutdown()}
