@@ -49,6 +49,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Reality Core build failed' }
             Copy-Item target/release/reality-client.exe ../payload/core/reality-client.exe -Force
             Copy-Item LICENSE ../payload/core/LICENSE-reality-core.txt -Force
+            cargo install cargo-about --locked --version 0.9.2 --features cli
+            if ($LASTEXITCODE -ne 0) { throw 'Reality Core license tool installation failed' }
+            cargo about generate --locked --manifest-path bin/client/Cargo.toml --output-file ../payload/core/THIRD-PARTY-LICENSES.html scripts/about/third-party-licenses.hbs
+            if ($LASTEXITCODE -ne 0) { throw 'Reality Core notices generation failed' }
             git archive --format=zip --output=../../outputs/Reality-Core-source.zip HEAD
             if ($LASTEXITCODE -ne 0) { throw 'Reality Core source archive failed' }
             cargo vendor --locked ../reality-dependencies | Out-Null
