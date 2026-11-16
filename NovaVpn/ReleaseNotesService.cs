@@ -21,6 +21,15 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 20),
+            "Добавлена встроенная история обновления режима нескольких VPN."),
+        new ReleaseNoteEntry(new Version(2, 6, 19),
+            "До 10 VPN-конфигов с отдельными окнами сайтов и приложений. При выключении режима правила сохраняются и временно используют основной VPN.",
+            "Добавление и удаление конфигов в сворачиваемом блоке главной страницы. Удаление слота не меняет номера остальных VPN."),
+        new ReleaseNoteEntry(new Version(2, 6, 18),
+            "Обновлено Reality Core с поддержкой нескольких выходов и исправлениями зависимостей Quinn."),
+        new ReleaseNoteEntry(new Version(2, 6, 17),
+            "При выключении VPN-2 его сайты и приложения временно используют основной VPN, сохраняя свои назначения."),
         new ReleaseNoteEntry(new Version(2, 6, 16),
             "Reality Core поддерживает два VPN-конфига и отдельные назначения сайтов и приложений."),
         new ReleaseNoteEntry(new Version(2, 6, 15),
