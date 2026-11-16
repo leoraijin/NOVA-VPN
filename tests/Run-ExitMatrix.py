@@ -175,7 +175,8 @@ def run_windows_tun(core, reality, fixture, count, workdir):
             threading.Thread(target=server.serve_forever, daemon=True).start()
             stack.callback(server.shutdown)
         datagram_exits = []
-        for number, destination in enumerate(addresses, start=1):
+        # Reality Core currently implements SOCKS5 CONNECT only.
+        for number, destination in enumerate([] if reality else addresses, start=1):
             server = stack.enter_context(socketserver.ThreadingTCPServer((underlay, 0), DatagramExit))
             server.label, server.number, server.destination = f"vpn{number}", number, destination
             server.seen = []
@@ -230,7 +231,8 @@ def run_windows_tun(core, reality, fixture, count, workdir):
                 assert answers == [server.label for server in exits], answers
                 assert all(server.seen and all(seen == (address, 80) for seen in server.seen)
                            for address, server in zip(addresses, exits))
-                verify_wintun_datagrams(addresses, datagram_exits)
+                if datagram_exits:
+                    verify_wintun_datagrams(addresses, datagram_exits)
                 if count > 1:
                     exits[-1].shutdown()
                     exits[-1].server_close()
@@ -258,7 +260,8 @@ def run_windows_tun(core, reality, fixture, count, workdir):
                     process.kill()
                     process.wait()
                     raise
-        print(f"PASS {'Reality Core' if reality else 'sing-box'}: {count} exit(s), Wintun TCP, UDP and DNS packets")
+        coverage = "TCP" if reality else "TCP, UDP and DNS packets"
+        print(f"PASS {'Reality Core' if reality else 'sing-box'}: {count} exit(s), Wintun {coverage}")
 
 
 def main():
