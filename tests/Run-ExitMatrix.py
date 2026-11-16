@@ -148,13 +148,18 @@ def dns_response(exit_number):
 
 
 def verify_wintun_datagrams(addresses, exits, dns_port=53):
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
-        client.settimeout(5)
-        for address, exit_server in zip(addresses, exits):
-            for port, payload, expected in ((5300, b"nova-wintun-udp", exit_server.label.encode("ascii")),
-                                            (dns_port, DNS_QUERY, dns_response(exit_server.number))):
+    for address, exit_server in zip(addresses, exits):
+        cases = ((5300, b"nova-wintun-udp", exit_server.label.encode("ascii")),
+                 (dns_port, DNS_QUERY, dns_response(exit_server.number)))
+        for port, payload, expected in cases:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+                client.settimeout(5)
                 client.sendto(payload, (address, port))
-                response, peer = client.recvfrom(2048)
+                try:
+                    response, peer = client.recvfrom(2048)
+                except TimeoutError as error:
+                    raise AssertionError(f"{exit_server.label}: no UDP response for {address}:{port}; "
+                                         f"exit packets={[server.seen for server in exits]}") from error
                 assert peer == (address, port) and response == expected, (exit_server.label, port, response)
     assert all(server.seen == [(address, 5300), (address, dns_port)]
                for address, server in zip(addresses, exits)), [server.seen for server in exits]
