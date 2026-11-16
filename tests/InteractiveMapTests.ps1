@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory=$true)][string]$AssemblyPath,
+param([Parameter(Mandatory=$true)][string]$AssemblyPath,
       [Parameter(Mandatory=$true)][string]$CorePath,
       [Parameter(Mandatory=$true)][string]$WorkPath)
 $ErrorActionPreference='Stop'
@@ -85,6 +85,24 @@ try{
         $cached=$catalogTest.Invoke($null,@($profile,$CorePath,$runtime,[Threading.CancellationToken]::None)).GetAwaiter().GetResult()
         Assert ($cached.Success -and $cached.CheckedUtc -eq $shared.CheckedUtc) 'cached catalog result must be reused and isolated from display changes'
     } finally {$scope.Dispose()}
+    $invalid=Profile 'DE Germany - Berlin'
+    $invalid.Protocol=$profile.Protocol
+    $invalid.Server=$profile.Server
+    $invalid.Port=$profile.Port
+    $invalid.Method=$profile.Method
+    $invalid.Password='incorrect-batch-password'
+    $valid=Profile 'PL Poland - Warsaw'
+    $valid.Protocol=$profile.Protocol
+    $valid.Server=$profile.Server
+    $valid.Port=$profile.Port
+    $valid.Method=$profile.Method
+    $valid.Password=$profile.Password
+    # A distinct but equivalent host spelling bypasses the previous cached success.
+    $valid.Server='localhost'
+    $batchSuccess=$catalogTest.Invoke($null,@($valid,$CorePath,$runtime,[Threading.CancellationToken]::None))
+    $batchFailure=$catalogTest.Invoke($null,@($invalid,$CorePath,$runtime,[Threading.CancellationToken]::None))
+    Assert $batchSuccess.GetAwaiter().GetResult().Success 'valid batch exit must pass HTTPS'
+    Assert (-not $batchFailure.GetAwaiter().GetResult().Success) 'dead batch exit must not fall through to the valid exit'
     $profile.Password='incorrect-test-password'
     $task=$test.Invoke($null,@($profile,$CorePath,$runtime,[Threading.CancellationToken]::None));$result=$task.GetAwaiter().GetResult()
     Assert (-not $result.Success) 'incorrect credentials must fail despite working direct internet'

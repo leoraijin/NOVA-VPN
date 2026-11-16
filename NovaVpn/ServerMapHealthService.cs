@@ -42,6 +42,169 @@ public static class ServerMapHealthService
         public int Waiters;
     }
 
+    private static readonly Dictionary<(string Core, string Runtime), List<PendingProbe>> PendingCatalog =
+        new Dictionary<(string, string), List<PendingProbe>>();
+
+    private sealed class PendingProbe
+    {
+        public VpnProfile Profile;
+        public CancellationToken Token;
+        public Tuple<string, string, string> Key;
+        public readonly TaskCompletionSource<ServerMapHealth> Completion =
+            new TaskCompletionSource<ServerMapHealth>(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    // CatalogLock is held by the caller so each queued task has one cache owner.
+    private static Task<ServerMapHealth> QueueCatalogProbe(VpnProfile profile, string corePath, string runtime,
+        CancellationToken token, Tuple<string, string, string> key)
+    {
+        if (profile.Protocol == "sing-box" || ConfigBuilder.RequiresXrayTransport(profile) || CorporateProxy.Enabled(profile))
+            return Task.Run(() => TestStampedAsync(profile, corePath, runtime, token, key));
+
+        var location = (Core: corePath, Runtime: runtime);
+        if (!PendingCatalog.TryGetValue(location, out var batch) || batch.Count == 8)
+        {
+            batch = new List<PendingProbe>();
+            PendingCatalog[location] = batch;
+            _ = FlushCatalogAsync(location, batch);
+        }
+        var probe = new PendingProbe { Profile = profile, Token = token, Key = key };
+        batch.Add(probe);
+        return probe.Completion.Task;
+    }
+
+    private static async Task FlushCatalogAsync((string Core, string Runtime) location, List<PendingProbe> queued)
+    {
+        await Task.Delay(35).ConfigureAwait(false);
+        lock (CatalogLock)
+        {
+            if (PendingCatalog.TryGetValue(location, out var current) && ReferenceEquals(current, queued))
+                PendingCatalog.Remove(location);
+        }
+
+        var active = queued.Where(probe => !probe.Token.IsCancellationRequested).ToArray();
+        foreach (var probe in queued.Except(active)) probe.Completion.TrySetCanceled();
+        if (active.Length == 0) return;
+        if (active.Length > 1)
+        {
+            try
+            {
+                var results = await RunCatalogBatchAsync(location.Core, location.Runtime, active).ConfigureAwait(false);
+                for (int i = 0; i < active.Length; i++)
+                {
+                    var probe = active[i];
+                    if (probe.Token.IsCancellationRequested) probe.Completion.TrySetCanceled();
+                    else probe.Completion.TrySetResult(results[i]);
+                }
+                return;
+            }
+            catch (Exception ex) { Debug.WriteLine("Catalog batch: " + ex.GetType().Name); }
+        }
+
+        // One incompatible config or a failed shared process must not hide healthy profiles.
+        await Task.WhenAll(active.Select(async probe =>
+        {
+            try
+            {
+                var result = await TestStampedAsync(probe.Profile, location.Core, location.Runtime, probe.Token, probe.Key).ConfigureAwait(false);
+                probe.Completion.TrySetResult(result);
+            }
+            catch (OperationCanceledException) { probe.Completion.TrySetCanceled(); }
+            catch (Exception ex) { probe.Completion.TrySetException(ex); }
+        })).ConfigureAwait(false);
+    }
+
+    private static async Task<ServerMapHealth[]> RunCatalogBatchAsync(string corePath, string runtime, PendingProbe[] probes)
+    {
+        using (var stop = new CancellationTokenSource())
+        {
+            var registrations = probes.Select(probe => probe.Token.Register(() =>
+            {
+                if (probes.All(item => item.Token.IsCancellationRequested)) stop.Cancel();
+            })).ToArray();
+            try
+            {
+                await ProbeSlots.WaitAsync(stop.Token).ConfigureAwait(false);
+                try { return await RunCatalogProcessAsync(corePath, runtime, probes, stop.Token).ConfigureAwait(false); }
+                finally { ProbeSlots.Release(); }
+            }
+            finally { foreach (var registration in registrations) registration.Dispose(); }
+        }
+    }
+
+    private static async Task<ServerMapHealth[]> RunCatalogProcessAsync(string corePath, string runtime,
+        PendingProbe[] probes, CancellationToken token)
+    {
+        var listeners = new List<TcpListener>();
+        var endpoints = new List<(VpnProfile Profile, int Port, string User, string Password)>();
+        try
+        {
+            foreach (var probe in probes)
+            {
+                var listener = new TcpListener(IPAddress.Loopback, 0);
+                listeners.Add(listener);
+                listener.Start();
+                endpoints.Add((probe.Profile, ((IPEndPoint)listener.LocalEndpoint).Port,
+                    Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N")));
+            }
+        }
+        finally { foreach (var listener in listeners) listener.Stop(); }
+
+        token.ThrowIfCancellationRequested();
+        string file = PrivateRuntimeFiles.WriteCoreConfig(runtime, ConfigBuilder.BuildCatalogProbeBatch(endpoints));
+        Process process = null;
+        try
+        {
+            process = new Process { StartInfo = OwnedCoreProcess.Wrap(new ProcessStartInfo(corePath, "run -c \"" + file + "\"")
+                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true }, file) };
+            process.OutputDataReceived += (s, e) => { };
+            process.ErrorDataReceived += (s, e) => { };
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                deadline.CancelAfter(TimeSpan.FromSeconds(30));
+                await Task.WhenAll(endpoints.Select(endpoint => WaitForListenerAsync(process, endpoint.Port, deadline.Token))).ConfigureAwait(false);
+                return await Task.WhenAll(endpoints.Select(async (endpoint, index) =>
+                {
+                    var probe = probes[index];
+                    var result = new ServerMapHealth();
+                    using (var request = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, probe.Token))
+                    {
+                        try { await MeasureProxyAsync(endpoint.Port, endpoint.User, endpoint.Password, result, request.Token).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { result.Message = "HTTPS: тайм-аут"; }
+                        catch (HttpRequestException) { result.Message = "HTTPS через профиль не прошёл"; }
+                        catch (IOException) { result.Message = "HTTPS через профиль не прошёл"; }
+                    }
+                    result.ProfileKey = probe.Key.Item1; result.NetworkKey = probe.Key.Item2; result.CoreKey = probe.Key.Item3;
+                    result.CheckedUtc = DateTime.UtcNow;
+                    return result;
+                })).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            if (process != null) { try { if (!process.HasExited) process.Kill(); process.WaitForExit(2000); } catch { } process.Dispose(); }
+            try { File.Delete(file); } catch { }
+        }
+    }
+
+    private static async Task WaitForListenerAsync(Process process, int port, CancellationToken token)
+    {
+        for (int i = 0; i < 40 && !process.HasExited; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            using (var socket = new TcpClient())
+            {
+                try { await socket.ConnectAsync(IPAddress.Loopback, port).ConfigureAwait(false); return; }
+                catch (SocketException) { }
+            }
+            await Task.Delay(75, token).ConfigureAwait(false);
+        }
+        throw new IOException("Probe failed to start");
+    }
+
     internal static async Task<ServerMapHealth> TestCatalogAsync(VpnProfile profile, string corePath,
         string runtimeDirectory, CancellationToken token)
     {
@@ -71,7 +234,7 @@ public static class ServerMapHealthService
                 }
                 entry = new CatalogProbe();
                 var owner = entry;
-                entry.Work = Task.Run(() => TestStampedAsync(profile, corePath, runtimeDirectory, owner.Stop.Token, key));
+                entry.Work = QueueCatalogProbe(profile, corePath, runtimeDirectory, owner.Stop.Token, key);
                 CatalogProbes.Add(key, entry);
                 entry.Work.ContinueWith(_ =>
                 {
@@ -172,66 +335,8 @@ public static class ServerMapHealthService
 			using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(token))
 			{
 				deadline.CancelAfter(TimeSpan.FromSeconds(30));
-				bool ready = false;
-				for (int i = 0; i < 40 && !process.HasExited; i++)
-				{
-					deadline.Token.ThrowIfCancellationRequested();
-					using (var socket = new TcpClient())
-					{
-						try { await socket.ConnectAsync(IPAddress.Loopback, port).ConfigureAwait(false); ready = true; break; }
-						catch (SocketException) { }
-					}
-					await Task.Delay(75, deadline.Token).ConfigureAwait(false);
-				}
-				if (!ready) throw new IOException("Probe failed to start");
-				var proxy = new WebProxy("http://127.0.0.1:" + port) { BypassProxyOnLocal = false, Credentials = new NetworkCredential(user, password) };
-				using (var handler = new HttpClientHandler { UseProxy = true, Proxy = proxy, AllowAutoRedirect = false })
-				using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) })
-				{
-					
-                    // Failure of one control service is not proof that the profile is down.
-                    foreach (string target in new[] { "https://1.1.1.1/cdn-cgi/trace", "https://www.gstatic.com/generate_204" })
-                    {
-                    try
-                    {
-                    using (var targetDeadline = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token))
-                    {
-                    targetDeadline.CancelAfter(TimeSpan.FromSeconds(7));
-                    bool trace = target.Contains("cdn-cgi/trace");
-                    result.LatencyMs = await WarmHttpsLatency.MeasureAsync(async () =>
-					{
-						using (var request = new HttpRequestMessage(HttpMethod.Get, target))
-						{
-							request.Headers.ConnectionClose = false;
-                            request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
-                            var watch = Stopwatch.StartNew();
-							using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, targetDeadline.Token).ConfigureAwait(false))
-							{
-								watch.Stop();
-                                if (response.Headers.ConnectionClose == true) throw new IOException("Persistent HTTPS unavailable");
-                                if (response.StatusCode != (trace ? HttpStatusCode.OK : HttpStatusCode.NoContent)) throw new IOException("Probe response failed");
-								using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-								{
-									var buffer = new byte[4096]; int count = 0, read;
-									while (count < buffer.Length && (read = await stream.ReadAsync(buffer, count, buffer.Length - count, targetDeadline.Token).ConfigureAwait(false)) > 0) count += read;
-									if (trace && !Encoding.UTF8.GetString(buffer, 0, count).Contains("\nip=")) throw new IOException("Unexpected probe body");
-								}
-                                return (int)Math.Max(1, watch.ElapsedMilliseconds);
-							}
-						}
-					}).ConfigureAwait(false);
-					result.Success = true;
-					result.Target = new Uri(target).Host;
-                    result.Message = "Медиана трёх HTTPS-ответов после установления соединения · " + result.Target;
-                    }
-                    break;
-                    }
-                    catch (OperationCanceledException) when (!deadline.IsCancellationRequested) { }
-                    catch (HttpRequestException) { }
-                    catch (IOException) { }
-                    }
-                    if (!result.Success) result.Message = "Контрольные HTTPS-адреса через профиль не ответили";
-				}
+				await WaitForListenerAsync(process, port, deadline.Token).ConfigureAwait(false);
+				await MeasureProxyAsync(port, user, password, result, deadline.Token).ConfigureAwait(false);
 			}
 		}
 		catch (OperationCanceledException) { if (token.IsCancellationRequested) throw; result.Message = "HTTPS: тайм-аут"; }
@@ -244,6 +349,58 @@ public static class ServerMapHealthService
 		}
 		result.CheckedUtc = DateTime.UtcNow;
 		return result;
+	}
+
+	private static async Task MeasureProxyAsync(int port, string user, string password, ServerMapHealth result, CancellationToken token)
+	{
+		var proxy = new WebProxy("http://127.0.0.1:" + port) { BypassProxyOnLocal = false, Credentials = new NetworkCredential(user, password) };
+		using (var handler = new HttpClientHandler { UseProxy = true, Proxy = proxy, AllowAutoRedirect = false })
+		using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) })
+		{
+
+                    // Failure of one control service is not proof that the profile is down.
+                    foreach (string target in new[] { "https://1.1.1.1/cdn-cgi/trace", "https://www.gstatic.com/generate_204" })
+                    {
+                    try
+                    {
+                    using (var targetDeadline = CancellationTokenSource.CreateLinkedTokenSource(token))
+                    {
+                    targetDeadline.CancelAfter(TimeSpan.FromSeconds(7));
+                    bool trace = target.Contains("cdn-cgi/trace");
+                    result.LatencyMs = await WarmHttpsLatency.MeasureAsync(async () =>
+			{
+				using (var request = new HttpRequestMessage(HttpMethod.Get, target))
+				{
+					request.Headers.ConnectionClose = false;
+                            request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
+                            var watch = Stopwatch.StartNew();
+					using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, targetDeadline.Token).ConfigureAwait(false))
+					{
+						watch.Stop();
+                                if (response.Headers.ConnectionClose == true) throw new IOException("Persistent HTTPS unavailable");
+                                if (response.StatusCode != (trace ? HttpStatusCode.OK : HttpStatusCode.NoContent)) throw new IOException("Probe response failed");
+						using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+						{
+							var buffer = new byte[4096]; int count = 0, read;
+							while (count < buffer.Length && (read = await stream.ReadAsync(buffer, count, buffer.Length - count, targetDeadline.Token).ConfigureAwait(false)) > 0) count += read;
+							if (trace && !Encoding.UTF8.GetString(buffer, 0, count).Contains("\nip=")) throw new IOException("Unexpected probe body");
+						}
+                                return (int)Math.Max(1, watch.ElapsedMilliseconds);
+					}
+				}
+			}).ConfigureAwait(false);
+			result.Success = true;
+			result.Target = new Uri(target).Host;
+                    result.Message = "Медиана трёх HTTPS-ответов после установления соединения · " + result.Target;
+                    }
+                    break;
+                    }
+                    catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+                    catch (HttpRequestException) { }
+                    catch (IOException) { }
+                    }
+                    if (!result.Success) result.Message = "Контрольные HTTPS-адреса через профиль не ответили";
+		}
 	}
 }
 

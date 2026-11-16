@@ -22,6 +22,42 @@ public static class ConfigBuilder
 		return new JavaScriptSerializer().Serialize(config);
 	}
 
+	internal static string BuildCatalogProbeBatch(IReadOnlyList<(VpnProfile Profile, int Port, string User, string Password)> probes)
+	{
+		if (probes == null || probes.Count < 2 || probes.Count > 8)
+			throw new ArgumentOutOfRangeException(nameof(probes));
+		var ports = new HashSet<int>();
+		var inbounds = new List<object>();
+		var outbounds = new List<object>();
+		var rules = new List<object>();
+		for (int index = 0; index < probes.Count; index++)
+		{
+			var probe = probes[index];
+			if (probe.Profile == null || probe.Profile.Protocol == "sing-box" || RequiresXrayTransport(probe.Profile) ||
+				CorporateProxy.Enabled(probe.Profile))
+				throw new NotSupportedException("Этот профиль требует отдельного процесса проверки.");
+			if (probe.Port < 1 || probe.Port > 65535 || !ports.Add(probe.Port) ||
+				string.IsNullOrWhiteSpace(probe.User) || string.IsNullOrWhiteSpace(probe.Password))
+				throw new ArgumentException("Некорректный локальный вход проверки.", nameof(probes));
+
+			string inbound = "map-probe-" + index;
+			string outbound = "map-exit-" + index;
+			inbounds.Add(Obj("type", "mixed", "tag", inbound, "listen", "127.0.0.1", "listen_port", probe.Port,
+				"users", new object[] { Obj("username", probe.User, "password", probe.Password) }));
+			var proxy = BuildProxy(probe.Profile);
+			proxy["tag"] = outbound;
+			outbounds.Add(proxy);
+			rules.Add(Obj("inbound", new[] { inbound }, "action", "route", "outbound", outbound));
+		}
+		// Every authenticated listener has exactly one exit. Unmatched traffic must fail closed.
+		rules.Add(Obj("action", "reject"));
+		var config = Obj("log", Obj("level", "error"),
+			"dns", Obj("servers", new object[] { Obj("type", "local", "tag", "local-dns") }),
+			"inbounds", inbounds, "outbounds", outbounds,
+			"route", Obj("rules", rules, "auto_detect_interface", true, "default_domain_resolver", "local-dns"));
+		return new JavaScriptSerializer().Serialize(config);
+	}
+
 	public static string Build(VpnProfile profile, RoutingSettings routing)
 	{
 		if (routing?.MultiServer != null) throw new NotSupportedException("Назначения серверов требуют многосерверной сборки конфигурации.");
