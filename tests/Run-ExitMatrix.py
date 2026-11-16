@@ -6,8 +6,10 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import select
 import socket
 import socketserver
+import struct
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -95,6 +97,68 @@ def run(core, reality, fixture, count, workdir):
         print(f"PASS {'Reality Core' if reality else 'sing-box'}: {count} exit(s), loopback TCP")
 
 
+class DatagramExit(socketserver.StreamRequestHandler):
+    """A SOCKS5 test exit that replies only to the two synthetic fixture protocols."""
+
+    def handle(self):
+        self.request.settimeout(6)
+        if self.rfile.read(3) != b"\x05\x01\x00":
+            return
+        self.wfile.write(b"\x05\x00")
+        version, cmd, reserved, family = self.rfile.read(4)
+        if (version, cmd, reserved) != (5, 3, 0):
+            return
+        address_size = {1: 4, 4: 16}.get(family)
+        if address_size is None:
+            return
+        self.rfile.read(address_size + 2)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as relay:
+            relay.bind((self.server.server_address[0], 0))
+            host, port = relay.getsockname()
+            self.wfile.write(b"\x05\x00\x00\x01" + socket.inet_aton(host) + struct.pack("!H", port))
+            while True:
+                readable, _, _ = select.select([self.request, relay], [], [], 6)
+                if not readable or self.request in readable:
+                    return
+                packet, peer = relay.recvfrom(2048)
+                if len(packet) < 10 or packet[:4] != b"\x00\x00\x00\x01":
+                    continue
+                target = socket.inet_ntoa(packet[4:8])
+                port = struct.unpack("!H", packet[8:10])[0]
+                if target != self.server.destination:
+                    continue
+                payload = packet[10:]
+                if port == 5300 and payload == b"nova-wintun-udp":
+                    response = self.server.label.encode("ascii")
+                elif port == 53 and payload == DNS_QUERY:
+                    response = dns_response(self.server.number)
+                else:
+                    continue
+                self.server.seen.append((target, port))
+                relay.sendto(packet[:10] + response, peer)
+
+
+DNS_QUERY = bytes.fromhex("ac1201000001000000000000046e6f766104746573740000010001")
+
+
+def dns_response(exit_number):
+    return (DNS_QUERY[:2] + bytes.fromhex("81800001000100000000") + DNS_QUERY[12:]
+            + bytes.fromhex("c00c000100010000003c0004cb0071") + bytes([exit_number]))
+
+
+def verify_wintun_datagrams(addresses, exits):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+        client.settimeout(5)
+        for address, exit_server in zip(addresses, exits):
+            for port, payload, expected in ((5300, b"nova-wintun-udp", exit_server.label.encode("ascii")),
+                                            (53, DNS_QUERY, dns_response(exit_server.number))):
+                client.sendto(payload, (address, port))
+                response, peer = client.recvfrom(2048)
+                assert peer == (address, port) and response == expected, (exit_server.label, port, response)
+    assert all(server.seen == [(address, 5300), (address, 53)]
+               for address, server in zip(addresses, exits)), [server.seen for server in exits]
+
+
 def run_windows_tun(core, reality, fixture, count, workdir):
     if sys.platform != "win32" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise RuntimeError("Wintun matrix requires an isolated GitHub-hosted Windows runner.")
@@ -110,6 +174,14 @@ def run_windows_tun(core, reality, fixture, count, workdir):
             exits.append(server)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             stack.callback(server.shutdown)
+        datagram_exits = []
+        for number, destination in enumerate(addresses, start=1):
+            server = stack.enter_context(socketserver.ThreadingTCPServer((underlay, 0), DatagramExit))
+            server.label, server.number, server.destination = f"vpn{number}", number, destination
+            server.seen = []
+            datagram_exits.append(server)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            stack.callback(server.shutdown)
         config = {
             "log": {"level": "error"},
             "inbounds": [{"type": "tun", "tag": "tun", "interface_name": "nova-test-matrix",
@@ -120,6 +192,13 @@ def run_windows_tun(core, reality, fixture, count, workdir):
             "route": {"rules": [{"ip_cidr": [address + "/32"], "outbound": server.label}
                                 for address, server in zip(addresses, exits)], "final": "unrelated"},
         }
+        config["outbounds"].extend(
+            {"type": "socks", "tag": f"udp-{server.label}", "server": underlay,
+             "server_port": server.server_address[1], "version": "5", "network": "udp"}
+            for server in datagram_exits)
+        config["route"]["rules"][:0] = [
+            {"network": "udp", "ip_cidr": [address + "/32"], "outbound": f"udp-{server.label}"}
+            for address, server in zip(addresses, datagram_exits)]
         if not reality:
             config["route"]["auto_detect_interface"] = True
         path = Path(directory, "config.json")
@@ -151,6 +230,7 @@ def run_windows_tun(core, reality, fixture, count, workdir):
                 assert answers == [server.label for server in exits], answers
                 assert all(server.seen and all(seen == (address, 80) for seen in server.seen)
                            for address, server in zip(addresses, exits))
+                verify_wintun_datagrams(addresses, datagram_exits)
                 if count > 1:
                     exits[-1].shutdown()
                     exits[-1].server_close()
@@ -178,7 +258,7 @@ def run_windows_tun(core, reality, fixture, count, workdir):
                     process.kill()
                     process.wait()
                     raise
-        print(f"PASS {'Reality Core' if reality else 'sing-box'}: {count} exit(s), Wintun TCP")
+        print(f"PASS {'Reality Core' if reality else 'sing-box'}: {count} exit(s), Wintun TCP, UDP and DNS packets")
 
 
 def main():
