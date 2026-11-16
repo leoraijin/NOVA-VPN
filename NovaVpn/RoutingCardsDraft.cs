@@ -10,7 +10,7 @@ internal sealed class RoutingCardsDraft
 {
     internal sealed class Group
     {
-        internal string Key, Title, Target;
+        internal string Key, Title, Target, ProfileId;
         internal bool Applications;
         internal readonly List<string> Values = new List<string>();
         internal readonly List<string> Initial = new List<string>();
@@ -26,12 +26,13 @@ internal sealed class RoutingCardsDraft
         Baseline = RoutingMigrationService.Fingerprint(source);
         foreach (bool apps in new[] {false, true})
         foreach (string target in new[] {"Direct", "Default", "Profile", "Block"})
+        foreach (var slot in target == "Profile" ? Source.MultiServer.Slots.ToArray() : new[] { new KeyValuePair<int,string>(0, null) })
         {
-            var group = new Group { Applications = apps, Target = target,
-                Key = (apps ? "RoutingApps" : "RoutingSites") + (target == "Direct" ? "Direct" : target == "Default" ? "Primary" : target == "Profile" ? "Secondary" : "Blocked"),
-                Title = (apps ? "Приложения " : "Сайты ") + (target == "Direct" ? "напрямую" : target == "Default" ? "через основной VPN" : target == "Profile" ? "через VPN-2" : "— блокировать") };
+            var group = new Group { Applications = apps, Target = target, ProfileId = slot.Value,
+                Key = (apps ? "RoutingApps" : "RoutingSites") + (target == "Direct" ? "Direct" : target == "Default" ? "Primary" : target == "Profile" ? (slot.Key == 2 ? "Secondary" : "Vpn" + slot.Key) : "Blocked"),
+                Title = (apps ? "Приложения " : "Сайты ") + (target == "Direct" ? "напрямую" : target == "Default" ? "через основной VPN" : target == "Profile" ? "через VPN-" + slot.Key : "— блокировать") };
             group.Records.AddRange(Source.MultiServer.Rules.Where(rule =>
-                (apps ? rule.ApplicationPath != null || rule.ApplicationName != null : rule.Domain != null) && MatchesTarget(rule, target)));
+                (apps ? rule.ApplicationPath != null || rule.ApplicationName != null : rule.Domain != null) && MatchesTarget(rule, target, slot.Value)));
             group.Values.AddRange(group.Records.Select(Label));
             if (apps && target == "Direct") group.Values.AddRange(Source.DirectProcesses);
             if (apps && target == "Default") group.Values.AddRange(Source.ProxyProcesses);
@@ -40,9 +41,9 @@ internal sealed class RoutingCardsDraft
             Groups.Add(group);
         }
     }
-    private bool MatchesTarget(MultiServerRuleRecord rule, string target) => target == "Default"
+    private bool MatchesTarget(MultiServerRuleRecord rule, string target, string profileId) => target == "Default"
         ? rule.Target == "Default" || rule.Target == "Profile" && rule.ProfileId == Source.MultiServer.DefaultProfileId
-        : target == "Profile" ? Source.MultiServer.SecondaryProfileId != null && rule.Target == "Profile" && rule.ProfileId == Source.MultiServer.SecondaryProfileId
+        : target == "Profile" ? profileId != null && rule.Target == "Profile" && rule.ProfileId == profileId
         : rule.Target == target;
     internal static string Label(MultiServerRuleRecord rule) => rule.ApplicationPath ?? rule.ApplicationName ?? rule.DomainLabel;
     internal static string Key(string value, bool apps)
@@ -94,7 +95,7 @@ internal sealed class RoutingCardsDraft
         var settings = next.MultiServer;
         foreach (var group in Groups.Where(group => !group.Values.SequenceEqual(group.Initial)))
         {
-            if (group.Target == "Profile" && settings.SecondaryProfileId == null && group.Values.Count != 0)
+            if (group.Target == "Profile" && group.ProfileId == null && group.Values.Count != 0)
                 throw new InvalidOperationException("Сначала выберите сервер VPN-2 во вкладке «Серверы».");
             var removed = Source.MultiServer.Rules.Select((rule, index) => new {rule, index})
                 .Where(item => group.Records.Contains(item.rule)).Select(item => item.index).ToArray();
@@ -114,7 +115,7 @@ internal sealed class RoutingCardsDraft
                 if (existing != null) { settings.Rules.Add(existing); originalCopies.Remove(existing); continue; }
                 if (legacy != null && legacyOriginal.Remove(value)) { legacy.Add(value); continue; }
                 var record = new MultiServerRuleRecord {Target = group.Target,
-                    ProfileId = group.Target == "Profile" ? settings.SecondaryProfileId : null};
+                    ProfileId = group.Target == "Profile" ? group.ProfileId : null};
                 if (group.Applications)
                 {
                     string path = Environment.ExpandEnvironmentVariables(value.Trim('"')).Replace('/', '\\');

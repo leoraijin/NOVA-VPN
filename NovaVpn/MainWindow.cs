@@ -970,7 +970,7 @@ public sealed partial class MainWindow : Window
         homeVpn2Status = new StackPanel {Name = "HomeVpn2Status", Margin = new Thickness(0, 10, 0, 0)};
 		UpdateVerificationDisplay();
 		stackPanel10.Children.Add(protection);
-        stackPanel10.Children.Add(homeVpn2Status);
+        stackPanel10.Children.Add(new ScrollViewer { Content = homeVpn2Status, MaxHeight = 150, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
 		if (state.Visual.ShowConnectionMap) stackPanel10.Children.Add(BuildConnectionPath(vpnProfile));
 		if (responsiveMode == "Wide")
 		{
@@ -1072,11 +1072,11 @@ public sealed partial class MainWindow : Window
         heading.ColumnDefinitions.Add(new ColumnDefinition());
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0) };
-        var title = T("Два VPN-конфига", 18, TextColor, FontWeights.SemiBold);
+        var title = T("Несколько VPN-конфигов", 18, TextColor, FontWeights.SemiBold);
         title.TextWrapping = TextWrapping.Wrap;
         labels.Children.Add(title);
         var description = T(enabled ? "Включено · отдельные серверы для приложений и сайтов" :
-            "Основной VPN для всего, VPN-2 — для выбранных приложений и сайтов", 12, Muted);
+            "До 10 VPN · отдельные серверы для приложений и сайтов", 12, Muted);
         description.TextWrapping = TextWrapping.Wrap;
         description.TextTrimming = TextTrimming.None;
         description.Margin = new Thickness(0, 5, 0, 0);
@@ -1085,24 +1085,56 @@ public sealed partial class MainWindow : Window
         var toggle = ToggleButton(enabled);
         toggle.Name = "DualVpnToggle";
         toggle.IsEnabled = editable;
-        System.Windows.Automation.AutomationProperties.SetName(toggle, "Два VPN-конфига: " + (enabled ? "включено" : "выключено"));
-        toggle.ToolTip = enabled ? "Выключить VPN-2 и направить его маршруты через основной VPN" : "Разрешить выбор VPN-2";
+        System.Windows.Automation.AutomationProperties.SetName(toggle, "Несколько VPN-конфигов: " + (enabled ? "включено" : "выключено"));
+        toggle.ToolTip = enabled ? "Выключить дополнительные VPN, сохранив правила, и использовать основной" : "Включить дополнительные VPN";
         Grid.SetColumn(toggle, 1);
         heading.Children.Add(toggle);
         content.Children.Add(heading);
-        if (enabled)
+        if (enabled || assignments != null)
         {
             string ProfileName(string id) => id == null ? "не выбран" :
                 state.Profiles.FirstOrDefault(p => p.Id == id && !p.RetiredFromSubscription)?.Name ?? "недоступен";
-            var names = T("Основной VPN: " + ProfileName(assignments?.DefaultProfileId ?? SelectedProfile()?.Id) +
-                "\nVPN-2: " + ProfileName(assignments?.SecondaryProfileId), 12, TextColor);
+            var slotPanel = new StackPanel();
+            var names = T("Основной VPN: " + ProfileName(assignments?.DefaultProfileId ?? SelectedProfile()?.Id), 12, TextColor);
             names.Name = "DualVpnProfiles";
             names.TextWrapping = TextWrapping.Wrap;
             names.TextTrimming = TextTrimming.None;
             names.Margin = new Thickness(0, 12, 0, 0);
-            content.Children.Add(names);
+            slotPanel.Children.Add(names);
+            foreach (var slot in assignments?.Slots ?? new SortedDictionary<int,string>()) {
+                var row = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
+                var remove = SmallButton("Удалить");
+                DockPanel.SetDock(remove, Dock.Right);
+                row.Children.Add(remove);
+                var label = T("VPN-" + slot.Key + " · " + ProfileName(slot.Value), 12, TextColor);
+                label.TextWrapping = TextWrapping.Wrap;
+                label.VerticalAlignment = VerticalAlignment.Center;
+                label.Margin = new Thickness(0, 0, 12, 0);
+                row.Children.Add(label);
+                remove.HorizontalAlignment = HorizontalAlignment.Left;
+                remove.Margin = new Thickness(0, 8, 0, 0);
+                remove.IsEnabled = editable;
+                remove.Click += async delegate {
+                    if (!CanEditServerAssignments()) return;
+                    if (MessageBox.Show(this, "Удалить VPN-" + slot.Key + " и его правила сайтов и приложений? Конфиг останется в списке серверов.",
+                        "Удалить дополнительный VPN", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                    try {
+                        var candidate = RoutingOverlayService.Clone(state.Routing);
+                        if (candidate.MultiServer == null || !candidate.MultiServer.Slots.ContainsKey(slot.Key) || candidate.MultiServer.Slots[slot.Key] != slot.Value)
+                            throw new InvalidOperationException("Настройки изменились. Повторите действие.");
+                        candidate.MultiServer.SetSlot(slot.Key, null);
+                        candidate.MultiServer.Revision++;
+                        await ApplyServerAssignmentsAsync(state, candidate);
+                    } catch (Exception error) { Toast(LogSanitizer.Sanitize(error.Message), Warning); }
+                    finally { if (!closing) RefreshCurrentPage(); }
+                };
+                slotPanel.Children.Add(row);
+            }
+            content.Children.Add(new Expander { Header = "Конфиги · " + (1 + (assignments?.Slots.Count ?? 0)),
+                Margin = new Thickness(0, 10, 0, 0), Foreground = new SolidColorBrush(TextColor),
+                Content = new ScrollViewer { Content = slotPanel, MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         }
-        var configure = SmallButton("Выбрать сервер");
+        var configure = SmallButton(assignments?.Slots.Count >= 9 ? "Изменить конфиги" : "+ Добавить VPN / выбрать сервер");
         configure.Name = "ConfigureDualVpn";
         configure.IsEnabled = !closing;
         configure.HorizontalAlignment = HorizontalAlignment.Left;
@@ -1209,19 +1241,22 @@ public sealed partial class MainWindow : Window
         if (assignments == null && !DualVpnEnabled) return;
         var primary = SelectedProfile();
         string primaryId = assignments?.DefaultProfileId ?? primary?.Id;
-        string secondaryId = assignments?.SecondaryProfileId;
-        foreach (bool secondary in new[] { false, true })
+        var slots = assignments?.Slots ?? new SortedDictionary<int,string>();
+        int freeSlot = Enumerable.Range(2, 9).FirstOrDefault(number => !slots.ContainsKey(number));
+        var roles = new[] {1}.Concat(slots.Keys).Concat(freeSlot == 0 ? Array.Empty<int>() : new[] {freeSlot});
+        foreach (int slot in roles)
         {
-            if (secondary && assignments?.SecondaryPaused == true) continue;
-            bool current = profile.Id == (secondary ? secondaryId : primaryId);
+            bool secondary = slot != 1;
+            string assignedId = secondary ? (slots.ContainsKey(slot) ? slots[slot] : null) : primaryId;
+            bool current = profile.Id == assignedId;
             var item = new MenuItem
             {
-                Header = secondary ? "Использовать как VPN-2" : "Использовать как основной VPN",
+                Header = secondary ? (slot == freeSlot && slot > 2 ? "Добавить VPN-" : "Использовать как VPN-") + slot : "Использовать как основной VPN",
                 IsCheckable = true,
                 IsChecked = current,
                 IsEnabled = !current && assignments?.RequiresRebinding != true && MultiServerRoutingWindow.Compatible(profile)
                     && (!secondary || assignments != null || (primary != null && MultiServerRoutingWindow.Compatible(primary)))
-                    && profile.Id != (secondary ? primaryId : secondaryId)
+                    && (secondary ? profile.Id != primaryId && !slots.Any(s => s.Key != slot && s.Value == profile.Id) : !slots.Values.Contains(profile.Id))
             };
             item.Click += async delegate
             {
@@ -1257,7 +1292,7 @@ public sealed partial class MainWindow : Window
                         }
                         candidate = MultiServerRoutingWindow.CreateCandidate(source, next, source.EnableIpv6);
                     }
-                    if (secondary) next.SetSecondaryProfile(chosen.Id);
+                    if (secondary) next.SetSlot(slot, chosen.Id);
                     else next.DefaultProfileId = chosen.Id;
                     next.Revision++;
                     next.Validate();
@@ -3118,7 +3153,7 @@ public sealed partial class MainWindow : Window
         var secondary = state.Profiles.FirstOrDefault(profile => profile.Id == settings.SecondaryProfileId);
         if (settings.SecondaryPaused)
         {
-            var notice = T("VPN-2 выключен. Его правила сохранены и сейчас используют основной VPN.", 12, Muted);
+            var notice = T("Дополнительные VPN выключены. Их правила сохранены и сейчас используют основной VPN.", 12, Muted);
             notice.TextWrapping = TextWrapping.Wrap;
             content.Children.Add(notice);
         }
@@ -3133,7 +3168,7 @@ public sealed partial class MainWindow : Window
         if (routingCardsDraft == null || (!routingCardsDraft.Dirty && routingCardsDraft.Baseline != RoutingMigrationService.Fingerprint(routing)))
             routingCardsDraft = new RoutingCardsDraft(routing);
         var draft = routingCardsDraft;
-        var pending = T("Изменения в этих окнах применяются кнопкой «Применить правила». При совпадении одного правила: блокировка → напрямую → VPN-2 → основной VPN. Более точные правила сайтов и пути приложений сохраняют приоритет.", 11, Muted);
+        var pending = T("Изменения в этих окнах применяются кнопкой «Применить правила». При совпадении одного правила: блокировка → напрямую → дополнительные VPN → основной VPN. Более точные правила сайтов и пути приложений сохраняют приоритет.", 11, Muted);
         pending.TextWrapping = TextWrapping.Wrap;
         pending.Margin = new Thickness(0, 0, 0, 12);
         content.Children.Add(pending);
@@ -3167,8 +3202,7 @@ public sealed partial class MainWindow : Window
         }
         bool GoesThroughPrimary(MultiServerRuleRecord rule) => rule.Target == "Default" ||
             rule.Target == "Profile" && rule.ProfileId == settings.DefaultProfileId;
-        bool GoesThroughSecondary(MultiServerRuleRecord rule) => settings.SecondaryProfileId != null &&
-            rule.Target == "Profile" && rule.ProfileId == settings.SecondaryProfileId;
+        bool GoesThroughSecondary(MultiServerRuleRecord rule) => rule.Target == "Profile" && settings.Slots.Values.Contains(rule.ProfileId);
         var other = settings.Rules.Where(rule => rule.Target == "Profile" && !GoesThroughPrimary(rule) && !GoesThroughSecondary(rule))
             .Select(rule => (rule.Domain == null ? rule.ApplicationPath ?? rule.ApplicationName : rule.DomainLabel) + " → " +
                 (state.Profiles.FirstOrDefault(profile => profile.Id == rule.ProfileId)?.Name ?? "Сервер недоступен")).ToArray();
@@ -3234,7 +3268,7 @@ public sealed partial class MainWindow : Window
     private Border RoutingDraftCard(RoutingCardsDraft draft, RoutingCardsDraft.Group group)
     {
         bool secondary = group.Target == "Profile";
-        bool ready = !draft.Source.MultiServer.RequiresRebinding && (!secondary || draft.Source.MultiServer.SecondaryProfileId != null);
+        bool ready = !draft.Source.MultiServer.RequiresRebinding && (!secondary || group.ProfileId != null);
         string instructions = group.Applications ? "Имя .exe или полный путь; можно выбрать файл кнопкой ниже. Все прежние правила сохранены."
             : "example.com, *.example.com; «и поддомены» сохраняет охват существующего правила.";
         if (!ready) instructions = "Сначала выберите VPN-2 или привяжите импортированные серверы в «Назначениях серверов».";
@@ -4985,13 +5019,14 @@ public sealed partial class MainWindow : Window
         homeVpn2Status.Children.Clear();
         var configured = state.Routing?.MultiServer;
         var active = core.Status == CoreStatus.Connected ? core.LastConnectedRouting?.MultiServer : null;
-        bool visible = DualVpnEnabled || active?.SecondaryProfileId != null;
+        bool visible = DualVpnEnabled || configured?.Slots.Count > 0 || active?.Slots.Count > 0;
         homeVpn2Status.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         if (!visible) return;
-        string id = configured?.SecondaryProfileId;
+        foreach (var slot in configured?.Slots.Count > 0 ? configured.Slots : new SortedDictionary<int,string> {{2, null}}) {
+        string id = slot.Value;
         var profile = state.Profiles.FirstOrDefault(item => item.Id == id);
-        var name = T("VPN-2 · " + (profile?.Name ?? (id == null ? "Сервер не выбран" : "Сервер недоступен")), 12, TextColor, FontWeights.SemiBold);
-        name.Name = "HomeVpn2Name"; name.TextWrapping = TextWrapping.Wrap;
+        var name = T("VPN-" + slot.Key + " · " + (profile?.Name ?? (id == null ? "Сервер не выбран" : "Сервер недоступен")), 12, TextColor, FontWeights.SemiBold);
+        name.Name = "HomeVpn" + slot.Key + "Name"; name.TextWrapping = TextWrapping.Wrap;
         homeVpn2Status.Children.Add(name);
         string detail; Color color = Muted;
         var result = core.Verification.MultiExits?.Results.FirstOrDefault(item => item.Exit.ProfileId == id);
@@ -5000,10 +5035,10 @@ public sealed partial class MainWindow : Window
         else if (id == null) detail = "Выберите второй конфиг во вкладке «Серверы».";
         else if (profile == null || profile.RetiredFromSubscription) {detail = "Конфиг недоступен · выберите другой сервер"; color = Warning;}
         else if (configured.RequiresRebinding) {detail = "Привяжите импортированные назначения к серверу"; color = Warning;}
-        else if (!assigned) detail = "Не используется · назначьте сайты или приложения через VPN-2";
+        else if (!assigned) detail = "Не используется · назначьте сайты или приложения через VPN-" + slot.Key;
         else if (core.Status == CoreStatus.Connecting) {detail = "Подключается…"; color = Warning;}
         else if (core.Status != CoreStatus.Connected) detail = "Не подключён";
-        else if (active?.SecondaryProfileId != id || !active.EffectiveRules().Any(rule => rule.Target.ProfileId == id))
+        else if ((active == null || !active.Slots.ContainsKey(slot.Key) || active.Slots[slot.Key] != id) || !active.EffectiveRules().Any(rule => rule.Target.ProfileId == id))
         {detail = "Назначения ещё не применены к подключению"; color = Warning;}
         else if (result == null) {detail = "HTTPS проверяется…"; color = Warning;}
         else if (result.Exit.ProfileFingerprint != ExitProbeTarget.Fingerprint(profile))
@@ -5021,9 +5056,10 @@ public sealed partial class MainWindow : Window
             var rules = configured.Rules.Where(rule => rule.Target == "Profile" && rule.ProfileId == id).ToArray();
             detail += " · сайтов: " + rules.Count(rule => rule.Domain != null) + " · приложений: " + rules.Count(rule => rule.Domain == null);
         }
-        var status = T(detail, 11, color); status.Name = "HomeVpn2Details";
+        var status = T(detail, 11, color); status.Name = "HomeVpn" + slot.Key + "Details";
         status.TextWrapping = TextWrapping.Wrap; status.Margin = new Thickness(0, 4, 0, 0);
         homeVpn2Status.Children.Add(status);
+        }
     }
 
 	private void UpdateVerificationDisplay()

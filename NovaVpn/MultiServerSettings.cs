@@ -17,8 +17,38 @@ public sealed class MultiServerSettings
     [DataMember(EmitDefaultValue=false)] public string SecondaryProfileId;
 
     [DataMember(EmitDefaultValue=false)] public bool SecondaryPaused;
+    [DataMember(EmitDefaultValue=false)] public List<VpnSlot> AdditionalSlots;
+    public SortedDictionary<int,string> Slots {
+        get {
+            var result = new SortedDictionary<int,string>();
+            if (SecondaryProfileId != null) result.Add(2, SecondaryProfileId);
+            foreach (var slot in AdditionalSlots ?? new List<VpnSlot>()) {
+                if (slot == null || slot.Number < 3 || slot.Number > 10 || result.ContainsKey(slot.Number))
+                    throw new SerializationException("Некорректный номер VPN.");
+                result.Add(slot.Number, slot.ProfileId);
+            }
+            return result;
+        }
+    }
+    internal void SetSlot(int number, string profileId) {
+        if (number < 2 || number > 10) throw new ArgumentOutOfRangeException(nameof(number));
+        if (profileId != null && (profileId == DefaultProfileId || Slots.Any(s => s.Key != number && s.Value == profileId)))
+            throw new InvalidOperationException("Этот конфиг уже назначен другому VPN.");
+        string old; Slots.TryGetValue(number, out old);
+        if (old != null) {
+            if (profileId == null) Rules.RemoveAll(r => r.Target == "Profile" && r.ProfileId == old);
+            else foreach (var rule in Rules.Where(r => r.Target == "Profile" && r.ProfileId == old)) rule.ProfileId = profileId;
+        }
+        if (number == 2) SecondaryProfileId = profileId;
+        else {
+            if (AdditionalSlots == null) AdditionalSlots = new List<VpnSlot>();
+            AdditionalSlots.RemoveAll(s => s.Number == number);
+            if (profileId != null) AdditionalSlots.Add(new VpnSlot { Number = number, ProfileId = profileId });
+        }
+        Validate();
+    }
 
-    public string[] ReferencedProfileIds { get { Validate();return Rules.Select(rule => rule.ProfileId).Concat(new[] {DefaultProfileId}).Where(id => id != null).Distinct(StringComparer.Ordinal).ToArray(); } }
+    public string[] ReferencedProfileIds { get { Validate();return Rules.Select(rule => rule.ProfileId).Concat(Slots.Values).Concat(new[] {DefaultProfileId}).Where(id => id != null).Distinct(StringComparer.Ordinal).ToArray(); } }
     public static string[] ProfileReferences(AppState state) => new[]{state?.Routing?.MultiServer,state?.RoutingMigrationBackup?.MultiServer,state?.MultiServerRoutingHistory?.SavedAssignments}
         .Where(s=>s!=null).SelectMany(s=>s.ReferencedProfileIds.Concat(!s.RequiresRebinding && s.SecondaryProfileId != null
             ? new[]{s.SecondaryProfileId} : Array.Empty<string>())).Concat(new[]{state?.MultiServerRoutingHistory?.SelectedProfileId,state?.MultiServerRoutingHistory?.FallbackRootProfileId}.Where(id=>!String.IsNullOrEmpty(id)))
@@ -30,6 +60,9 @@ public sealed class MultiServerSettings
         if (SecondaryProfileId != null && (String.IsNullOrWhiteSpace(SecondaryProfileId) ||
             SecondaryProfileId.Length > 128 || SecondaryProfileId == DefaultProfileId))
             throw new SerializationException("Выберите разные конфиги для основного VPN и VPN-2.");
+        if (Slots.Values.Any(id => String.IsNullOrWhiteSpace(id) || id.Length > 128 || id == DefaultProfileId) ||
+            Slots.Values.Distinct(StringComparer.Ordinal).Count() != Slots.Count)
+            throw new SerializationException("Выберите разные конфиги для каждого VPN.");
         new MultiServerPolicy(Revision,DefaultProfileId,EffectiveRules(),Array.Empty<string>());
     }
     [OnDeserialized] private void Read(StreamingContext context) { Validate(); }
@@ -37,19 +70,9 @@ public sealed class MultiServerSettings
     {
         Validate();
         return new MultiServerSettings { Schema=Schema, Revision=Revision, DefaultProfileId=DefaultProfileId,
-            SecondaryProfileId=SecondaryProfileId, SecondaryPaused=SecondaryPaused, RequiresRebinding=RequiresRebinding, Rules=Rules.Select(r => r.Copy()).ToList() };
+            SecondaryProfileId=SecondaryProfileId, SecondaryPaused=SecondaryPaused, AdditionalSlots=AdditionalSlots?.Select(s => new VpnSlot {Number=s.Number, ProfileId=s.ProfileId}).ToList(), RequiresRebinding=RequiresRebinding, Rules=Rules.Select(r => r.Copy()).ToList() };
     }
-    internal void SetSecondaryProfile(string profileId)
-    {
-        if (profileId == DefaultProfileId)
-            throw new InvalidOperationException("Выберите разные конфиги для основного VPN и VPN-2.");
-        if (SecondaryProfileId != null)
-        {
-            foreach (var rule in Rules.Where(rule => rule.Target == "Profile" && rule.ProfileId == SecondaryProfileId))
-                rule.ProfileId = profileId;
-        }
-        SecondaryProfileId = profileId;
-    }
+    internal void SetSecondaryProfile(string profileId) => SetSlot(2, profileId);
 
     // Keep all user entries in the document; resolve identical selectors only for the core.
     // Blocks win, then direct, VPN-2, other assigned servers, and the default VPN.
@@ -99,4 +122,9 @@ public sealed class MultiServerRuleRecord
     }
     public MultiServerRuleRecord Copy() => new MultiServerRuleRecord { ApplicationPath=ApplicationPath,ApplicationName=ApplicationName,Domain=Domain,
         IncludeSubdomains=IncludeSubdomains,Target=Target,ProfileId=ProfileId };
+}
+[DataContract]
+public sealed class VpnSlot {
+    [DataMember(IsRequired=true)] public int Number;
+    [DataMember(IsRequired=true)] public string ProfileId;
 }

@@ -15,6 +15,7 @@ public sealed class MultiServerRoutingWindow : Window
  readonly RoutingSettings source;readonly VpnProfile[] profiles;readonly List<MultiServerRuleRecord> rules;
  readonly ListBox apps=new ListBox{SelectionMode=SelectionMode.Extended,HorizontalContentAlignment=HorizontalAlignment.Stretch};
  readonly ListBox secondaryApps=new ListBox{SelectionMode=SelectionMode.Extended,HorizontalContentAlignment=HorizontalAlignment.Stretch};
+ readonly Dictionary<int,string> additionalSlotIds = new Dictionary<int,string>();
  readonly ComboBox secondary=new ComboBox{MinWidth=240};
  readonly ListBox sites=new ListBox{HorizontalContentAlignment=HorizontalAlignment.Stretch};
  readonly ComboBox primary=new ComboBox{MinWidth=240};readonly ComboBox target=new ComboBox{MinWidth=240};
@@ -91,6 +92,31 @@ public sealed class MultiServerRoutingWindow : Window
   top.Children.Add(new TextBlock{Text="Основной сервер"});top.Children.Add(primary);
   top.Children.Add(new TextBlock{Text="VPN-2"});top.Children.Add(secondary);
   System.Windows.Automation.AutomationProperties.SetName(secondary,"VPN-2");
+  var additionalPanel = new StackPanel();
+  foreach (var slot in source.MultiServer?.Slots.Where(s => s.Key > 2) ?? Enumerable.Empty<KeyValuePair<int,string>>()) {
+   int number = slot.Key;
+   string originalId = slot.Value;
+   additionalSlotIds[number] = source.MultiServer.RequiresRebinding ? null : originalId;
+   additionalPanel.Children.Add(new TextBlock {Text="VPN-"+number, Margin=new Thickness(0,8,0,4)});
+   var picker = new ComboBox {MinWidth=240};
+   foreach (var profile in this.profiles.Where(Compatible)) {
+    var option = new ComboBoxItem {Content=profile.Name, Tag=profile.Id};
+    picker.Items.Add(option);
+    if (profile.Id == additionalSlotIds[number]) picker.SelectedItem=option;
+   }
+   picker.SelectionChanged += delegate {
+    if (!(picker.SelectedItem is ComboBoxItem selected)) return;
+    string oldId=additionalSlotIds[number] ?? originalId;
+    string newId=(string)selected.Tag;
+    foreach (var rule in rules.Where(r=>r.Target=="Profile"&&r.ProfileId==oldId)) {rule.ProfileId=newId;unbound.Remove(rule);}
+    additionalSlotIds[number]=newId;
+    Render();
+   };
+   additionalPanel.Children.Add(picker);
+  }
+  if (additionalSlotIds.Count > 0) top.Children.Add(new Expander { Header="Дополнительные VPN", Content=new ScrollViewer {
+   Content=additionalPanel, MaxHeight=220, VerticalScrollBarVisibility=ScrollBarVisibility.Auto
+  }});
   ipv6.IsChecked=source.EnableIpv6;top.Children.Add(ipv6);
   top.Children.Add(new TextBlock{Text="При выключенном IPv6 эта семья трафика блокируется внутри TUN.",TextWrapping=TextWrapping.Wrap});
   top.Children.Add(new TextBlock{Text="Поиск сервера: название, страна или транспорт",Margin=new Thickness(0,8,0,0)});top.Children.Add(search);
@@ -357,8 +383,9 @@ public sealed class MultiServerRoutingWindow : Window
   if(!preservingMissing&&!profiles.Any(p=>p.Id==primaryId&&!p.RetiredFromSubscription&&p.Protocol!="sing-box"&&!CorporateProxy.Enabled(p)))throw new InvalidOperationException("Выберите доступный совместимый основной сервер.");
   if (unconfirmedApps.Any(rules.Contains)) throw new InvalidOperationException("Укажите путь к .exe для каждого импортированного правила приложения.");
   if(unbound.Any(r=>rules.Contains(r)))throw new InvalidOperationException("Заново назначьте сервер для каждого импортированного правила.");
+  if (additionalSlotIds.Values.Any(String.IsNullOrEmpty)) throw new InvalidOperationException("Выберите сервер для каждого дополнительного VPN.");
   return CreateCandidate(source, new MultiServerSettings { Revision = (source.MultiServer?.Revision ?? 0) + 1,
-   DefaultProfileId = primaryId, SecondaryProfileId = secondaryId, SecondaryPaused = source.MultiServer?.SecondaryPaused == true, Rules = rules.Select(r => r.Copy()).ToList() }, ipv6.IsChecked == true);
+   DefaultProfileId = primaryId, SecondaryProfileId = secondaryId, AdditionalSlots = additionalSlotIds.Select(s => new VpnSlot {Number=s.Key,ProfileId=s.Value}).ToList(), SecondaryPaused = source.MultiServer?.SecondaryPaused == true, Rules = rules.Select(r => r.Copy()).ToList() }, ipv6.IsChecked == true);
  }
  void Save(){try{Accepted=BuildCandidate();DialogResult=true;}catch(Exception e){error.Text=LogSanitizer.Sanitize(e.Message);}}
 }

@@ -62,14 +62,22 @@ try {
   $card=Named 'DualVpnCard';$toggle=Named 'DualVpnToggle';$edit=Named 'ConfigureDualVpn'
   Assert ($null -ne $card -and $null -ne $toggle -and $null -ne $edit) 'Home dual controls missing'
   $labels=@(Nodes $root | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)
-  Assert ($labels -contains 'Два VPN-конфига') 'Dual VPN heading missing'
-  Assert ($edit.Content -eq 'Выбрать сервер') 'Wrong configuration action'
+  Assert ($labels -contains 'Несколько VPN-конфигов') 'Dual VPN heading missing'
+  Assert ($edit.Content -eq '+ Добавить VPN / выбрать сервер') 'Wrong configuration action'
   $status2=Named 'HomeVpn2Status'
   Assert (($status2.Visibility -eq [Windows.Visibility]::Visible) -eq ($case.Dual -or $case.Pending)) 'VPN2 home visibility wrong'
   if($case.Dual){Assert ((Named 'HomeVpn2Name').Text.Contains($state.Profiles[2].Name)) 'VPN2 server missing from home status'}
-  $names=Named 'DualVpnProfiles'
-  Assert (($null -ne $names) -eq ($case.Dual -or $case.Pending)) 'Profile names do not reflect mode'
-  if($case.Dual){Assert ($names.Text.Contains($state.Profiles[0].Name) -and $names.Text.Contains($state.Profiles[2].Name)) 'Selected configs missing'}
+  $expander=@(Nodes $card | Where-Object {$_ -is [Windows.Controls.Expander]}) | Select-Object -First 1
+  Assert (($null -ne $expander) -eq ($case.Dual -or $case.Pending)) 'Config management visibility wrong'
+  if($expander){
+   $expander.IsExpanded=$true;Layout
+   $names=Named 'DualVpnProfiles'
+   if($case.Dual){
+    $slotLabels=@(Nodes $expander | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)
+    Assert ($names.Text.Contains($state.Profiles[0].Name) -and @($slotLabels|Where-Object {$_ -like ('*'+$state.Profiles[2].Name+'*')}).Count -gt 0) 'Selected configs missing'
+   }
+   $expander.IsExpanded=$false;Layout
+  }
   Visible $toggle $card 'Dual toggle';Visible $edit $card 'Dual editor button'
   # The entry is visible without scrolling at ordinary desktop sizes; minimum height remains scrollable.
   if($case.Height -ge 720 -and $case.Scale -eq 1){Visible $toggle $root 'Home toggle on first screen'}
