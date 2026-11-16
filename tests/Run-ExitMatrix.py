@@ -271,6 +271,10 @@ def run_windows_tun(core, reality, fixture, count, workdir, singbox):
         }
         if reality:
             datagram_exits, udp_outbounds = start_vless_datagram_peer(stack, singbox, directory, underlay, addresses)
+            config["inbounds"][0]["dns_hijack"] = True
+            config["dns"] = {"servers": [{"type": "udp", "tag": "fixture-dns", "server": underlay,
+                                          "server_port": datagram_exits[0].server_address[1],
+                                          "detour": "unrelated"}], "final": "fixture-dns"}
         else:
             udp_outbounds = [
                 {"type": "socks", "tag": f"udp-{server.label}", "server": underlay,
