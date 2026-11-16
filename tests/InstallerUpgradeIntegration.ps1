@@ -14,8 +14,8 @@ Add-Type -AssemblyName System.Windows.Forms
 $target = Join-Path $env:ProgramW6432 'NOVA VPN'
 $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NOVA VPN'
 $profile = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'NovaVPN'
-if ((Test-Path $target) -or (Test-Path $key) -or (Test-Path $profile)) {
-    throw 'Expected a clean runner with no NOVA VPN state.'
+if ((Test-Path $target) -or (Test-Path $key)) {
+    throw "Expected no installed NOVA VPN. Directory=$(Test-Path $target), Registry=$(Test-Path $key)."
 }
 
 function Install-Package([string]$Path, [string]$UpdatePath) {
@@ -66,10 +66,11 @@ function Install-Package([string]$Path, [string]$UpdatePath) {
 }
 
 Install-Package $BaselineInstaller ''
-New-Item -ItemType Directory -Path $profile | Out-Null
+New-Item -ItemType Directory -Path $profile -Force | Out-Null
 $sentinel = Join-Path $profile 'installer-upgrade-sentinel.txt'
 Set-Content -LiteralPath $sentinel -Value 'preserve user profile' -Encoding ASCII
-$before = (Get-FileHash -LiteralPath $sentinel).Hash
+$before = @(Get-ChildItem -LiteralPath $profile -File -Recurse -Force | Get-FileHash | Sort-Object Path)
 Install-Package $CandidateInstaller $target
-if ((Get-FileHash -LiteralPath $sentinel).Hash -ne $before) { throw 'Upgrade modified user profile data.' }
+$after = @(Get-ChildItem -LiteralPath $profile -File -Recurse -Force | Get-FileHash | Sort-Object Path)
+if (Compare-Object $before $after -Property Path,Hash) { throw 'Upgrade modified user profile data.' }
 
