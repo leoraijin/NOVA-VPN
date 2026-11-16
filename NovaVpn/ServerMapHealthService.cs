@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Linq;
@@ -71,7 +71,7 @@ public static class ServerMapHealthService
                 }
                 entry = new CatalogProbe();
                 var owner = entry;
-                entry.Work = Task.Run(() => TestAsync(profile, corePath, runtimeDirectory, owner.Stop.Token));
+                entry.Work = Task.Run(() => TestStampedAsync(profile, corePath, runtimeDirectory, owner.Stop.Token, key));
                 CatalogProbes.Add(key, entry);
                 entry.Work.ContinueWith(_ =>
                 {
@@ -89,8 +89,7 @@ public static class ServerMapHealthService
                 token.ThrowIfCancellationRequested();
                 var result = await entry.Work.ConfigureAwait(false);
                 if (result.ProfileKey != key.Item1 || result.NetworkKey != key.Item2 || result.CoreKey != key.Item3 ||
-                    SubscriptionManager.ConfigKey(profile) != key.Item1 ||
-                    ProfileHealthEvidence.NetworkKey() != key.Item2 || ProfileHealthEvidence.CoreKey(corePath) != key.Item3)
+                    !MatchesCurrentProfile(profile, corePath, key))
                     return new ServerMapHealth { Message = "Параметры проверки изменились. Повторите проверку.", CheckedUtc = DateTime.UtcNow };
                 if (profile.LastCheckedUtc < result.CheckedUtc) ProfileHealthEvidence.Record(profile, result);
                 // Callers can annotate their display result without changing the shared sample.
@@ -112,23 +111,35 @@ public static class ServerMapHealthService
     }
 
 	// The probe has no TUN, no direct outbound, and no proxy bypass/fallback.
-	public static async Task<ServerMapHealth> TestAsync(VpnProfile profile, string corePath, string runtimeDirectory, CancellationToken token)
+	public static Task<ServerMapHealth> TestAsync(VpnProfile profile, string corePath, string runtimeDirectory, CancellationToken token)
+	{
+		return TestStampedAsync(profile, corePath, runtimeDirectory, token, null);
+	}
+
+	private static async Task<ServerMapHealth> TestStampedAsync(VpnProfile profile, string corePath, string runtimeDirectory,
+		CancellationToken token, Tuple<string, string, string> catalogKey)
 	{
 		await ProbeSlots.WaitAsync(token).ConfigureAwait(false);
 		try
-        {
-            string key = profile == null ? "" : SubscriptionManager.ConfigKey(profile);
-            string network = ProfileHealthEvidence.NetworkKey(), core = ProfileHealthEvidence.CoreKey(corePath);
-            var result = await TestCoreAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            if (profile != null && (key != SubscriptionManager.ConfigKey(profile) || network != ProfileHealthEvidence.NetworkKey() || core != ProfileHealthEvidence.CoreKey(corePath)))
-                return new ServerMapHealth { Message = "Профиль, ядро или сеть изменились во время проверки. Повторите проверку.", CheckedUtc = DateTime.UtcNow };
-            result.ProfileKey = key; result.NetworkKey = network; result.CoreKey = core;
-            result.CheckedUtc = DateTime.UtcNow;
-            ProfileHealthEvidence.Record(profile, result);
-            return result;
-        }
+		{
+			var key = catalogKey ?? Tuple.Create(profile == null ? "" : SubscriptionManager.ConfigKey(profile),
+				ProfileHealthEvidence.NetworkKey(), ProfileHealthEvidence.CoreKey(corePath));
+			var result = await TestCoreAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false);
+			token.ThrowIfCancellationRequested();
+			if (profile != null && !MatchesCurrentProfile(profile, corePath, key))
+				return new ServerMapHealth { Message = "Профиль, ядро или сеть изменились во время проверки. Повторите проверку.", CheckedUtc = DateTime.UtcNow };
+			result.ProfileKey = key.Item1; result.NetworkKey = key.Item2; result.CoreKey = key.Item3;
+			result.CheckedUtc = DateTime.UtcNow;
+			if (catalogKey == null) ProfileHealthEvidence.Record(profile, result);
+			return result;
+		}
 		finally { ProbeSlots.Release(); }
+	}
+
+	private static bool MatchesCurrentProfile(VpnProfile profile, string corePath, Tuple<string, string, string> key)
+	{
+		return SubscriptionManager.ConfigKey(profile) == key.Item1 &&
+			ProfileHealthEvidence.NetworkKey() == key.Item2 && ProfileHealthEvidence.CoreKey(corePath) == key.Item3;
 	}
 
 	private static async Task<ServerMapHealth> TestCoreAsync(VpnProfile profile, string corePath, string runtimeDirectory, CancellationToken token)
