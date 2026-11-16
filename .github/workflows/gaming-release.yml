@@ -162,6 +162,15 @@ jobs:
           Get-ChildItem outputs -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Set-Content outputs/SHA256SUMS.txt -Encoding ascii
+      - name: Verify installed files and upgrade from the stable Windows release
+        shell: pwsh
+        run: |
+          $baseline = 'work/NOVA.VPN.Setup.2.6.20.exe'
+          Invoke-WebRequest 'https://github.com/leoraijin/NOVA-VPN/releases/download/v2.6.20/NOVA.VPN.Setup.2.6.20.exe' -OutFile $baseline
+          if ((Get-FileHash -LiteralPath $baseline).Hash -ne '7562CB38B182D1D65D7334DA2B06B6D85130CA5B50021A13F11A7731DD308D99') { throw 'Baseline installer SHA-256 mismatch' }
+          $version = ([Version](Get-Item -LiteralPath 'bin/Release/NOVA VPN.exe').VersionInfo.FileVersion).ToString(3)
+          powershell -NoProfile -STA -File tests/InstallerUpgradeIntegration.ps1 -BaselineInstaller $baseline -CandidateInstaller "work/complete/NOVA.VPN.Setup.$version.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Installer upgrade integration failed' }
       - name: Save verified packages
         uses: actions/upload-artifact@v4
         with:
