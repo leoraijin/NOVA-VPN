@@ -187,7 +187,9 @@ jobs:
           Routing entry UI: eight lists, independent edits, add/delete, multiline paste, Zapret locks, light/dark and narrow layout checks: PASS.
           Desktop UI, legacy recovery, scroll and installer regressions above: PASS.
           Reality Core compiled from the revision pinned in VpnEngine.cs. Remaining runtime payload restored from checksum-pinned 2.6.15.
-          Real provider connectivity was not tested for this UI update.
+          Windows Wintun on a disposable runner: TCP, UDP and DNS packets through 1, 2 and 10 exits on both cores: PASS.
+          Windows map background activity and cancellation regression: PASS.
+          Network scenarios used isolated test servers.
           "@ | Set-Content outputs/VERIFICATION.txt -Encoding utf8
           Get-ChildItem outputs -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
