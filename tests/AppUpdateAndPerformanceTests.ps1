@@ -108,6 +108,7 @@ $app.ShutdownMode = 'OnExplicitShutdown'
 $window = [Activator]::CreateInstance($mainWindow, [object[]]@($true))
 $window.ShowInTaskbar = $false
 $window.ShowActivated = $false
+$window.WindowStartupLocation = 'Manual'
 $window.Left = -32000
 $window.Top = -32000
 $flags = [Reflection.BindingFlags]'Instance,NonPublic'
@@ -115,9 +116,14 @@ $snapshot = $mainWindow.GetField('snapshotMode', $flags)
 $timer = $mainWindow.GetField('mapHealthTimer', $flags).GetValue($window)
 $scope = $mainWindow.GetField('visibleMapChecks', $flags)
 $sync = $mainWindow.GetMethod('SyncMapHealthTimer', $flags)
+$mode = $mainWindow.GetField('responsiveMode', $flags)
+$build = $mainWindow.GetMethod('BuildShell', $flags)
 try {
-    $window.Width = 1180
     $window.Show()
+    $window.UpdateLayout()
+    $window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
+    $mode.SetValue($window, 'Wide')
+    $build.Invoke($window, $null)
     $window.UpdateLayout()
     $window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
     $snapshot.SetValue($window, $false)
@@ -126,7 +132,8 @@ try {
     $token = $scope.GetValue($window).Token
     $snapshot.SetValue($window, $true)
 
-    $window.Width = 700
+    $mode.SetValue($window, 'Compact')
+    $build.Invoke($window, $null)
     $window.UpdateLayout()
     $window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
     $snapshot.SetValue($window, $false)
