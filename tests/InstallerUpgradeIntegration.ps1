@@ -1,6 +1,7 @@
 param(
-    [Parameter(Mandatory)][string]$BaselineInstaller,
-    [Parameter(Mandatory)][string]$CandidateInstaller
+    [string]$BaselineInstaller,
+    [Parameter(Mandatory)][string]$CandidateInstaller,
+    [switch]$CleanInstallOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,6 +65,12 @@ function Install-Package([string]$Path, [string]$UpdatePath) {
     }
     Write-Host "Verified installer $version against the installed files and machine registration."
 }
+
+if ($CleanInstallOnly) {
+    Install-Package $CandidateInstaller ''
+    return
+}
+if (!$BaselineInstaller) { throw 'BaselineInstaller is required to verify an upgrade.' }
 
 Install-Package $BaselineInstaller ''
 New-Item -ItemType Directory -Path $profile -Force | Out-Null
