@@ -100,3 +100,43 @@ try { $parser.GetMethod('ParseSingle').Invoke($null, @('{invalid')) | Out-Null }
 Assert-True $invalidJsonRejected 'malformed sing-box JSON must not be accepted as an importable profile'
 
 Write-Output 'Updater link parsing and visual sampling policy tests passed.'
+
+Add-Type -AssemblyName PresentationFramework
+[Windows.Application]::ResourceAssembly = $assembly
+$app = New-Object Windows.Application
+$app.ShutdownMode = 'OnExplicitShutdown'
+$window = [Activator]::CreateInstance($mainWindow, [object[]]@($true))
+$window.ShowInTaskbar = $false
+$window.ShowActivated = $false
+$window.Left = -32000
+$window.Top = -32000
+$flags = [Reflection.BindingFlags]'Instance,NonPublic'
+$snapshot = $mainWindow.GetField('snapshotMode', $flags)
+$timer = $mainWindow.GetField('mapHealthTimer', $flags).GetValue($window)
+$scope = $mainWindow.GetField('visibleMapChecks', $flags)
+$sync = $mainWindow.GetMethod('SyncMapHealthTimer', $flags)
+try {
+    $window.Width = 1180
+    $window.Show()
+    $window.UpdateLayout()
+    $window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
+    $snapshot.SetValue($window, $false)
+    $sync.Invoke($window, $null)
+    Assert-True $timer.IsEnabled 'visible map on wide home page starts health checks'
+    $token = $scope.GetValue($window).Token
+    $snapshot.SetValue($window, $true)
+
+    $window.Width = 700
+    $window.UpdateLayout()
+    $window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::ApplicationIdle)
+    $snapshot.SetValue($window, $false)
+    $sync.Invoke($window, $null)
+    Assert-True (-not $timer.IsEnabled) 'narrow home page without a map stops health checks'
+    Assert-True $token.IsCancellationRequested 'hiding the map cancels its previous batch'
+} finally {
+    $snapshot.SetValue($window, $true)
+    $sync.Invoke($window, $null)
+    $window.Close()
+    $app.Shutdown()
+}
+Write-Output 'Map visibility policy passed with a real wide and narrow WPF window.'

@@ -114,6 +114,11 @@ jobs:
         run: |
           powershell -NoProfile -STA -File tests/SettingsTransferTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Settings transfer regression failed' }
+      - name: Verify map background activity
+        shell: pwsh
+        run: |
+          powershell -NoProfile -STA -File tests/AppUpdateAndPerformanceTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Map background activity regression failed' }
       - name: Package and verify
         shell: pwsh
         run: |
