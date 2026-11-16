@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: leoraijin/vpn-core
-          ref: 16fe5dd518652965fe2c469dc943054fb86f4b9c
+          ref: ac47b5563604fb185b6c63ed60db49325dcb1c2f
           path: work/reality-core
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87

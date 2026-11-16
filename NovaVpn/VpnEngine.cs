@@ -7,7 +7,7 @@ public enum VpnEngine { SingBox = 0, Reality = 1 }
 
 public static class VpnEngines
 {
-    public const string RealitySourceRevision = "16fe5dd518652965fe2c469dc943054fb86f4b9c";
+    public const string RealitySourceRevision = "ac47b5563604fb185b6c63ed60db49325dcb1c2f";
 
     public static string DisplayName(VpnEngine engine) => engine == VpnEngine.Reality
         ? "Reality Core · экспериментальное" : "sing-box · по умолчанию";
