@@ -67,7 +67,7 @@ $serverFile=Join-Path $WorkPath 'fixture-server.json'
 [IO.File]::WriteAllText($serverFile,$serverConfig,[Text.UTF8Encoding]::new($false))
 $process=Start-Process -FilePath $CorePath -ArgumentList @('run','-c',('"'+$serverFile+'"')) -WindowStyle Hidden -PassThru
 $test=$assembly.GetType('NovaVpn.ServerMapHealthService').GetMethod('TestAsync')
-$runtime=[string](Join-Path $WorkPath 'private-runtime')
+$runtime=[string](Join-Path $WorkPath ('private-runtime-'+[Guid]::NewGuid().ToString('N')))
 try{
     Start-Sleep -Milliseconds 800
     $task=$test.Invoke($null,@($profile,$CorePath,$runtime,[Threading.CancellationToken]::None));$result=$task.GetAwaiter().GetResult()
@@ -103,12 +103,43 @@ try{
     $batchFailure=$catalogTest.Invoke($null,@($invalid,$CorePath,$runtime,[Threading.CancellationToken]::None))
     Assert $batchSuccess.GetAwaiter().GetResult().Success 'valid batch exit must pass HTTPS'
     Assert (-not $batchFailure.GetAwaiter().GetResult().Success) 'dead batch exit must not fall through to the valid exit'
+    $cancelled=Profile 'DE Germany - Hamburg'
+    $cancelled.Protocol=$profile.Protocol
+    $cancelled.Server=$profile.Server
+    $cancelled.Port=$profile.Port
+    $cancelled.Method=$profile.Method
+    $cancelled.Password='cancelled-batch-password'
+    $survivor=Profile 'FR France - Paris'
+    $survivor.Protocol=$profile.Protocol
+    $survivor.Server=$profile.Server
+    $survivor.Port=$profile.Port
+    $survivor.Method=$profile.Method
+    $survivor.Password=$profile.Password
+    # The Shadowsocks outbound ignores Path, but the profile identity includes it.
+    $survivor.Path='/uncached-batch-survivor'
+    $batchCancellation=[Threading.CancellationTokenSource]::new()
+    try {
+        $aborted=$catalogTest.Invoke($null,@($cancelled,$CorePath,$runtime,$batchCancellation.Token))
+        $surviving=$catalogTest.Invoke($null,@($survivor,$CorePath,$runtime,[Threading.CancellationToken]::None))
+        $timer=[Diagnostics.Stopwatch]::StartNew()
+        while (@(Get-ChildItem $runtime -Recurse -File -Filter '*.json').Count -eq 0 -and $timer.Elapsed.TotalSeconds -lt 3) {
+            Start-Sleep -Milliseconds 10
+        }
+        Assert (@(Get-ChildItem $runtime -Recurse -File -Filter '*.json').Count -eq 1) 'two parallel probes must start with one shared runtime config'
+        $runtimeConfig=Get-ChildItem $runtime -Recurse -File -Filter '*.json' | Select-Object -First 1
+        $sharedConfig=Get-Content -LiteralPath $runtimeConfig.FullName -Raw | ConvertFrom-Json
+        Assert ($sharedConfig.inbounds.Count -eq 2) 'the running config must contain both independent listeners'
+        $batchCancellation.Cancel()
+        try { $aborted.GetAwaiter().GetResult(); throw 'catalog cancellation ignored' }
+        catch { Assert $aborted.IsCanceled 'cancellation should reach the catalog caller' }
+        Assert $surviving.GetAwaiter().GetResult().Success 'cancelling one exit must leave the other working'
+    } finally { $batchCancellation.Dispose() }
     $profile.Password='incorrect-test-password'
     $task=$test.Invoke($null,@($profile,$CorePath,$runtime,[Threading.CancellationToken]::None));$result=$task.GetAwaiter().GetResult()
     Assert (-not $result.Success) 'incorrect credentials must fail despite working direct internet'
     $cancel=[Threading.CancellationTokenSource]::new();$cancel.CancelAfter(250)
     $task=$test.Invoke($null,@($profile,$CorePath,$runtime,$cancel.Token))
     try{$task.GetAwaiter().GetResult();throw 'cancellation was ignored'}catch{Assert $task.IsCanceled 'canceled probe task must be canceled'}finally{$cancel.Dispose()}
-    Assert (@(Get-ChildItem $runtime -Filter '*.json').Count -eq 0) 'temporary profile configs must be removed'
+    Assert (@(Get-ChildItem $runtime -Recurse -File -Filter '*.json').Count -eq 0) 'temporary profile configs must be removed'
 }finally{if(-not $process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose();Remove-Item -LiteralPath $serverFile -ErrorAction SilentlyContinue}
 Write-Output 'PASS: map styling; hover/click; clustered markers; stale-state expiry; geometry reuse; encrypted HTTPS success; wrong-password failure; cancellation and config cleanup.'
