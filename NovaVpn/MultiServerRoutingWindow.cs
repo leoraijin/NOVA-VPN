@@ -358,7 +358,7 @@ public sealed class MultiServerRoutingWindow : Window
   if (unconfirmedApps.Any(rules.Contains)) throw new InvalidOperationException("Укажите путь к .exe для каждого импортированного правила приложения.");
   if(unbound.Any(r=>rules.Contains(r)))throw new InvalidOperationException("Заново назначьте сервер для каждого импортированного правила.");
   return CreateCandidate(source, new MultiServerSettings { Revision = (source.MultiServer?.Revision ?? 0) + 1,
-   DefaultProfileId = primaryId, SecondaryProfileId = secondaryId, Rules = rules.Select(r => r.Copy()).ToList() }, ipv6.IsChecked == true);
+   DefaultProfileId = primaryId, SecondaryProfileId = secondaryId, SecondaryPaused = source.MultiServer?.SecondaryPaused == true, Rules = rules.Select(r => r.Copy()).ToList() }, ipv6.IsChecked == true);
  }
  void Save(){try{Accepted=BuildCandidate();DialogResult=true;}catch(Exception e){error.Text=LogSanitizer.Sanitize(e.Message);}}
 }

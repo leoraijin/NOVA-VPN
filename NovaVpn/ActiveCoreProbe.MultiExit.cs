@@ -33,7 +33,7 @@ public sealed partial class ActiveCoreProbe
             var catalog=MultiServerConfigBuilder.CaptureProfiles(profiles);
             if(catalog.Any(p=>p==null||string.IsNullOrWhiteSpace(p.Id))||catalog.Select(p=>p.Id).Distinct(StringComparer.Ordinal).Count()!=catalog.Length)
                 throw new InvalidDataException("Некорректный снимок серверов.");
-            var policy=settings.Copy();var ids=policy.ReferencedProfileIds;
+            var policy=settings.Copy();var ids=policy.Compile(Array.Empty<string>()).ReferencedProfileIds;
             if(ids.Length>2000)throw new InvalidDataException("Слишком много выходов для проверки.");
             var identities=MultiServerConfigBuilder.ExitIdentities(policy,catalog);
             var codec=new JavaScriptSerializer{MaxJsonLength=8*1024*1024};

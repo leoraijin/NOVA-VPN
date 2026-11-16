@@ -69,6 +69,24 @@ class MultiServerConfigTests
         var missing=codec.Deserialize<Dictionary<string,object>>(MultiServerConfigBuilder.Build(copy,new[]{us},path));
         Check(Equals(Items(((Dictionary<string,object>)missing["route"])["rules"]).Last()["action"],"reject"));
         File.WriteAllText(Path.Combine(args[0],"synthetic-multi-config.json"),json);
+        var paused = RoutingOverlayService.Clone(routing);
+        paused.MultiServer.SecondaryProfileId = "us";
+        paused.MultiServer.SecondaryPaused = true;
+        paused.MultiServer.Rules.Add(new MultiServerRuleRecord { Domain = "second.example.com", Target = "Profile", ProfileId = "us" });
+        var pausedCopy = RoutingOverlayService.Clone(paused);
+        var pausedPolicy = pausedCopy.MultiServer.Compile(new[] { "fr" });
+        var pausedConfig = codec.Deserialize<Dictionary<string,object>>(MultiServerConfigBuilder.Build(pausedCopy, new[] { fr, us }, path));
+        var pausedOutbounds = Items(pausedConfig["outbounds"]);
+        Check(pausedOutbounds.All(o => !o.ContainsKey("server") || Equals(o["server"], fr.Server)));
+        var pausedRules = Items(((Dictionary<string,object>)pausedConfig["route"])["rules"]);
+        var primaryTag = pausedOutbounds.Single(o => o.ContainsKey("server"))["tag"];
+        Check(pausedRules.Count(r => Equals(r["action"], "route") && Equals(r["outbound"], primaryTag) &&
+            (r.ContainsKey("process_path_regex") || r.ContainsKey("domain") &&
+                ((IEnumerable)r["domain"]).Cast<object>().Contains("second.example.com"))) == 2);
+        Check(pausedPolicy.ReferencedProfileIds.SequenceEqual(new[] { "fr" }) &&
+            pausedCopy.MultiServer.Rules.Count(r => r.ProfileId == "us") == 2);
+        pausedCopy.MultiServer.SecondaryPaused = false;
+        Check(pausedCopy.MultiServer.Compile(new[] { "fr", "us" }).ReferencedProfileIds.Contains("us"));
         var captured=MultiServerConfigBuilder.CaptureProfiles(new[]{fr,us});
         var oldHost=fr.Server;fr.Server="changed.example.test";
         Check(captured.Single(p=>p.Id=="fr").Server==oldHost);

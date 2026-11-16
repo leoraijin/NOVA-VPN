@@ -16,6 +16,8 @@ public sealed class MultiServerSettings
     [DataMember] public bool RequiresRebinding;
     [DataMember(EmitDefaultValue=false)] public string SecondaryProfileId;
 
+    [DataMember(EmitDefaultValue=false)] public bool SecondaryPaused;
+
     public string[] ReferencedProfileIds { get { Validate();return Rules.Select(rule => rule.ProfileId).Concat(new[] {DefaultProfileId}).Where(id => id != null).Distinct(StringComparer.Ordinal).ToArray(); } }
     public static string[] ProfileReferences(AppState state) => new[]{state?.Routing?.MultiServer,state?.RoutingMigrationBackup?.MultiServer,state?.MultiServerRoutingHistory?.SavedAssignments}
         .Where(s=>s!=null).SelectMany(s=>s.ReferencedProfileIds.Concat(!s.RequiresRebinding && s.SecondaryProfileId != null
@@ -35,7 +37,7 @@ public sealed class MultiServerSettings
     {
         Validate();
         return new MultiServerSettings { Schema=Schema, Revision=Revision, DefaultProfileId=DefaultProfileId,
-            SecondaryProfileId=SecondaryProfileId, RequiresRebinding=RequiresRebinding, Rules=Rules.Select(r => r.Copy()).ToList() };
+            SecondaryProfileId=SecondaryProfileId, SecondaryPaused=SecondaryPaused, RequiresRebinding=RequiresRebinding, Rules=Rules.Select(r => r.Copy()).ToList() };
     }
     internal void SetSecondaryProfile(string profileId)
     {
@@ -60,7 +62,11 @@ public sealed class MultiServerSettings
                 rule.Target.Kind == ServerRouteKind.Profile && rule.Target.ProfileId != DefaultProfileId ? 3 : 4)
             .GroupBy(rule => rule.Domain != null ? "d:" + rule.Domain + ":" + rule.IncludeSubdomains :
                 (rule.ApplicationName != null ? "n:" + rule.ApplicationName.ToUpperInvariant() : "a:" + rule.ApplicationPath.ToUpperInvariant()), StringComparer.Ordinal)
-            .Select(group => group.First());
+            .Select(group => group.First())
+            .Select(rule => SecondaryPaused && rule.Target.Kind == ServerRouteKind.Profile
+                ? new MultiServerRule(rule.ApplicationPath, rule.Domain, rule.IncludeSubdomains,
+                    new ServerRouteTarget(ServerRouteKind.Default), rule.ApplicationName)
+                : rule);
     }
 
     public MultiServerPolicy Compile(IEnumerable<string> availableProfileIds)

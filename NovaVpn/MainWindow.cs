@@ -1059,7 +1059,8 @@ public sealed partial class MainWindow : Window
 		});
 	}
 
-    private bool DualVpnEnabled => state.DualVpnSelectionEnabled || state.Routing?.MultiServer != null;
+    private bool DualVpnEnabled => state.Routing?.MultiServer is MultiServerSettings assignments
+        ? !assignments.SecondaryPaused : state.DualVpnSelectionEnabled;
 
     private UIElement BuildDualVpnControl()
     {
@@ -1085,7 +1086,7 @@ public sealed partial class MainWindow : Window
         toggle.Name = "DualVpnToggle";
         toggle.IsEnabled = editable;
         System.Windows.Automation.AutomationProperties.SetName(toggle, "Два VPN-конфига: " + (enabled ? "включено" : "выключено"));
-        toggle.ToolTip = enabled ? "Выключить два конфига и вернуть прежнюю маршрутизацию" : "Разрешить выбор VPN-2";
+        toggle.ToolTip = enabled ? "Выключить VPN-2 и направить его маршруты через основной VPN" : "Разрешить выбор VPN-2";
         Grid.SetColumn(toggle, 1);
         heading.Children.Add(toggle);
         content.Children.Add(heading);
@@ -1114,7 +1115,13 @@ public sealed partial class MainWindow : Window
             toggle.IsEnabled = false;
             try
             {
-                if (assignments != null) await ApplyServerAssignmentsAsync(state, null, true);
+                if (assignments != null)
+                {
+                    var candidate = RoutingOverlayService.Clone(state.Routing);
+                    candidate.MultiServer.SecondaryPaused = enabled;
+                    candidate.MultiServer.Revision++;
+                    await ApplyServerAssignmentsAsync(state, candidate);
+                }
                 else
                 {
                     bool previous = state.DualVpnSelectionEnabled;
@@ -1139,7 +1146,7 @@ public sealed partial class MainWindow : Window
 
     private async Task ChooseProfileRoleAsync(VpnProfile profile)
     {
-        if (!DualVpnEnabled)
+        if (state.Routing?.MultiServer == null && !DualVpnEnabled)
         {
             await SelectProfileAsync(profile);
             return;
@@ -1199,12 +1206,13 @@ public sealed partial class MainWindow : Window
     private void AddVpnRoleMenuItems(ContextMenu menu, VpnProfile profile)
     {
         var assignments = state.Routing?.MultiServer;
-        if (!DualVpnEnabled) return;
+        if (assignments == null && !DualVpnEnabled) return;
         var primary = SelectedProfile();
         string primaryId = assignments?.DefaultProfileId ?? primary?.Id;
         string secondaryId = assignments?.SecondaryProfileId;
         foreach (bool secondary in new[] { false, true })
         {
+            if (secondary && assignments?.SecondaryPaused == true) continue;
             bool current = profile.Id == (secondary ? secondaryId : primaryId);
             var item = new MenuItem
             {
@@ -1219,7 +1227,7 @@ public sealed partial class MainWindow : Window
             {
                 try
                 {
-                    if (!CanEditServerAssignments() || !DualVpnEnabled) return;
+                    if (!CanEditServerAssignments() || (!DualVpnEnabled && state.Routing?.MultiServer == null)) return;
                     var opened = state;
                     var candidate = RoutingOverlayService.Clone(opened.Routing);
                     var next = candidate.MultiServer;
@@ -3108,6 +3116,12 @@ public sealed partial class MainWindow : Window
         var settings = routing.MultiServer;
         var primary = state.Profiles.FirstOrDefault(profile => profile.Id == settings.DefaultProfileId);
         var secondary = state.Profiles.FirstOrDefault(profile => profile.Id == settings.SecondaryProfileId);
+        if (settings.SecondaryPaused)
+        {
+            var notice = T("VPN-2 выключен. Его правила сохранены и сейчас используют основной VPN.", 12, Muted);
+            notice.TextWrapping = TextWrapping.Wrap;
+            content.Children.Add(notice);
+        }
         if (settings.RequiresRebinding)
         {
             var warning = T("Импортированные назначения требуют привязки к серверам этого компьютера.", 12, Warning);
@@ -4982,7 +4996,8 @@ public sealed partial class MainWindow : Window
         string detail; Color color = Muted;
         var result = core.Verification.MultiExits?.Results.FirstOrDefault(item => item.Exit.ProfileId == id);
         bool assigned = id != null && configured != null && configured.EffectiveRules().Any(rule => rule.Target.ProfileId == id);
-        if (id == null) detail = "Выберите второй конфиг во вкладке «Серверы».";
+        if (configured?.SecondaryPaused == true) detail = "Выключен · маршруты идут через основной VPN";
+        else if (id == null) detail = "Выберите второй конфиг во вкладке «Серверы».";
         else if (profile == null || profile.RetiredFromSubscription) {detail = "Конфиг недоступен · выберите другой сервер"; color = Warning;}
         else if (configured.RequiresRebinding) {detail = "Привяжите импортированные назначения к серверу"; color = Warning;}
         else if (!assigned) detail = "Не используется · назначьте сайты или приложения через VPN-2";
