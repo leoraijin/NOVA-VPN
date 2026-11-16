@@ -147,17 +147,27 @@ def dns_response(exit_number):
             + bytes.fromhex("c00c000100010000003c0004cb0071") + bytes([exit_number]))
 
 
-def verify_wintun_datagrams(addresses, exits):
+def verify_wintun_datagrams(addresses, exits, dns_port=53):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
         client.settimeout(5)
         for address, exit_server in zip(addresses, exits):
             for port, payload, expected in ((5300, b"nova-wintun-udp", exit_server.label.encode("ascii")),
-                                            (53, DNS_QUERY, dns_response(exit_server.number))):
+                                            (dns_port, DNS_QUERY, dns_response(exit_server.number))):
                 client.sendto(payload, (address, port))
                 response, peer = client.recvfrom(2048)
                 assert peer == (address, port) and response == expected, (exit_server.label, port, response)
-    assert all(server.seen == [(address, 5300), (address, 53)]
+    assert all(server.seen == [(address, 5300), (address, dns_port)]
                for address, server in zip(addresses, exits)), [server.seen for server in exits]
+
+
+def verify_reality_fake_dns(address):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+        client.settimeout(5)
+        client.sendto(DNS_QUERY, (address, 53))
+        response, peer = client.recvfrom(2048)
+        assert peer == (address, 53) and response[:2] == DNS_QUERY[:2], (peer, response)
+        assert len(response) >= 20 and response[2] & 0x80 and response[3] & 0x0f == 0, response
+        assert response[6:8] == b"\x00\x01" and response[-4] == 198 and response[-3] in (18, 19), response
 
 
 class VlessDatagramEcho(socketserver.BaseRequestHandler):
@@ -166,7 +176,7 @@ class VlessDatagramEcho(socketserver.BaseRequestHandler):
         if payload == b"nova-wintun-udp":
             port, answer = 5300, self.server.label.encode("ascii")
         elif payload == DNS_QUERY:
-            port, answer = 53, dns_response(self.server.number)
+            port, answer = 5353, dns_response(self.server.number)
         else:
             return
         self.server.seen.append((self.server.destination, port))
@@ -296,7 +306,9 @@ def run_windows_tun(core, reality, fixture, count, workdir, singbox):
                 assert answers == [server.label for server in exits], answers
                 assert all(server.seen and all(seen == (address, 80) for seen in server.seen)
                            for address, server in zip(addresses, exits))
-                verify_wintun_datagrams(addresses, datagram_exits)
+                verify_wintun_datagrams(addresses, datagram_exits, dns_port=5353 if reality else 53)
+                if reality:
+                    verify_reality_fake_dns(addresses[0])
                 if count > 1:
                     exits[-1].shutdown()
                     exits[-1].server_close()
