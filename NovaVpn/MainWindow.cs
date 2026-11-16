@@ -1429,6 +1429,9 @@ public sealed partial class MainWindow : Window
 		InteractiveServerMap map = ServerRegionMapService.BuildInteractiveCanvas(state.Profiles.ToArray(), profile, 250, 132, palette, mapHealth,
 			async target => await ChooseProfileRoleAsync(target), false);
 		liveServerMap = map;
+		map.Loaded += (s, e) => SyncMapHealthTimer();
+		map.Unloaded += (s, e) => SyncMapHealthTimer();
+		map.IsVisibleChanged += (s, e) => SyncMapHealthTimer();
 		map.Margin = new Thickness(0, 5, 0, 0);
 		System.Windows.Automation.AutomationProperties.SetName(map, region.HasCountry
 			? "Географическая карта региона VPN-сервера: " + region.CountryName + (region.CityName.Length > 0 ? ", " + region.CityName : "")
@@ -1480,6 +1483,7 @@ public sealed partial class MainWindow : Window
 		serverMapWindow = dialog;
 		dialog.Closed += (s, e) => { expandedServerMap = null; serverMapWindow = null; SyncMapHealthTimer(); };
 		dialog.StateChanged += (s, e) => SyncMapHealthTimer();
+		dialog.IsVisibleChanged += (s, e) => SyncMapHealthTimer();
 		dialog.Show();
 		SyncMapHealthTimer();
 	}
@@ -1487,7 +1491,8 @@ public sealed partial class MainWindow : Window
 	private void SyncMapHealthTimer()
 	{
 		bool visible = !snapshotMode && !closing && IsLoaded &&
-			((IsVisible && WindowState != WindowState.Minimized && currentPage == "home") ||
+			((IsVisible && WindowState != WindowState.Minimized && currentPage == "home" &&
+			  liveServerMap?.IsLoaded == true && liveServerMap.IsVisible) ||
 			 (serverMapWindow?.IsVisible == true && serverMapWindow.WindowState != WindowState.Minimized));
 		if (visible == mapHealthTimer.IsEnabled) return;
 		if (visible) {
