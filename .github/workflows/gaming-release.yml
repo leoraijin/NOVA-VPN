@@ -109,6 +109,8 @@ jobs:
         run: |
           python work/wintun-test-fixture/scripts/test_dual_exit_loopback.py work/payload/core/reality-client.exe --windows-tun
           if ($LASTEXITCODE -ne 0) { throw 'Wintun route verification failed' }
+          python tests/Run-ExitMatrix.py --windows-tun --fixture work/wintun-test-fixture/scripts/test_dual_exit_loopback.py --sing-box work/payload/core/sing-box.exe --reality work/payload/core/reality-client.exe --workdir work/test-exit-matrix
+          if ($LASTEXITCODE -ne 0) { throw 'Wintun exit matrix failed' }
       - name: Verify settings transfer
         shell: pwsh
         run: |
