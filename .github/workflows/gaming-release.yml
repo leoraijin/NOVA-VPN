@@ -9,13 +9,41 @@ on:
         description: 'Publish normal release after all checks (existing releases are never replaced)'
         type: boolean
         default: false
+      tun_only:
+        description: 'Run the Wintun fixture quickly with the pinned stable binaries'
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
-  group: windows-release
+  group: ${{ inputs.tun_only && 'windows-wintun-fixture' || 'windows-release' }}
   cancel-in-progress: true
 jobs:
+  verify-tun:
+    if: github.event_name == 'workflow_dispatch' && inputs.tun_only
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: leoraijin/vpn-core
+          ref: ac6f365a1b620155e4d6f4176d58e8b0aac03d7a
+          path: work/wintun-test-fixture
+          persist-credentials: false
+      - name: Verify Windows TUN with the pinned stable cores
+        shell: pwsh
+        run: |
+          $archive = 'work/stable-windows-runtime.zip'
+          Invoke-WebRequest 'https://github.com/leoraijin/NOVA-VPN/releases/download/v2.6.20/NOVA-VPN-Windows-2.6.20-Portable.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive).Hash -ne 'CF780E97F3FA35CD574F4B70A230018E0C7CFCB05ABDB30EADD2C5FD636783C9') { throw 'Pinned runtime hash mismatch' }
+          Expand-Archive -LiteralPath $archive -DestinationPath work/stable-runtime
+          python tests/Run-ExitMatrix.py --windows-tun --fixture work/wintun-test-fixture/scripts/test_dual_exit_loopback.py --sing-box work/stable-runtime/core/sing-box.exe --reality work/stable-runtime/core/reality-client.exe --workdir work/test-exit-matrix
+          if ($LASTEXITCODE -ne 0) { throw 'Wintun exit matrix failed' }
   build:
+    if: github.event_name != 'workflow_dispatch' || !inputs.tun_only
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
