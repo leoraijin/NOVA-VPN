@@ -142,8 +142,8 @@ class DatagramExit(socketserver.StreamRequestHandler):
 DNS_QUERY = bytes.fromhex("ac1201000001000000000000046e6f766104746573740000010001")
 
 
-def dns_response(exit_number):
-    return (DNS_QUERY[:2] + bytes.fromhex("81800001000100000000") + DNS_QUERY[12:]
+def dns_response(exit_number, transaction=DNS_QUERY[:2]):
+    return (transaction + bytes.fromhex("81800001000100000000") + DNS_QUERY[12:]
             + bytes.fromhex("c00c000100010000003c0004cb0071") + bytes([exit_number]))
 
 
@@ -165,14 +165,20 @@ def verify_wintun_datagrams(addresses, exits, dns_port=53):
                for address, server in zip(addresses, exits)), [server.seen for server in exits]
 
 
-def verify_reality_fake_dns(address):
+def verify_reality_forwarded_dns(address, resolver):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
         client.settimeout(5)
         client.sendto(DNS_QUERY, (address, 53))
         response, peer = client.recvfrom(2048)
         assert peer == (address, 53) and response[:2] == DNS_QUERY[:2], (peer, response)
         assert len(response) >= 20 and response[2] & 0x80 and response[3] & 0x0f == 0, response
-        assert response[6:8] == b"\x00\x01" and response[-4] == 198 and response[-3] in (18, 19), response
+        assert response[6:8] == b"\x00\x01" and response[-4:] == bytes([203, 0, 113, resolver.number]), response
+    assert resolver.seen, "Configured DNS resolver did not receive the question."
+
+
+def is_fixture_dns_question(payload):
+    return (len(payload) >= len(DNS_QUERY) and payload[4:6] == b"\x00\x01"
+            and payload[12:len(DNS_QUERY)].lower() == DNS_QUERY[12:])
 
 
 class VlessDatagramEcho(socketserver.BaseRequestHandler):
@@ -180,8 +186,8 @@ class VlessDatagramEcho(socketserver.BaseRequestHandler):
         payload, udp_socket = self.request
         if payload == b"nova-wintun-udp":
             port, answer = 5300, self.server.label.encode("ascii")
-        elif payload == DNS_QUERY:
-            port, answer = 5353, dns_response(self.server.number)
+        elif is_fixture_dns_question(payload):
+            port, answer = self.server.dns_port, dns_response(self.server.number, payload[:2])
         else:
             return
         self.server.seen.append((self.server.destination, port))
@@ -196,7 +202,7 @@ def start_vless_datagram_peer(stack, singbox, directory, underlay, addresses):
     for number, destination in enumerate(addresses, start=1):
         echo = stack.enter_context(socketserver.ThreadingUDPServer((underlay, 0), VlessDatagramEcho))
         echo.label, echo.number, echo.destination = f"vpn{number}", number, destination
-        echo.seen = []
+        echo.seen, echo.dns_port = [], 5353
         threading.Thread(target=echo.serve_forever, daemon=True).start()
         stack.callback(echo.shutdown)
         exits.append(echo)
@@ -271,9 +277,14 @@ def run_windows_tun(core, reality, fixture, count, workdir, singbox):
         }
         if reality:
             datagram_exits, udp_outbounds = start_vless_datagram_peer(stack, singbox, directory, underlay, addresses)
+            resolver = stack.enter_context(socketserver.ThreadingUDPServer((underlay, 0), VlessDatagramEcho))
+            resolver.label, resolver.number, resolver.destination = "fixture-dns", 99, underlay
+            resolver.seen, resolver.dns_port = [], 53
+            threading.Thread(target=resolver.serve_forever, daemon=True).start()
+            stack.callback(resolver.shutdown)
             config["inbounds"][0]["dns_hijack"] = True
             config["dns"] = {"servers": [{"type": "udp", "tag": "fixture-dns", "server": underlay,
-                                          "server_port": datagram_exits[0].server_address[1],
+                                          "server_port": resolver.server_address[1],
                                           "detour": "unrelated"}], "final": "fixture-dns"}
         else:
             udp_outbounds = [
@@ -317,7 +328,7 @@ def run_windows_tun(core, reality, fixture, count, workdir, singbox):
                            for address, server in zip(addresses, exits))
                 verify_wintun_datagrams(addresses, datagram_exits, dns_port=5353 if reality else 53)
                 if reality:
-                    verify_reality_fake_dns(addresses[0])
+                    verify_reality_forwarded_dns(addresses[0], resolver)
                 if count > 1:
                     exits[-1].shutdown()
                     exits[-1].server_close()
