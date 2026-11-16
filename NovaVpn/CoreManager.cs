@@ -363,7 +363,7 @@ public sealed partial class CoreManager : IDisposable
             lock(routingSnapshotSync){if(Status==CoreStatus.Connected||Status==CoreStatus.Connecting)return;requestGeneration=RuntimeGeneration;previousProcess=process;preparedEngine=Engine;}
             if(!File.Exists(VpnEngines.ExecutablePath(preparedEngine)))throw new FileNotFoundException("Не найдено выбранное VPN-ядро: "+VpnEngines.DisplayName(preparedEngine),VpnEngines.ExecutablePath(preparedEngine));
             var preparedRouting=RoutingOverlayService.Clone(routing);
-            var preparedProfiles = preparedRouting.MultiServer == null ? null : MultiServerConfigBuilder.CaptureProfiles(profiles);
+            var preparedProfiles = preparedRouting.MultiServer == null ? null : MultiServerConfigBuilder.CaptureRoutingProfiles(preparedRouting.MultiServer, profiles);
             if (preparedProfiles != null) profile = MultiServerStartupSelection.ResolveCatalogIdentity(preparedRouting.MultiServer, preparedProfiles);
             // Probe setup validates tags against the shared policy before engine-specific adaptation.
             var configEngine = preparedProfiles == null ? preparedEngine : VpnEngine.SingBox;
@@ -684,7 +684,7 @@ public sealed partial class CoreManager : IDisposable
 
 	public async Task<int> TestLatencyAsync(VpnProfile profile)
 	{
-		return (await HealthCheckService.TestAsync(profile)).LatencyMs;
+		return (await HealthCheckService.TestCatalogAsync(profile)).LatencyMs;
 	}
 
 	public async Task<string> ValidateAsync(VpnProfile profile, RoutingSettings routing, System.Collections.Generic.IEnumerable<VpnProfile> profiles = null)
@@ -698,7 +698,7 @@ public sealed partial class CoreManager : IDisposable
         string path = null;
 		try
 		{
-            path = PrivateRuntimeFiles.WriteCoreConfig(runtimeDir, BuildConfig(profile, routing, routing?.MultiServer == null ? null : MultiServerConfigBuilder.CaptureProfiles(profiles)));
+            path = PrivateRuntimeFiles.WriteCoreConfig(runtimeDir, BuildConfig(profile, routing, routing?.MultiServer == null ? null : MultiServerConfigBuilder.CaptureRoutingProfiles(routing.MultiServer, profiles)));
 			return await RunCheckAsync(path);
 		}
 		catch (Exception ex)

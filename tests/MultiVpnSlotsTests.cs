@@ -44,6 +44,34 @@ class MultiVpnSlotsTests {
             Check(fallback.Decide(null,"vpn"+n+".example.org").Effective.ProfileId=="p1","paused site");
             Check(fallback.Decide(@"C:\Apps\app"+n+".exe",null).Effective.ProfileId=="p1","paused app");
         }
+        var capture = typeof(MultiServerConfigBuilder).GetMethod("CaptureRoutingProfiles", BindingFlags.Static | BindingFlags.NonPublic);
+        var twoThousand = all.Concat(Enumerable.Range(11, 1990).Select(Profile)).ToArray();
+        var frozen = (VpnProfile[])capture.Invoke(null, new object[]{paused, twoThousand});
+        Check(frozen.Length == 1 && frozen[0].Id == "p1" && !ReferenceEquals(frozen[0], all[0]), "paused routing snapshot copies only primary");
+        var activeFrozen = (VpnProfile[])capture.Invoke(null, new object[]{s, twoThousand});
+        Check(activeFrozen.Length == 10, "active routing snapshot copies every referenced exit");
+        Check(Refuses(() => capture.Invoke(null, new object[]{paused, twoThousand.Take(1999).Concat(new[]{all[0]})})), "duplicate catalog ID is still rejected");
+        var sameRouting = typeof(MultiServerConfigBuilder).GetMethod("SameEffectiveRouting", BindingFlags.Static | BindingFlags.NonPublic);
+        var pausedRouting = new RoutingSettings {MultiServer=paused.Copy()};
+        var replacement = RoutingOverlayService.Clone(pausedRouting);
+        Set(replacement.MultiServer, 10, "inactive-new-profile");
+        replacement.MultiServer.Revision++;
+        var changedDirect = RoutingOverlayService.Clone(pausedRouting);
+        changedDirect.MultiServer.Rules[0].Target = "Direct";
+        changedDirect.MultiServer.Rules[0].ProfileId = null;
+        var resumed = RoutingOverlayService.Clone(pausedRouting);
+        resumed.MultiServer.SecondaryPaused = false;
+        var changedCatalog = MultiServerConfigBuilder.CaptureProfiles(all);
+        changedCatalog[0].Server = "new-primary.example.test";
+        string cache = Path.Combine(args[0], "effective-compare.db");
+        foreach (var engine in new[] {VpnEngine.SingBox, VpnEngine.Reality}) {
+            bool Equivalent(RoutingSettings candidate, VpnProfile[] catalog) =>
+                (bool)sameRouting.Invoke(null, new object[]{pausedRouting, all, candidate, catalog, engine, cache});
+            Check(Equivalent(replacement, all), "inactive slot replacement must keep effective routing");
+            Check(!Equivalent(changedDirect, all), "direct route changes effective routing");
+            Check(!Equivalent(resumed, all), "resuming secondary exits changes effective routing");
+            Check(!Equivalent(pausedRouting, changedCatalog), "primary server changes require restart");
+        }
         paused.SecondaryPaused=false;
         Check(paused.Compile(all.Select(p=>p.Id)).Decide(null,"vpn10.example.org").Effective.ProfileId=="p10","resume");
         var removed=s.Copy();Set(removed,5,null);

@@ -131,6 +131,7 @@ public sealed partial class MainWindow : Window
 
 	private readonly DispatcherTimer visualTimer;
 	private readonly DispatcherTimer mapHealthTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+	private System.Threading.CancellationTokenSource visibleMapChecks;
 	private readonly System.Threading.CancellationTokenSource mapHealthCancellation = new System.Threading.CancellationTokenSource();
 	private readonly Dictionary<string, ServerMapHealth> mapHealth = new Dictionary<string, ServerMapHealth>();
 	private InteractiveServerMap liveServerMap, expandedServerMap;
@@ -269,7 +270,7 @@ public sealed partial class MainWindow : Window
 		visualTimer.Tick += delegate { UpdateLiveVisuals(); };
 		mapHealthTimer.Tick += async delegate { await RefreshMapHealthAsync(); };
         InitializeConnectionMonitor();
-		if (!snapshotMode) base.Loaded += async delegate { mapHealthTimer.Start(); await RefreshMapHealthAsync(); };
+		if (!snapshotMode) base.Loaded += delegate { SyncMapHealthTimer(); };
 		base.Title = "NOVA VPN";
 		// Explicit window icon is also used when Windows pins a running WPF window.
 		// Do not depend on the shell extracting it from a custom-chrome window.
@@ -363,7 +364,7 @@ public sealed partial class MainWindow : Window
 			reconnectTimer.Stop();
 			subscriptionTimer.Stop();
 			visualTimer.Stop();
-			mapHealthTimer.Stop();
+			SyncMapHealthTimer();
 			mapHealthCancellation.Cancel();
 			if (!snapshotMode)
 			{
@@ -392,6 +393,7 @@ public sealed partial class MainWindow : Window
 		base.StateChanged += delegate
 		{
 			SyncVisualTimerState();
+			SyncMapHealthTimer();
 			if (base.WindowState == WindowState.Minimized && state.MinimizeToTray)
 			{
 				Hide();
@@ -399,7 +401,7 @@ public sealed partial class MainWindow : Window
 				ShowNotification("NOVA работает в области уведомлений.");
 			}
 		};
-		base.IsVisibleChanged += delegate { SyncVisualTimerState(); };
+		base.IsVisibleChanged += delegate { SyncVisualTimerState(); SyncMapHealthTimer(); };
 	}
 
 	public static string ResponsiveModeForWidth(double width)
@@ -763,6 +765,7 @@ public sealed partial class MainWindow : Window
 		ScrollViewer previousScroll = FindVisualChild<ScrollViewer>(contentHost);
 		if (previousScroll != null) scrollPositions[currentPage] = previousScroll.VerticalOffset;
 		currentPage = page;
+		SyncMapHealthTimer();
 		foreach (KeyValuePair<string, NavItem> navItem in navItems)
 		{
 			bool flag = navItem.Key == page;
@@ -1475,16 +1478,33 @@ public sealed partial class MainWindow : Window
 		Grid.SetRow(caption, 2); grid.Children.Add(caption);
 		dialog.Content = grid;
 		serverMapWindow = dialog;
-		dialog.Closed += (s, e) => { expandedServerMap = null; serverMapWindow = null; };
+		dialog.Closed += (s, e) => { expandedServerMap = null; serverMapWindow = null; SyncMapHealthTimer(); };
+		dialog.StateChanged += (s, e) => SyncMapHealthTimer();
 		dialog.Show();
-		_ = RefreshMapHealthAsync();
+		SyncMapHealthTimer();
+	}
+
+	private void SyncMapHealthTimer()
+	{
+		bool visible = !snapshotMode && !closing && IsLoaded &&
+			((IsVisible && WindowState != WindowState.Minimized && currentPage == "home") ||
+			 (serverMapWindow?.IsVisible == true && serverMapWindow.WindowState != WindowState.Minimized));
+		if (visible == mapHealthTimer.IsEnabled) return;
+		if (visible) {
+			visibleMapChecks = new System.Threading.CancellationTokenSource();
+			mapHealthTimer.Start();
+			return;
+		}
+		mapHealthTimer.Stop();
+		visibleMapChecks?.Cancel();
+		visibleMapChecks?.Dispose();
+		visibleMapChecks = null;
 	}
 
 	private async Task RefreshMapHealthAsync()
 	{
-		liveServerMap?.RefreshStatus(); expandedServerMap?.RefreshStatus();
-		if (snapshotMode || closing || mapHealthBusy || !IsVisible || WindowState == WindowState.Minimized ||
-			(currentPage != "home" && expandedServerMap == null) || state.Profiles.Count == 0) return;
+		var batch = visibleMapChecks;
+		if (batch == null || mapHealthBusy || state.Profiles.Count == 0) return;
 		mapHealthBusy = true;
 		try
 		{
@@ -1502,22 +1522,25 @@ public sealed partial class MainWindow : Window
 			}
 			using (var gate = new System.Threading.SemaphoreSlim(2))
 			{
-				var token = mapHealthCancellation.Token;
+				var token = batch.Token;
 				string corePath = core.ProbeCorePath, directory = System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "map-probes");
 				var tasks = candidates.Select(async profile => {
 					await gate.WaitAsync(token);
 					try {
-						var value = await Task.Run(() => ServerMapHealthService.TestAsync(profile, corePath, directory, token), token);
-						if (!closing && state.Profiles.Any(p => ReferenceEquals(p, profile))) {
+						var value = await Task.Run(() => ServerMapHealthService.TestCatalogAsync(profile, corePath, directory, token), token);
+						if (!token.IsCancellationRequested && !closing && state.Profiles.Any(p => ReferenceEquals(p, profile))) {
 							if (core.Status == CoreStatus.Connected && core.Verification.Completed && core.Verification.MultiExits == null && core.Verification.ProfileId == profile.Id && !core.Verification.InternetOk) {
 								value.Success = false; value.Message = "Контрольный HTTPS-запрос активного соединения не прошёл";
 							}
 							if (!mapHealth.TryGetValue(profile.Id, out var newer) || newer.CheckedUtc <= value.CheckedUtc) mapHealth[profile.Id] = value;
-							liveServerMap?.RefreshStatus(); expandedServerMap?.RefreshStatus();
 						}
 					} finally { gate.Release(); }
 				}).ToArray();
 				await Task.WhenAll(tasks);
+				if (!token.IsCancellationRequested) {
+					if (currentPage == "home") liveServerMap?.RefreshStatus();
+					expandedServerMap?.RefreshStatus();
+				}
 			}
 		}
 		catch (OperationCanceledException) { }
@@ -2434,36 +2457,65 @@ public sealed partial class MainWindow : Window
         // Fit the action grid to the actual page width, including DPI and enlarged text.
         grid.SizeChanged += delegate { actions.Width = Math.Min(620, Math.Max(1, grid.ActualWidth - (responsiveMode == "Wide" && state.Visual.TextScale <= 1.15 ? 210 : 0))); };
 		grid.Children.Add(PageHeader("Серверы", state.Profiles.Count + " профилей · " + state.Profiles.Count(p => p.IsFavorite) + " избранных", actions, null));
-        var stackPanel = new StackPanel();
-        Action renderServers = delegate {
-            stackPanel.Children.Clear();
-            stackPanel.Children.Add(CollectionBar());
-            RenderSubscriptionCards(stackPanel);
+        var catalog = new ServerCatalogList(ServerCard, viewer => TouchScrollViewer(viewer)) { Name = "ServerCatalogList" };
+        var scrollFactory = new FrameworkElementFactory(typeof(ScrollViewer), "CatalogScroll");
+        scrollFactory.SetValue(ScrollViewer.CanContentScrollProperty, true);
+        scrollFactory.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+        scrollFactory.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+        scrollFactory.AppendChild(new FrameworkElementFactory(typeof(ItemsPresenter)));
+        catalog.Template = new ControlTemplate(typeof(ItemsControl)) { VisualTree = scrollFactory };
+        catalog.ItemsPanel = new ItemsPanelTemplate(new FrameworkElementFactory(typeof(VirtualizingStackPanel)));
+        VirtualizingStackPanel.SetIsVirtualizing(catalog, true);
+        VirtualizingStackPanel.SetVirtualizationMode(catalog, VirtualizationMode.Recycling);
+        VirtualizingStackPanel.SetScrollUnit(catalog, ScrollUnit.Pixel);
 
-		if (state.Profiles.Count == 0)
-		{
-			Border border = EmptyState("servers", "Здесь появятся ваши серверы", "Вставьте одиночный VPN-ключ или ссылку на подписку.");
-			border.Margin = new Thickness(0.0, 36.0, 0.0, 0.0);
-			stackPanel.Children.Add(border);
-		}
-		else
-		{
-			var visible = CollectionCandidates().Where(p => (!serverFavoritesOnly || p.IsFavorite) && (string.IsNullOrWhiteSpace(serverSearch) || (p.Name ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0 || (p.Endpoint ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
-            if (visible.Count == 0) stackPanel.Children.Add(EmptyState("servers", "Серверы не найдены", "Измените поисковый запрос или фильтр избранного."));
-            var groups = visible.GroupBy(ServerGroupingService.CountryLabel).OrderBy(group => group.Key == "Другие" ? 1 : 0).ThenBy(group => group.Key);
-			foreach (var group in groups)
-			{
-				TextBlock groupTitle = SectionTitle(group.Key.ToUpperInvariant() + " · " + group.Count());
-				groupTitle.Margin = new Thickness(2.0, stackPanel.Children.Count == 0 ? 0.0 : 12.0, 0.0, 8.0);
-				stackPanel.Children.Add(groupTitle);
-				IEnumerable<VpnProfile> sorted = serverSortByLatency ? group.OrderBy(p => p.LastLatency > 0 ? p.LastLatency : int.MaxValue) : group.OrderBy(p => p.Name);
-                foreach (VpnProfile profile in sorted) stackPanel.Children.Add(ServerCard(profile));
-			}
-		}
+        Action renderServers = delegate
+        {
+            var header = new StackPanel();
+            header.Children.Add(CollectionBar());
+            RenderSubscriptionCards(header);
+            var rows = new List<object> { header };
+            if (state.Profiles.Count == 0)
+            {
+                var empty = EmptyState("servers", "Здесь появятся ваши серверы", "Вставьте одиночный VPN-ключ или ссылку на подписку.");
+                empty.Margin = new Thickness(0, 36, 0, 0);
+                rows.Add(empty);
+            }
+            else
+            {
+                var visible = CollectionCandidates().Where(p =>
+                    (!serverFavoritesOnly || p.IsFavorite) &&
+                    (string.IsNullOrWhiteSpace(serverSearch) ||
+                     (p.Name ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     (p.Endpoint ?? "").IndexOf(serverSearch, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
+                if (visible.Count == 0)
+                    rows.Add(EmptyState("servers", "Серверы не найдены", "Измените поисковый запрос или фильтр избранного."));
+                var groups = visible.GroupBy(ServerGroupingService.CountryLabel)
+                    .OrderBy(group => group.Key == "Другие" ? 1 : 0).ThenBy(group => group.Key);
+                foreach (var group in groups)
+                {
+                    var title = SectionTitle(group.Key.ToUpperInvariant() + " · " + group.Count());
+                    title.Margin = new Thickness(2, 12, 0, 8);
+                    rows.Add(title);
+                    IEnumerable<VpnProfile> sorted = serverSortByLatency
+                        ? group.OrderBy(p => p.LastLatency > 0 ? p.LastLatency : int.MaxValue)
+                        : group.OrderBy(p => p.Name);
+                    rows.AddRange(sorted);
+                }
+            }
+            catalog.ItemsSource = rows;
         };
         var search = new TextBox { Text = serverSearch, MinHeight = 34, Padding = new Thickness(10,6,10,6), FontSize = 14, Background = new SolidColorBrush(palette.Input), Foreground = new SolidColorBrush(TextColor), BorderBrush = new SolidColorBrush(BorderColor), ToolTip = "Поиск по названию или адресу", Margin = new Thickness(0,0,12,0) };
         AutomationProperties.SetName(search,"Поиск серверов");
-        search.TextChanged += delegate { serverSearch = search.Text; renderServers(); };
+        var searchDelay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
+        searchDelay.Tick += delegate { searchDelay.Stop(); if (search.IsLoaded) renderServers(); };
+        search.Unloaded += delegate { searchDelay.Stop(); };
+        search.TextChanged += delegate
+        {
+            serverSearch = search.Text;
+            searchDelay.Stop();
+            searchDelay.Start();
+        };
         var filterBar = new Grid { Margin = new Thickness(0,0,0,16) };
         filterBar.ColumnDefinitions.Add(new ColumnDefinition()); filterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); filterBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         filterBar.Children.Add(search);
@@ -2473,15 +2525,46 @@ public sealed partial class MainWindow : Window
         AutomationProperties.SetName(sort,"Сортировка серверов");
         sort.SelectionChanged += delegate { serverSortByLatency = sort.SelectedIndex == 1; renderServers(); };Grid.SetColumn(sort,2);filterBar.Children.Add(sort);
         renderServers();
-		ScrollViewer scrollViewer = TouchScrollViewer(new ScrollViewer());
-		scrollViewer.Content = stackPanel;
-		scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-		scrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        var results = new Grid();results.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });results.RowDefinitions.Add(new RowDefinition());
-        results.Children.Add(filterBar); Grid.SetRow(scrollViewer,1);results.Children.Add(scrollViewer);
+        var results = new Grid();
+        results.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        results.RowDefinitions.Add(new RowDefinition());
+        results.Children.Add(filterBar);
+        Grid.SetRow(catalog, 1);
+        results.Children.Add(catalog);
         Grid.SetRow(results,2);grid.Children.Add(results);
 		return grid;
 	}
+
+    private sealed class ServerCatalogList : ItemsControl
+    {
+        private readonly Func<VpnProfile, UIElement> createCard;
+        private readonly Action<ScrollViewer> configureScroll;
+
+        public ServerCatalogList(Func<VpnProfile, UIElement> createCard, Action<ScrollViewer> configureScroll)
+        {
+            this.createCard = createCard;
+            this.configureScroll = configureScroll;
+        }
+
+        public override void OnApplyTemplate()
+        {
+            base.OnApplyTemplate();
+            if (GetTemplateChild("CatalogScroll") is ScrollViewer viewer) configureScroll(viewer);
+        }
+
+        protected override bool IsItemItsOwnContainerOverride(object item) => false;
+        protected override DependencyObject GetContainerForItemOverride() => new ContentPresenter();
+        protected override void PrepareContainerForItemOverride(DependencyObject element, object item)
+        {
+            base.PrepareContainerForItemOverride(element, item);
+            ((ContentPresenter)element).Content = item is VpnProfile profile ? createCard(profile) : item;
+        }
+        protected override void ClearContainerForItemOverride(DependencyObject element, object item)
+        {
+            ((ContentPresenter)element).ClearValue(ContentPresenter.ContentProperty);
+            base.ClearContainerForItemOverride(element, item);
+        }
+    }
 
 	private UIElement ServerCard(VpnProfile profile)
 	{
@@ -3276,10 +3359,7 @@ public sealed partial class MainWindow : Window
         var notice = T("", 11, Warning); notice.TextWrapping = TextWrapping.Wrap;
         notice.Margin = new Thickness(0, 6, 0, 4); notice.Visibility = Visibility.Collapsed;
         string lastWarning = null;
-        var previousValues = group.Values.ToArray();
-        var editor = new RoutingListEditor(group.Values, () => {
-            var changed = group.Values.Except(previousValues, StringComparer.Ordinal).ToArray();
-            previousValues = group.Values.ToArray();
+        var editor = new RoutingListEditor(group.Values, changed => {
             string warning = draft.WarningForValues(group, changed);
             notice.Text = warning ?? "Изменения ещё не применены.";
             notice.Visibility = Visibility.Visible;
@@ -3383,7 +3463,6 @@ public sealed partial class MainWindow : Window
         try {
             if(!CanEditServerAssignments(true)||!ReferenceEquals(opened,state))throw new InvalidOperationException("Подключение изменилось. Откройте редактор заново.");
             multiServerApplyBusy=true;
-            var catalog=MultiServerConfigBuilder.CaptureProfiles(opened.Profiles);
             string routingBaseline = RoutingMigrationService.Fingerprint(opened.Routing);
             string historyBaseline = MultiServerRoutingHistory.Fingerprint(opened.MultiServerRoutingHistory);
             string collectionBaseline = opened.ActiveProfileCollectionId;
@@ -3395,6 +3474,9 @@ public sealed partial class MainWindow : Window
             var candidate=restore==null ? ZapretRoutingTransitionService.PrepareAssignedRouting(opened,accepted).Routing
                 : ZapretRoutingTransitionService.PrepareOrdinaryRouting(opened,restore.SingleServerRouting).Routing;
             string selectedId=restorePrevious?restore.SelectedProfileId:candidate.MultiServer?.DefaultProfileId;
+            var catalog = candidate.MultiServer == null
+                ? MultiServerConfigBuilder.CaptureProfiles(opened.Profiles.Where(p => p.Id == selectedId))
+                : MultiServerConfigBuilder.CaptureRoutingProfiles(candidate.MultiServer, opened.Profiles);
             var primary=catalog.FirstOrDefault(p=>p.Id==selectedId&&(!restorePrevious||!p.RetiredFromSubscription));
             var savedAssignments = opened.Routing?.MultiServer;
             if (primary == null && !restorePrevious && savedAssignments != null && !savedAssignments.RequiresRebinding &&
@@ -3420,13 +3502,33 @@ public sealed partial class MainWindow : Window
                 commit.Apply(()=>ReferenceEquals(opened,state)&&CanEditServerAssignments(true)&&core.CanSelectEngine,StateStore.Save);
                 Toast(restorePrevious?(primary==null?"Прежние правила восстановлены. Выберите доступный сервер перед подключением.":"Прежняя маршрутизация восстановлена. Назначения сохранены."):"Назначения проверены и сохранены. Подключите VPN.",Green);return true;
             }
-            var previousRouting=RoutingOverlayService.Clone(core.LastConnectedRouting??opened.Routing);
+            var activeRouting = core.LastConnectedRouting;
+            var previousRouting=RoutingOverlayService.Clone(activeRouting??opened.Routing);
             var previousCatalog=core.CaptureActiveProfiles();
             var previousProfile = previousRouting.MultiServer == null
                 ? previousCatalog.SingleOrDefault(p => p.Id == core.ActiveProfileId)
                 : MultiServerStartupSelection.ResolveCatalogIdentity(previousRouting.MultiServer, previousCatalog);
             if (previousProfile == null || previousProfile.Id != core.ActiveProfileId)
                 throw new InvalidOperationException("Нет снимка предыдущего подключения.");
+            if (!restorePrevious && activeRouting?.MultiServer != null && candidate.MultiServer != null)
+            {
+                var engine = core.Engine;
+                string cachePath = System.IO.Path.Combine(StateStore.DirectoryPath, "multi-server-dns-v2.db");
+                bool unchanged = await Task.Run(() => MultiServerConfigBuilder.SameEffectiveRouting(
+                    previousRouting, previousCatalog, candidate, catalog, engine, cachePath));
+                bool OwnsActiveTunnel() => InputsUnchanged() && CanEditServerAssignments(true) &&
+                    !manualDisconnect && connectionRequested && core.Status == CoreStatus.Connected &&
+                    core.ActiveProfileId == previousProfile.Id && ReferenceEquals(activeRouting, core.LastConnectedRouting);
+                if (!OwnsActiveTunnel()) throw new OperationCanceledException("Подключение изменилось. Повторите применение.");
+                if (unchanged)
+                {
+                    RequireCandidateCatalog();
+                    var commit = MultiServerRoutingCommitPlan.PrepareConnected(opened, candidate, previousProfile.Id);
+                    commit.Apply(OwnsActiveTunnel, StateStore.Save);
+                    Toast("Назначения сохранены. Действующие маршруты не изменились.", Green);
+                    return true;
+                }
+            }
             bool Current()=>!closing&&!snapshotMode&&!manualDisconnect&&connectionRequested&&InputsUnchanged();
             profileSwitchInProgress=true;multiServerApplyBusy=true;reconnectTimer.Stop();manualDisconnect=false;connectionRequested=true;
             async Task Restart(VpnProfile selected,RoutingSettings routes,VpnProfile[] profiles){
@@ -3652,11 +3754,8 @@ public sealed partial class MainWindow : Window
 		string itemLabel = key.EndsWith("domains", StringComparison.Ordinal) ? "домен"
 			: key.EndsWith("apps", StringComparison.Ordinal) ? "приложение"
 			: key.EndsWith("paths", StringComparison.Ordinal) ? "путь" : "правило";
-        var previousValues = values.ToArray();
-		var editor = new RoutingListEditor(values, () =>
+		var editor = new RoutingListEditor(values, changed =>
 		{
-            var changed = values.Except(previousValues, StringComparer.Ordinal).ToArray();
-            previousValues = values.ToArray();
 			if (!snapshotMode) StateStore.Save(state);
             WarnOrdinaryRoutingDuplicate(values, key, changed);
 		}, () => new TextBox

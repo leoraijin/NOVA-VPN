@@ -67,6 +67,7 @@ public static class SmoothScrollBehavior
         private void ContentChanged(object sender, EventArgs args) { if (!wrapping && viewer.IsLoaded) { Stop(); PrepareSurface(); } }
         private void PrepareSurface()
         {
+            if (viewer.CanContentScroll && viewer.Content is ItemsPresenter) return;
             if (viewer.Content is PixelScrollSurface || (!ownsPhysicalSurface && viewer.CanContentScroll && viewer.Content is System.Windows.Controls.Primitives.IScrollInfo)) return;
             if (!(viewer.Content is UIElement content)) return;
             wrapping = true;

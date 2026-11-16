@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$AssemblyPath,
+﻿param([Parameter(Mandatory=$true)][string]$AssemblyPath,
       [Parameter(Mandatory=$true)][string]$CorePath,
       [Parameter(Mandatory=$true)][string]$WorkPath)
 $ErrorActionPreference='Stop'
@@ -24,6 +24,9 @@ $dictType=[Collections.Generic.Dictionary``2].MakeGenericType([string],$healthTy
 $health=[Activator]::CreateInstance($dictType)
 $good=[Activator]::CreateInstance($healthType);$good.Success=$true;$good.LatencyMs=25;$good.CheckedUtc=[DateTime]::UtcNow;$health.Add($profile.Id,$good)
 $bad=[Activator]::CreateInstance($healthType);$bad.CheckedUtc=[DateTime]::UtcNow;$bad.Message='HTTPS failed';$health.Add($other.Id,$bad)
+$configKey=$assembly.GetType('NovaVpn.SubscriptionManager').GetMethod('ConfigKey')
+$good.ProfileKey=$configKey.Invoke($null,@($profile.psobject.BaseObject))
+$bad.ProfileKey=$configKey.Invoke($null,@($other.psobject.BaseObject))
 $script:chosen=$null
 $choose=[Action[object]]{param($p) $script:chosen=$p}
 $themes=$assembly.GetType('NovaVpn.ThemePalette').GetField('ThemeNames').GetValue($null)
@@ -69,6 +72,19 @@ try{
     Start-Sleep -Milliseconds 800
     $task=$test.Invoke($null,@($profile,$CorePath,$runtime,[Threading.CancellationToken]::None));$result=$task.GetAwaiter().GetResult()
     Assert $result.Success 'HTTPS must pass through the controlled encrypted Shadowsocks profile'
+    $catalogTest=$assembly.GetType('NovaVpn.ServerMapHealthService').GetMethod('TestCatalogAsync',[Reflection.BindingFlags]'NonPublic,Static')
+    $scope=[Threading.CancellationTokenSource]::new()
+    try {
+        $first=$catalogTest.Invoke($null,@($profile,$CorePath,$runtime,$scope.Token))
+        $second=$catalogTest.Invoke($null,@($profile,$CorePath,$runtime,[Threading.CancellationToken]::None))
+        $scope.Cancel()
+        try{$first.GetAwaiter().GetResult();throw 'catalog cancellation ignored'}catch{Assert $first.IsCanceled 'catalog request cancellation'}
+        $shared=$second.GetAwaiter().GetResult()
+        Assert $shared.Success 'closing one catalog subscriber stopped another'
+        $shared.Success=$false
+        $cached=$catalogTest.Invoke($null,@($profile,$CorePath,$runtime,[Threading.CancellationToken]::None)).GetAwaiter().GetResult()
+        Assert ($cached.Success -and $cached.CheckedUtc -eq $shared.CheckedUtc) 'cached catalog result must be reused and isolated from display changes'
+    } finally {$scope.Dispose()}
     $profile.Password='incorrect-test-password'
     $task=$test.Invoke($null,@($profile,$CorePath,$runtime,[Threading.CancellationToken]::None));$result=$task.GetAwaiter().GetResult()
     Assert (-not $result.Success) 'incorrect credentials must fail despite working direct internet'
@@ -77,4 +93,4 @@ try{
     try{$task.GetAwaiter().GetResult();throw 'cancellation was ignored'}catch{Assert $task.IsCanceled 'canceled probe task must be canceled'}finally{$cancel.Dispose()}
     Assert (@(Get-ChildItem $runtime -Filter '*.json').Count -eq 0) 'temporary profile configs must be removed'
 }finally{if(-not $process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose();Remove-Item -LiteralPath $serverFile -ErrorAction SilentlyContinue}
-Write-Output 'PASS: five palettes; hover/click; clustered markers; stale-state expiry; geometry reuse; encrypted HTTPS success; wrong-password failure; cancellation and config cleanup.'
+Write-Output 'PASS: map styling; hover/click; clustered markers; stale-state expiry; geometry reuse; encrypted HTTPS success; wrong-password failure; cancellation and config cleanup.'

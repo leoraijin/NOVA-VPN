@@ -39,6 +39,45 @@ public static class MultiServerConfigBuilder
             throw new InvalidOperationException("Назначенные серверы изменились после проверки. Повторите применение.");
     }
 
+    internal static bool SameEffectiveRouting(RoutingSettings applied, VpnProfile[] appliedProfiles,
+        RoutingSettings candidate, VpnProfile[] candidateProfiles, VpnEngine engine, string cachePath)
+    {
+        if (applied?.MultiServer == null || candidate?.MultiServer == null ||
+            applied.MultiServer.DefaultProfileId != candidate.MultiServer.DefaultProfileId) return false;
+
+        var appliedIds = applied.MultiServer.Compile(Array.Empty<string>()).ReferencedProfileIds;
+        var candidateIds = candidate.MultiServer.Compile(Array.Empty<string>()).ReferencedProfileIds;
+        if (!new HashSet<string>(appliedIds, StringComparer.Ordinal).SetEquals(candidateIds) ||
+            CatalogChanged(candidate.MultiServer, appliedProfiles, candidateProfiles)) return false;
+
+        // Preserve settings consumed outside the core configuration as well.
+        var oldOptions = RoutingOverlayService.Clone(applied);
+        var newOptions = RoutingOverlayService.Clone(candidate);
+        oldOptions.MultiServer = null;
+        newOptions.MultiServer = null;
+        if (RoutingMigrationService.Fingerprint(oldOptions) != RoutingMigrationService.Fingerprint(newOptions)) return false;
+
+        string oldConfig = CoreManager.BuildPreparedConfiguration(null, applied, engine, appliedProfiles, cachePath);
+        string newConfig = CoreManager.BuildPreparedConfiguration(null, candidate, engine, candidateProfiles, cachePath);
+        return string.Equals(oldConfig, newConfig, StringComparison.Ordinal);
+    }
+
+    internal static VpnProfile[] CaptureRoutingProfiles(MultiServerSettings settings, IEnumerable<VpnProfile> profiles)
+    {
+        if (profiles == null) throw new InvalidOperationException("Нет снимка серверов.");
+        var allIds = new HashSet<string>(StringComparer.Ordinal);
+        var used = new HashSet<string>(settings.Compile(Array.Empty<string>()).ReferencedProfileIds, StringComparer.Ordinal);
+        var selected = new List<VpnProfile>();
+        foreach (var profile in profiles)
+        {
+            if (profile == null || string.IsNullOrWhiteSpace(profile.Id) || !allIds.Add(profile.Id))
+                throw new ArgumentException("Некорректные ID серверов.");
+            if (allIds.Count > 2000) throw new ArgumentException("Слишком много серверов.");
+            if (used.Contains(profile.Id)) selected.Add(profile);
+        }
+        return CaptureProfiles(selected);
+    }
+
     public static VpnProfile[] CaptureProfiles(IEnumerable<VpnProfile> profiles)
     {
         var entries=(profiles??throw new InvalidOperationException("Нет снимка серверов.")).ToArray();

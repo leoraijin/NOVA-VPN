@@ -97,23 +97,34 @@ internal sealed class RoutingCardsDraft
         {
             if (group.Target == "Profile" && group.ProfileId == null && group.Values.Count != 0)
                 throw new InvalidOperationException("Сначала выберите сервер VPN-2 во вкладке «Серверы».");
+            var originalRecords = new HashSet<MultiServerRuleRecord>(group.Records);
             var removed = Source.MultiServer.Rules.Select((rule, index) => new {rule, index})
-                .Where(item => group.Records.Contains(item.rule)).Select(item => item.index).ToArray();
+                .Where(item => originalRecords.Contains(item.rule)).Select(item => item.index).ToArray();
             // Match against the original records, not selectors in other cards.
-            var originalCopies = group.Records.Select(rule => rule.Copy()).ToList();
+            var originalCopies = group.Records.GroupBy(Label, StringComparer.Ordinal)
+                .ToDictionary(bucket => bucket.Key, bucket => new Queue<MultiServerRuleRecord>(bucket), StringComparer.Ordinal);
             foreach (int index in removed) next.MultiServer.Rules[index] = null;
             List<string> legacy = group.Applications && group.Target == "Direct" ? next.DirectProcesses :
                 group.Applications && group.Target == "Default" ? next.ProxyProcesses :
                 !group.Applications && group.Target == "Block" ? next.BlockDomains : null;
-            var legacyOriginal = legacy == null ? new List<string>() : new List<string>(legacy);
+            var legacyCounts = (legacy ?? Enumerable.Empty<string>()).GroupBy(value => value, StringComparer.Ordinal)
+                .ToDictionary(bucket => bucket.Key, bucket => bucket.Count(), StringComparer.Ordinal);
             legacy?.Clear();
             foreach (string raw in group.Values)
             {
                 string value = raw.Trim();
                 if (value.Length == 0) continue;
-                var existing = originalCopies.FirstOrDefault(rule => Label(rule) == value);
-                if (existing != null) { settings.Rules.Add(existing); originalCopies.Remove(existing); continue; }
-                if (legacy != null && legacyOriginal.Remove(value)) { legacy.Add(value); continue; }
+                if (originalCopies.TryGetValue(value, out var matches) && matches.Count != 0)
+                {
+                    settings.Rules.Add(matches.Dequeue().Copy());
+                    continue;
+                }
+                if (legacy != null && legacyCounts.TryGetValue(value, out int count) && count > 0)
+                {
+                    legacyCounts[value] = count - 1;
+                    legacy.Add(value);
+                    continue;
+                }
                 var record = new MultiServerRuleRecord {Target = group.Target,
                     ProfileId = group.Target == "Profile" ? group.ProfileId : null};
                 if (group.Applications)

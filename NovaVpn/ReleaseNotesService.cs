@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 21),
+            "Каталог создаёт карточки по мере прокрутки, карта проверяет серверы только когда открыта.",
+            "Совпадающая действующая маршрутизация сохраняется без переподключения VPN."),
         new ReleaseNoteEntry(new Version(2, 6, 20),
             "Добавлена встроенная история обновления режима нескольких VPN."),
         new ReleaseNoteEntry(new Version(2, 6, 19),

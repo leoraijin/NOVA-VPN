@@ -12,14 +12,23 @@ namespace NovaVpn;
 
 public static class HealthCheckService
 {
-    public static async Task<ServerHealthResult> TestAsync(VpnProfile profile, int timeoutMs = 30000)
+    public static Task<ServerHealthResult> TestAsync(VpnProfile profile, int timeoutMs = 30000)
+        => TestCoreAsync(profile, timeoutMs, reuseCatalogResult: false);
+
+    internal static Task<ServerHealthResult> TestCatalogAsync(VpnProfile profile)
+        => TestCoreAsync(profile, 30_000, reuseCatalogResult: true);
+
+    private static async Task<ServerHealthResult> TestCoreAsync(VpnProfile profile, int timeoutMs, bool reuseCatalogResult)
     {
         using (var deadline = new CancellationTokenSource(Math.Max(1000, timeoutMs)))
         {
             try
             {
-                var result = await ServerMapHealthService.TestAsync(profile, VpnEngines.ExecutablePath(VpnEngine.SingBox),
-                    Path.Combine(StateStore.DirectoryPath, "runtime", "profile-probes"), deadline.Token);
+                string corePath = VpnEngines.ExecutablePath(VpnEngine.SingBox);
+                string directory = Path.Combine(StateStore.DirectoryPath, "runtime", "profile-probes");
+                var result = await (reuseCatalogResult
+                    ? ServerMapHealthService.TestCatalogAsync(profile, corePath, directory, deadline.Token)
+                    : ServerMapHealthService.TestAsync(profile, corePath, directory, deadline.Token));
                 return FromProbe(result);
             }
             catch (OperationCanceledException)

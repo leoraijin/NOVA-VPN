@@ -11,16 +11,18 @@ namespace NovaVpn;
 public sealed class RoutingListEditor : StackPanel
 {
     private readonly List<string> values;
-    private readonly Action save;
+    private readonly Action<IReadOnlyList<string>> save;
     private readonly Func<TextBox> createInput;
     private readonly Func<string, Button> createButton;
     private readonly string itemLabel;
     private readonly bool readOnly;
     private readonly StackPanel rows = new StackPanel();
     private readonly List<TextBox> inputs = new List<TextBox>();
+    private readonly Dictionary<TextBox, int> committedIndices = new Dictionary<TextBox, int>();
+    private readonly Dictionary<string, int> valueCounts = new Dictionary<string, int>(StringComparer.Ordinal);
     private bool updating;
 
-    public RoutingListEditor(List<string> values, Action save, Func<TextBox> createInput,
+    public RoutingListEditor(List<string> values, Action<IReadOnlyList<string>> save, Func<TextBox> createInput,
         Func<string, Button> createButton, string itemLabel, bool readOnly)
     {
         this.values = values;
@@ -40,6 +42,7 @@ public sealed class RoutingListEditor : StackPanel
         Children.Add(scroll);
         foreach (string value in values) InsertRow(inputs.Count, value);
         if (inputs.Count == 0) InsertRow(0, "");
+        if (values.All(value => !string.IsNullOrWhiteSpace(value) && value.Trim() == value)) IndexRows();
 
         var add = createButton("+ Добавить " + itemLabel);
         add.Name = "AddRoutingEntry";
@@ -97,7 +100,7 @@ public sealed class RoutingListEditor : StackPanel
 
         rows.Children.Insert(index, row);
         inputs.Insert(index, input);
-        input.TextChanged += delegate { Commit(); };
+        input.TextChanged += delegate { CommitRow(input); };
         remove.Click += delegate
         {
             if (readOnly) return;
@@ -141,14 +144,54 @@ public sealed class RoutingListEditor : StackPanel
         last.CaretIndex = last.Text.Length;
     }
 
+    private void IndexRows()
+    {
+        committedIndices.Clear();
+        valueCounts.Clear();
+        int index = 0;
+        foreach (var input in inputs)
+        {
+            if (string.IsNullOrWhiteSpace(input.Text)) continue;
+            committedIndices.Add(input, index);
+            string value = values[index++];
+            valueCounts.TryGetValue(value, out int count);
+            valueCounts[value] = count + 1;
+        }
+    }
+
+    private void CommitRow(TextBox input)
+    {
+        if (updating || readOnly) return;
+        string value = input.Text.Trim();
+        if (value.Length == 0 || !committedIndices.TryGetValue(input, out int index))
+        {
+            Commit();
+            return;
+        }
+        string previous = values[index];
+        if (previous == value) return;
+        if (valueCounts[previous] == 1) valueCounts.Remove(previous);
+        else valueCounts[previous]--;
+        valueCounts.TryGetValue(value, out int count);
+        valueCounts[value] = count + 1;
+        values[index] = value;
+        save(count == 0 ? new[] { value } : Array.Empty<string>());
+    }
+
     private void Commit()
     {
         if (updating || readOnly) return;
         var next = inputs.Select(input => input.Text.Trim()).Where(value => value.Length > 0).ToList();
-        if (values.SequenceEqual(next)) return;
+        if (values.SequenceEqual(next))
+        {
+            IndexRows();
+            return;
+        }
+        var added = next.Except(values, StringComparer.Ordinal).ToArray();
         values.Clear();
         values.AddRange(next);
-        save();
+        IndexRows();
+        save(added);
     }
 
     private static void FocusInput(TextBox input)

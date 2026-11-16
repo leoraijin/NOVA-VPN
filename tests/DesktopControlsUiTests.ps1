@@ -136,6 +136,30 @@ try {
   }}
   Save-Image ('servers-'+$case.Name)
  }
+ $originalProfiles=@($state.Profiles)
+ $profileType=$assembly.GetType('NovaVpn.VpnProfile')
+ try {
+  $state.Profiles.Clear()
+  for($i=0;$i -lt 2000;$i++){
+   $profile=[Activator]::CreateInstance($profileType)
+   $profile.Name=('Germany Test {0:0000}' -f $i)
+   $profile.Server=('test-{0}.example.test' -f $i)
+   $profile.Protocol='vless';$profile.Port=443
+   $state.Profiles.Add($profile)
+  }
+  $window.ShowPageForSnapshot('servers');Layout
+  $catalog=Named 'ServerCatalogList'
+  Assert ($catalog.Items.Count -ge 2000) 'Virtual catalog lost profiles'
+  $panel=@(Nodes $catalog | Where-Object {$_ -is [Windows.Controls.VirtualizingStackPanel]})[0]
+  Assert ($panel.Children.Count -gt 0 -and $panel.Children.Count -lt 100) 'Catalog materialized too many cards'
+  $scroll=@(Nodes $catalog | Where-Object {$_ -is [Windows.Controls.ScrollViewer]})[0]
+  $scroll.ScrollToEnd();Layout
+  Assert ($null -ne $catalog.ItemContainerGenerator.ContainerFromIndex($catalog.Items.Count-1)) 'Last catalog item is unreachable'
+  Assert ($panel.Children.Count -lt 100) 'Catalog retained offscreen cards'
+ } finally {
+  $state.Profiles.Clear()
+  foreach($profile in $originalProfiles){$state.Profiles.Add($profile)}
+ }
  $state.Routing.MultiServer=$null
  $window.ShowPageForSnapshot('routing');Layout
  $labels=@(Nodes $root | Where-Object {$_ -is [Windows.Controls.TextBlock]} | ForEach-Object Text)
@@ -201,6 +225,23 @@ try {
  $window.ShowPageForSnapshot('routing');Layout
  $secondaryInput=@(Nodes (Named 'RoutingSitesSecondary') | Where-Object {$_ -is [Windows.Controls.TextBox] -and $_.Name -eq 'RoutingEntry'})[0]
  Assert ($secondaryInput.Text -eq 'DIRECT-0.example.test') 'Navigation lost unsaved draft'
+ $card=Named 'RoutingSitesSecondary'
+ $routeEditor=@(Nodes $card | Where-Object {$_.GetType().FullName -eq 'NovaVpn.RoutingListEditor'})[0]
+ $secondaryInput.SelectAll()
+ $paste=$routeEditor.GetType().GetMethod('PasteRows',$flags)
+ $paste.Invoke($routeEditor,@($secondaryInput.psobject.BaseObject,('first.example.test'+[char]10+'second.example.test')))
+ Layout
+ $fields=@(Nodes $card | Where-Object {$_ -is [Windows.Controls.TextBox] -and $_.Name -eq 'RoutingEntry'})
+ Assert ($fields[0].Text -eq 'first.example.test' -and $fields[1].Text -eq 'second.example.test') 'Multiline paste lost a row'
+ $fields[1].Text='second-edited.example.test'
+ $remove=@(Nodes $card | Where-Object {$_ -is [Windows.Controls.Button] -and $_.Name -eq 'RemoveRoutingEntry'})[0]
+ $remove.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+ $window.ShowPageForSnapshot('servers');Layout
+ $window.ShowPageForSnapshot('routing');Layout
+ $fields=@(Nodes (Named 'RoutingSitesSecondary') | Where-Object {$_ -is [Windows.Controls.TextBox] -and $_.Name -eq 'RoutingEntry'})
+ Assert ($fields[0].Text -eq 'second-edited.example.test') 'Deleting an earlier row lost edits in a later row'
+ Assert (@($fields | Where-Object Text -eq 'first.example.test').Count -eq 0) 'Deleted route returned after navigation'
+
 
  Write-Output "PASS: $checks desktop UI checks; seven window/theme/mode variants. Synthetic profiles only."
 } finally {$window.Close();$app.Shutdown()}

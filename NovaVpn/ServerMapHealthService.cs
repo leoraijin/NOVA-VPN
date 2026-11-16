@@ -21,6 +21,7 @@ public sealed class ServerMapHealth
 	public string Message = "Не проверен";
     public string ProfileKey = "", NetworkKey = "", CoreKey = "";
     public string Target = "";
+    internal ServerMapHealth Copy() => (ServerMapHealth)MemberwiseClone();
 	public bool IsFresh => CheckedUtc != default(DateTime) && DateTime.UtcNow >= CheckedUtc && DateTime.UtcNow - CheckedUtc < TimeSpan.FromMinutes(3);
     public bool IsFreshFor(VpnProfile profile) => IsFresh && profile != null && ProfileKey == SubscriptionManager.ConfigKey(profile);
 	public string Label => !Supported ? Message : !IsFresh ? "Нужна свежая проверка" :
@@ -30,6 +31,86 @@ public sealed class ServerMapHealth
 public static class ServerMapHealthService
 {
 	private static readonly SemaphoreSlim ProbeSlots = new SemaphoreSlim(2);
+    private static readonly object CatalogLock = new object();
+    private static readonly Dictionary<Tuple<string, string, string>, CatalogProbe> CatalogProbes =
+        new Dictionary<Tuple<string, string, string>, CatalogProbe>();
+
+    private sealed class CatalogProbe
+    {
+        public readonly CancellationTokenSource Stop = new CancellationTokenSource();
+        public Task<ServerMapHealth> Work;
+        public int Waiters;
+    }
+
+    internal static async Task<ServerMapHealth> TestCatalogAsync(VpnProfile profile, string corePath,
+        string runtimeDirectory, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (profile == null) return await TestAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false);
+        var key = Tuple.Create(SubscriptionManager.ConfigKey(profile), ProfileHealthEvidence.NetworkKey(),
+            ProfileHealthEvidence.CoreKey(corePath));
+        if (string.IsNullOrEmpty(key.Item2) || string.IsNullOrEmpty(key.Item3))
+            return await TestAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false);
+
+        CatalogProbe entry;
+        lock (CatalogLock)
+        {
+            if (CatalogProbes.TryGetValue(key, out entry) && entry.Work.IsCompleted &&
+                (entry.Work.Status != TaskStatus.RanToCompletion || !entry.Work.Result.Success || !entry.Work.Result.IsFresh ||
+                 DateTime.UtcNow - entry.Work.Result.CheckedUtc >= TimeSpan.FromSeconds(150)))
+            {
+                CatalogProbes.Remove(key);
+                entry = null;
+            }
+            if (entry == null)
+            {
+                if (CatalogProbes.Count >= 2048)
+                {
+                    foreach (var expired in CatalogProbes.Where(pair => pair.Value.Work.IsCompleted).Select(pair => pair.Key).ToArray())
+                        CatalogProbes.Remove(expired);
+                }
+                entry = new CatalogProbe();
+                var owner = entry;
+                entry.Work = Task.Run(() => TestAsync(profile, corePath, runtimeDirectory, owner.Stop.Token));
+                CatalogProbes.Add(key, entry);
+                entry.Work.ContinueWith(_ =>
+                {
+                    lock (CatalogLock) owner.Stop.Dispose();
+                }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            }
+            entry.Waiters++;
+        }
+        try
+        {
+            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (token.Register(() => cancelled.TrySetResult(true)))
+            {
+                await Task.WhenAny(entry.Work, cancelled.Task).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                var result = await entry.Work.ConfigureAwait(false);
+                if (result.ProfileKey != key.Item1 || result.NetworkKey != key.Item2 || result.CoreKey != key.Item3 ||
+                    SubscriptionManager.ConfigKey(profile) != key.Item1 ||
+                    ProfileHealthEvidence.NetworkKey() != key.Item2 || ProfileHealthEvidence.CoreKey(corePath) != key.Item3)
+                    return new ServerMapHealth { Message = "Параметры проверки изменились. Повторите проверку.", CheckedUtc = DateTime.UtcNow };
+                if (profile.LastCheckedUtc < result.CheckedUtc) ProfileHealthEvidence.Record(profile, result);
+                // Callers can annotate their display result without changing the shared sample.
+                return result.Copy();
+            }
+        }
+        finally
+        {
+            lock (CatalogLock)
+            {
+                if (--entry.Waiters == 0 && !entry.Work.IsCompleted)
+                {
+                    if (CatalogProbes.TryGetValue(key, out var latest) && ReferenceEquals(entry, latest))
+                        CatalogProbes.Remove(key);
+                    entry.Stop.Cancel();
+                }
+            }
+        }
+    }
+
 	// The probe has no TUN, no direct outbound, and no proxy bypass/fallback.
 	public static async Task<ServerMapHealth> TestAsync(VpnProfile profile, string corePath, string runtimeDirectory, CancellationToken token)
 	{
@@ -39,6 +120,7 @@ public static class ServerMapHealthService
             string key = profile == null ? "" : SubscriptionManager.ConfigKey(profile);
             string network = ProfileHealthEvidence.NetworkKey(), core = ProfileHealthEvidence.CoreKey(corePath);
             var result = await TestCoreAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
             if (profile != null && (key != SubscriptionManager.ConfigKey(profile) || network != ProfileHealthEvidence.NetworkKey() || core != ProfileHealthEvidence.CoreKey(corePath)))
                 return new ServerMapHealth { Message = "Профиль, ядро или сеть изменились во время проверки. Повторите проверку.", CheckedUtc = DateTime.UtcNow };
             result.ProfileKey = key; result.NetworkKey = network; result.CoreKey = core;

@@ -89,6 +89,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Routing-card native core check failed' }
           & 'work/payload/core/reality-client.exe' --check -c 'bin/Release/MultiServerConfigTests/reality-dual-config.json'
           if ($LASTEXITCODE -ne 0) { throw 'Reality Core rejected the Windows dual configuration' }
+          & 'work/payload/core/sing-box.exe' check -c 'bin/Release/MultiVpnSlotsTests/ten-config.json'
+          if ($LASTEXITCODE -ne 0) { throw 'sing-box rejected the ten-exit configuration' }
+          & 'work/payload/core/reality-client.exe' --check -c 'bin/Release/MultiVpnSlotsTests/reality-ten-config.json'
+          if ($LASTEXITCODE -ne 0) { throw 'Reality Core rejected the ten-exit configuration' }
+      - uses: actions/checkout@v4
+        with:
+          repository: leoraijin/vpn-core
+          ref: ac6f365a1b620155e4d6f4176d58e8b0aac03d7a
+          path: work/wintun-test-fixture
+          persist-credentials: false
+      - name: Verify actual Wintun routing on the disposable runner
+        shell: pwsh
+        run: |
+          python work/wintun-test-fixture/scripts/test_dual_exit_loopback.py work/payload/core/reality-client.exe --windows-tun
+          if ($LASTEXITCODE -ne 0) { throw 'Wintun route verification failed' }
       - name: Verify settings transfer
         shell: pwsh
         run: |

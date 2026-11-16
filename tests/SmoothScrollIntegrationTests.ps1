@@ -22,6 +22,7 @@ try {
  foreach($page in @('home','servers','routing','settings','diagnostics','engine')) {
   $window.ShowPageForSnapshot($page);$window.UpdateLayout()
   $scroll=Find-Scroll ($type.GetField('contentHost',$flags).GetValue($window))
+  if($page -eq 'servers' -and !$scroll){throw 'Virtual server catalog scroll not attached'}
   if($scroll) {
    if($null -eq $scroll.GetValue($stateProperty)){throw "Page scroll not attached: $page"}
    $count++

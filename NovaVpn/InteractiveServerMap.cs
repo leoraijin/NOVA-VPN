@@ -11,7 +11,12 @@ namespace NovaVpn;
 
 public sealed class InteractiveServerMap : Canvas
 {
-	private sealed class Node { public VpnProfile[] Profiles; public Ellipse Dot, Halo; public string Country; }
+	private sealed class Node
+    {
+        public VpnProfile[] Profiles;
+        public Ellipse Dot, Halo;
+        public int MarkerStatus = -1;
+    }
 	private readonly List<Node> nodes = new List<Node>();
 	private readonly Dictionary<string, ServerMapHealth> health;
 	private readonly ThemePalette palette;
@@ -56,30 +61,54 @@ public sealed class InteractiveServerMap : Canvas
 		SetLeft(halo, point.X - 13); SetTop(halo, point.Y - 13); SetZIndex(halo, 20);
 		SetLeft(dot, point.X - 8); SetTop(dot, point.Y - 8); SetZIndex(dot, 21);
 		System.Windows.Automation.AutomationProperties.SetName(dot, country + " · выбор VPN-сервера");
-		dot.MouseEnter += (s, e) => { highlight(true); dot.ToolTip = Summary(profiles) + "\nКоординаты по названию профиля"; };
+        var node = new Node { Profiles = profiles, Dot = dot, Halo = halo };
+        dot.Stroke = new SolidColorBrush(profiles.Any(p => p.Id == selectedId) ? palette.Accent : palette.Surface);
+        dot.ToolTip = country;
+        dot.ToolTipOpening += (s, e) => dot.ToolTip = country +
+            (node.MarkerStatus == 3 ? " · самый быстрый из проверенных" : "") + "\n" +
+            Summary(profiles) + "\nКоординаты по названию профиля";
+        dot.MouseEnter += (s, e) => highlight(true);
 		dot.MouseLeave += (s, e) => highlight(false);
 		dot.MouseLeftButtonUp += (s, e) => { e.Handled = true; Choose(dot, profiles); };
 		Children.Add(halo); Children.Add(dot);
-		nodes.Add(new Node { Profiles = profiles, Dot = dot, Halo = halo, Country = country });
+		nodes.Add(node);
 	}
 
 	public void RefreshStatus()
 	{
-		int best = nodes.SelectMany(n => n.Profiles).Where(p => health.TryGetValue(p.Id, out var h) && h.Supported && h.IsFreshFor(p) && h.Success).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
-		foreach (var node in nodes)
-		{
-			int latency = node.Profiles.Where(p => health.TryGetValue(p.Id, out var h) && h.Supported && h.IsFreshFor(p) && h.Success).Select(Score).DefaultIfEmpty(int.MaxValue).Min();
-			bool verified = latency < int.MaxValue;
-			bool active = node.Profiles.Any(p => p.Id == selectedId);
-			bool failed = node.Profiles.All(p => health.TryGetValue(p.Id, out var value) && value.Supported && value.IsFreshFor(p) && !value.Success);
-			Color color = verified ? Color.FromRgb(45, 174, 112) : failed ? Color.FromRgb(224, 76, 83) : palette.Muted;
-			node.Dot.Fill = new SolidColorBrush(color);
-			node.Dot.Stroke = new SolidColorBrush(active ? palette.Accent : palette.Surface);
-			node.Dot.Opacity = verified || failed ? 1 : 0.55;
-			node.Halo.Fill = new SolidColorBrush(Color.FromArgb((byte)(verified ? (latency == best ? 105 : 55) : failed ? 45 : 0), color.R, color.G, color.B));
-			node.Dot.ToolTip = node.Country + (verified && latency == best ? " · самый быстрый из проверенных" : "") + "\n" + Summary(node.Profiles) + "\nКоординаты по названию профиля";
-		}
-	}
+        var status = new Dictionary<string, ServerMapHealth>(StringComparer.Ordinal);
+        var rows = nodes.Select(node =>
+        {
+            int latency = int.MaxValue;
+            bool failed = node.Profiles.Length != 0;
+            foreach (var profile in node.Profiles)
+            {
+                if (!status.TryGetValue(profile.Id, out var result))
+                {
+                    result = health.TryGetValue(profile.Id, out var found) && found.Supported && found.IsFreshFor(profile)
+                        ? found : null;
+                    status.Add(profile.Id, result);
+                }
+                if (result?.Success == true) latency = Math.Min(latency, result.LatencyMs);
+                if (result?.Success != false) failed = false;
+            }
+            return new { node, latency, failed };
+        }).ToArray();
+        int best = rows.Select(row => row.latency).DefaultIfEmpty(int.MaxValue).Min();
+        foreach (var row in rows)
+        {
+            bool verified = row.latency < int.MaxValue;
+            bool fastest = verified && row.latency == best;
+            int markerStatus = fastest ? 3 : verified ? 2 : row.failed ? 1 : 0;
+            if (row.node.MarkerStatus == markerStatus) continue;
+            row.node.MarkerStatus = markerStatus;
+            Color color = verified ? Color.FromRgb(45, 174, 112) : row.failed ? Color.FromRgb(224, 76, 83) : palette.Muted;
+            row.node.Dot.Fill = new SolidColorBrush(color);
+            row.node.Dot.Opacity = verified || row.failed ? 1 : 0.55;
+            row.node.Halo.Fill = new SolidColorBrush(Color.FromArgb(
+                (byte)(fastest ? 105 : verified ? 55 : row.failed ? 45 : 0), color.R, color.G, color.B));
+        }
+    }
 
 	public void SetMarkerScale(double zoom)
 	{
