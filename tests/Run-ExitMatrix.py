@@ -15,6 +15,7 @@ import sys
 from tempfile import TemporaryDirectory
 import threading
 import time
+import uuid
 
 
 def run(core, reality, fixture, count, workdir):
@@ -159,14 +160,74 @@ def verify_wintun_datagrams(addresses, exits):
                for address, server in zip(addresses, exits)), [server.seen for server in exits]
 
 
-def run_windows_tun(core, reality, fixture, count, workdir):
+class VlessDatagramEcho(socketserver.BaseRequestHandler):
+    def handle(self):
+        payload, udp_socket = self.request
+        if payload == b"nova-wintun-udp":
+            port, answer = 5300, self.server.label.encode("ascii")
+        elif payload == DNS_QUERY:
+            port, answer = 53, dns_response(self.server.number)
+        else:
+            return
+        self.server.seen.append((self.server.destination, port))
+        udp_socket.sendto(answer, self.client_address)
+
+
+def start_vless_datagram_peer(stack, singbox, directory, underlay, addresses):
+    fixture_config = {"log": {"level": "error"}, "inbounds": [],
+                      "outbounds": [{"type": "direct", "tag": "echo"}],
+                      "route": {"rules": [], "final": "echo"}}
+    exits, client_outbounds = [], []
+    for number, destination in enumerate(addresses, start=1):
+        echo = stack.enter_context(socketserver.ThreadingUDPServer((underlay, 0), VlessDatagramEcho))
+        echo.label, echo.number, echo.destination = f"vpn{number}", number, destination
+        echo.seen = []
+        threading.Thread(target=echo.serve_forever, daemon=True).start()
+        stack.callback(echo.shutdown)
+        exits.append(echo)
+        with socket.socket() as reserve:
+            reserve.bind((underlay, 0))
+            listener = reserve.getsockname()[1]
+        tag, credential = f"vless-{number}", str(uuid.uuid4())
+        fixture_config["inbounds"].append({"type": "vless", "tag": tag, "listen": underlay,
+                                            "listen_port": listener, "users": [{"uuid": credential}]})
+        fixture_config["route"]["rules"].append(
+            {"inbound": [tag], "network": "udp", "action": "route-options",
+             "override_address": underlay, "override_port": echo.server_address[1]})
+        client_outbounds.append({"type": "vless", "tag": f"udp-{echo.label}", "server": underlay,
+                                 "server_port": listener, "uuid": credential, "packet_encoding": "xudp",
+                                 "allow_insecure": True})
+    path = Path(directory, "vless-peer.json")
+    path.write_text(json.dumps(fixture_config), encoding="utf-8")
+    subprocess.run([singbox, "check", "-c", path], timeout=15, check=True)
+    log = stack.enter_context(Path(directory, "vless-peer.log").open("w+b"))
+    peer = subprocess.Popen([singbox, "run", "-c", path], stdout=log, stderr=log)
+
+    def stop_peer():
+        if peer.poll() is None:
+            peer.terminate()
+        peer.wait(timeout=10)
+
+    stack.callback(stop_peer)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and peer.poll() is None:
+        try:
+            with socket.create_connection((underlay, listener), timeout=.3):
+                return exits, client_outbounds
+        except OSError:
+            time.sleep(.05)
+    log.seek(0)
+    raise RuntimeError("VLESS datagram peer did not start: " + log.read().decode("utf-8", errors="replace"))
+
+
+def run_windows_tun(core, reality, fixture, count, workdir, singbox):
     if sys.platform != "win32" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise RuntimeError("Wintun matrix requires an isolated GitHub-hosted Windows runner.")
     addresses = [f"192.0.2.{number}" for number in range(80, 80 + count)]
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
         route.connect((addresses[0], 9))
         underlay = route.getsockname()[0]
-    with ExitStack() as stack, TemporaryDirectory(prefix="wintun-matrix-", dir=workdir) as directory:
+    with TemporaryDirectory(prefix="wintun-matrix-", dir=workdir) as directory, ExitStack() as stack:
         exits = []
         for number in range(1, count + 1):
             server = stack.enter_context(socketserver.ThreadingTCPServer((underlay, 0), fixture.Exit))
@@ -193,10 +254,14 @@ def run_windows_tun(core, reality, fixture, count, workdir):
             "route": {"rules": [{"ip_cidr": [address + "/32"], "outbound": server.label}
                                 for address, server in zip(addresses, exits)], "final": "unrelated"},
         }
-        config["outbounds"].extend(
-            {"type": "socks", "tag": f"udp-{server.label}", "server": underlay,
-             "server_port": server.server_address[1], "version": "5", "network": "udp"}
-            for server in datagram_exits)
+        if reality:
+            datagram_exits, udp_outbounds = start_vless_datagram_peer(stack, singbox, directory, underlay, addresses)
+        else:
+            udp_outbounds = [
+                {"type": "socks", "tag": f"udp-{server.label}", "server": underlay,
+                 "server_port": server.server_address[1], "version": "5", "network": "udp"}
+                for server in datagram_exits]
+        config["outbounds"].extend(udp_outbounds)
         config["route"]["rules"][:0] = [
             {"network": "udp", "ip_cidr": [address + "/32"], "outbound": f"udp-{server.label}"}
             for address, server in zip(addresses, datagram_exits)]
@@ -231,8 +296,7 @@ def run_windows_tun(core, reality, fixture, count, workdir):
                 assert answers == [server.label for server in exits], answers
                 assert all(server.seen and all(seen == (address, 80) for seen in server.seen)
                            for address, server in zip(addresses, exits))
-                if datagram_exits:
-                    verify_wintun_datagrams(addresses, datagram_exits)
+                verify_wintun_datagrams(addresses, datagram_exits)
                 if count > 1:
                     exits[-1].shutdown()
                     exits[-1].server_close()
@@ -260,8 +324,7 @@ def run_windows_tun(core, reality, fixture, count, workdir):
                     process.kill()
                     process.wait()
                     raise
-        coverage = "TCP" if reality else "TCP, UDP and DNS packets"
-        print(f"PASS {'Reality Core' if reality else 'sing-box'}: {count} exit(s), Wintun {coverage}")
+        print(f"PASS {'Reality Core' if reality else 'sing-box'}: {count} exit(s), Wintun TCP, UDP and DNS packets")
 
 
 def main():
@@ -276,8 +339,11 @@ def main():
     args.workdir.mkdir(parents=True, exist_ok=True)
     for core, reality in ((args.sing_box, False), (args.reality, True)):
         for count in (1, 2, 10):
-            exercise = run_windows_tun if args.windows_tun else run
-            exercise(core.resolve(strict=True), reality, fixture, count, args.workdir.resolve())
+            parameters = (core.resolve(strict=True), reality, fixture, count, args.workdir.resolve())
+            if args.windows_tun:
+                run_windows_tun(*parameters, args.sing_box.resolve(strict=True))
+            else:
+                run(*parameters)
 
 
 if __name__ == "__main__":
