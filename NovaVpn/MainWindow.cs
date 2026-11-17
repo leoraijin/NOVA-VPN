@@ -2513,7 +2513,7 @@ public sealed partial class MainWindow : Window
 		if (!state.AutoSelectBestServer) actions.Children.Add(chooseBest);
 		actions.Children.Add(update);
 		actions.Children.Add(addButton);
-        var importFile = SmallButton("Из файла"); importFile.Margin = new Thickness(0, 6, 8, 0);
+        var importFile = SmallButton("Импорт конфигов"); importFile.Name = "ServerConfigImport"; importFile.Margin = new Thickness(0, 6, 8, 0);
         importFile.Click += async delegate { await ImportFileAsync(); }; actions.Children.Add(importFile);
         var qr = SmallButton("QR ▾"); qr.Margin = new Thickness(0, 6, 8, 0);
         var qrMenu = new ContextMenu(); qr.ContextMenu = qrMenu;
@@ -2525,10 +2525,10 @@ public sealed partial class MainWindow : Window
         qr.Click += delegate { qrMenu.PlacementTarget = qr; qrMenu.IsOpen = true; }; actions.Children.Add(qr);
         var fallback = SmallButton("Резервные профили"); fallback.Margin = new Thickness(0, 6, 8, 0);
         fallback.Click += delegate { EditFallbackProfiles(); }; actions.Children.Add(fallback);
-        var corporate = SmallButton("Корпоративный прокси"); corporate.Margin = new Thickness(0, 6, 8, 0);
-        corporate.Click += async delegate { await EditCorporateProxyAsync(); }; actions.Children.Add(corporate);
-        var vps = SmallButton("Мой VPS"); vps.Margin = new Thickness(0, 6, 8, 0);
-        vps.Click += async delegate { await OpenVpsAsync(); }; actions.Children.Add(vps);
+        var exportFile = SmallButton("Экспорт конфигов"); exportFile.Name = "ServerConfigExport";
+        exportFile.IsEnabled = state.Profiles.Count > 0;
+        exportFile.ToolTip = "Сохранить все серверы и ключи в один файл";
+        exportFile.Click += delegate { ExportServerConfigs(); }; actions.Children.Add(exportFile);
         var services = SmallButton("Доступность сервисов"); services.Margin = new Thickness(0, 6, 8, 0);
         services.Click += async delegate {
             var dialog = new ServiceMatrixWindow(CollectionCandidates(), () => CollectionCandidates(), core.ProbeCorePath,

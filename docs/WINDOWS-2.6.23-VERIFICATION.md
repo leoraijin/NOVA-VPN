@@ -15,3 +15,5 @@ The same eight-profile sample using the fixed checker produced six verified HTTP
 - HomeConfigTransferLayoutTests.ps1: PASS, five themes at widths 800/1280 and 140% text size.
 
 Runtime probe configs containing user keys were transient and removed by the owned process cleanup. No user profiles are committed. GitHub release workflow must finish successfully before publication is reported complete. This file does not assert live installation on the user's PC.
+
+Final server toolbar update: removed My VPS and corporate proxy actions, added explicit server config import/export. HomeConfigTransferLayoutTests checks home and server pages in five themes. DesktopControlsUiTests: 576 checks, seven window/theme/mode variants PASS. ServerConfigTransferTests repeated PASS. Rendered servers-dark.png inspected locally.
