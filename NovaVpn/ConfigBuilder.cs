@@ -8,7 +8,10 @@ namespace NovaVpn;
 
 public static class ConfigBuilder
 {
-	public static string BuildProbe(VpnProfile profile, int port, string user, string password)
+	public static string BuildProbe(VpnProfile profile, int port, string user, string password) =>
+		BuildProbeWithRouting(profile, port, user, password, false);
+
+	internal static string BuildProbeWithRouting(VpnProfile profile, int port, string user, string password, bool useSystemRoute)
 	{
 		if (profile == null || profile.Protocol == "sing-box")
 			throw new NotSupportedException("Полная конфигурация проверяется при подключении.");
@@ -17,12 +20,12 @@ public static class ConfigBuilder
 			"inbounds", new object[] { Obj("type", "mixed", "tag", "map-probe", "listen", "127.0.0.1", "listen_port", port,
 				"users", new object[] { Obj("username", user, "password", password) }) },
 			"outbounds", new object[] { BuildProxy(profile) },
-			"route", Obj("final", "proxy", "auto_detect_interface", true, "default_domain_resolver", "local-dns"));
+			"route", Obj("final", "proxy", "auto_detect_interface", !useSystemRoute, "default_domain_resolver", "local-dns"));
 		CorporateProxy.Apply(config, profile, "proxy");
 		return new JavaScriptSerializer().Serialize(config);
 	}
 
-	internal static string BuildCatalogProbeBatch(IReadOnlyList<(VpnProfile Profile, int Port, string User, string Password)> probes)
+	internal static string BuildCatalogProbeBatch(IReadOnlyList<(VpnProfile Profile, int Port, string User, string Password)> probes, bool useSystemRoute = false)
 	{
 		if (probes == null || probes.Count < 2 || probes.Count > 8)
 			throw new ArgumentOutOfRangeException(nameof(probes));
@@ -54,7 +57,7 @@ public static class ConfigBuilder
 		var config = Obj("log", Obj("level", "error"),
 			"dns", Obj("servers", new object[] { Obj("type", "local", "tag", "local-dns") }),
 			"inbounds", inbounds, "outbounds", outbounds,
-			"route", Obj("rules", rules, "auto_detect_interface", true, "default_domain_resolver", "local-dns"));
+			"route", Obj("rules", rules, "auto_detect_interface", !useSystemRoute, "default_domain_resolver", "local-dns"));
 		return new JavaScriptSerializer().Serialize(config);
 	}
 

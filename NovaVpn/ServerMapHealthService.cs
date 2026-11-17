@@ -16,6 +16,7 @@ public sealed class ServerMapHealth
 {
 	public bool Success;
 	public bool Supported = true;
+    public bool UsesSystemRoute;
 	public int LatencyMs;
 	public DateTime CheckedUtc;
 	public string Message = "Не проверен";
@@ -32,8 +33,8 @@ public static class ServerMapHealthService
 {
 	private static readonly SemaphoreSlim ProbeSlots = new SemaphoreSlim(2);
     private static readonly object CatalogLock = new object();
-    private static readonly Dictionary<Tuple<string, string, string>, CatalogProbe> CatalogProbes =
-        new Dictionary<Tuple<string, string, string>, CatalogProbe>();
+    private static readonly Dictionary<Tuple<string, string, string, bool>, CatalogProbe> CatalogProbes =
+        new Dictionary<Tuple<string, string, string, bool>, CatalogProbe>();
 
     private sealed class CatalogProbe
     {
@@ -42,26 +43,26 @@ public static class ServerMapHealthService
         public int Waiters;
     }
 
-    private static readonly Dictionary<(string Core, string Runtime), List<PendingProbe>> PendingCatalog =
-        new Dictionary<(string, string), List<PendingProbe>>();
+    private static readonly Dictionary<(string Core, string Runtime, bool UseSystemRoute), List<PendingProbe>> PendingCatalog =
+        new Dictionary<(string, string, bool), List<PendingProbe>>();
 
     private sealed class PendingProbe
     {
         public VpnProfile Profile;
         public CancellationToken Token;
-        public Tuple<string, string, string> Key;
+        public Tuple<string, string, string, bool> Key;
         public readonly TaskCompletionSource<ServerMapHealth> Completion =
             new TaskCompletionSource<ServerMapHealth>(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     // CatalogLock is held by the caller so each queued task has one cache owner.
     private static Task<ServerMapHealth> QueueCatalogProbe(VpnProfile profile, string corePath, string runtime,
-        CancellationToken token, Tuple<string, string, string> key)
+        CancellationToken token, Tuple<string, string, string, bool> key)
     {
         if (profile.Protocol == "sing-box" || ConfigBuilder.RequiresXrayTransport(profile) || CorporateProxy.Enabled(profile))
             return Task.Run(() => TestStampedAsync(profile, corePath, runtime, token, key));
 
-        var location = (Core: corePath, Runtime: runtime);
+        var location = (Core: corePath, Runtime: runtime, UseSystemRoute: key.Item4);
         if (!PendingCatalog.TryGetValue(location, out var batch) || batch.Count == 8)
         {
             batch = new List<PendingProbe>();
@@ -73,7 +74,7 @@ public static class ServerMapHealthService
         return probe.Completion.Task;
     }
 
-    private static async Task FlushCatalogAsync((string Core, string Runtime) location, List<PendingProbe> queued)
+    private static async Task FlushCatalogAsync((string Core, string Runtime, bool UseSystemRoute) location, List<PendingProbe> queued)
     {
         await Task.Delay(35).ConfigureAwait(false);
         lock (CatalogLock)
@@ -89,7 +90,7 @@ public static class ServerMapHealthService
         {
             try
             {
-                var results = await RunCatalogBatchAsync(location.Core, location.Runtime, active).ConfigureAwait(false);
+                var results = await RunCatalogBatchAsync(location.Core, location.Runtime, active, location.UseSystemRoute).ConfigureAwait(false);
                 for (int i = 0; i < active.Length; i++)
                 {
                     var probe = active[i];
@@ -114,7 +115,7 @@ public static class ServerMapHealthService
         })).ConfigureAwait(false);
     }
 
-    private static async Task<ServerMapHealth[]> RunCatalogBatchAsync(string corePath, string runtime, PendingProbe[] probes)
+    private static async Task<ServerMapHealth[]> RunCatalogBatchAsync(string corePath, string runtime, PendingProbe[] probes, bool useSystemRoute)
     {
         using (var stop = new CancellationTokenSource())
         {
@@ -125,7 +126,7 @@ public static class ServerMapHealthService
             try
             {
                 await ProbeSlots.WaitAsync(stop.Token).ConfigureAwait(false);
-                try { return await RunCatalogProcessAsync(corePath, runtime, probes, stop.Token).ConfigureAwait(false); }
+                try { return await RunCatalogProcessAsync(corePath, runtime, probes, stop.Token, useSystemRoute).ConfigureAwait(false); }
                 finally { ProbeSlots.Release(); }
             }
             finally { foreach (var registration in registrations) registration.Dispose(); }
@@ -133,7 +134,7 @@ public static class ServerMapHealthService
     }
 
     private static async Task<ServerMapHealth[]> RunCatalogProcessAsync(string corePath, string runtime,
-        PendingProbe[] probes, CancellationToken token)
+        PendingProbe[] probes, CancellationToken token, bool useSystemRoute)
     {
         var listeners = new List<TcpListener>();
         var endpoints = new List<(VpnProfile Profile, int Port, string User, string Password)>();
@@ -151,7 +152,7 @@ public static class ServerMapHealthService
         finally { foreach (var listener in listeners) listener.Stop(); }
 
         token.ThrowIfCancellationRequested();
-        string file = PrivateRuntimeFiles.WriteCoreConfig(runtime, ConfigBuilder.BuildCatalogProbeBatch(endpoints));
+        string file = PrivateRuntimeFiles.WriteCoreConfig(runtime, ConfigBuilder.BuildCatalogProbeBatch(endpoints, useSystemRoute));
         Process process = null;
         try
         {
@@ -179,7 +180,7 @@ public static class ServerMapHealthService
                     }
                     result.ProfileKey = probe.Key.Item1; result.NetworkKey = probe.Key.Item2; result.CoreKey = probe.Key.Item3;
                     result.CheckedUtc = DateTime.UtcNow;
-                    return result;
+                    return ApplyRouteContext(result, useSystemRoute);
                 })).ConfigureAwait(false);
             }
         }
@@ -205,21 +206,25 @@ public static class ServerMapHealthService
         throw new IOException("Probe failed to start");
     }
 
-    internal static async Task<ServerMapHealth> TestCatalogAsync(VpnProfile profile, string corePath,
-        string runtimeDirectory, CancellationToken token)
+    internal static Task<ServerMapHealth> TestCatalogAsync(VpnProfile profile, string corePath,
+        string runtimeDirectory, CancellationToken token) =>
+        CheckCatalogAsync(profile, corePath, runtimeDirectory, token, false);
+
+    internal static async Task<ServerMapHealth> CheckCatalogAsync(VpnProfile profile, string corePath,
+        string runtimeDirectory, CancellationToken token, bool refresh, bool useSystemRoute = false)
     {
         token.ThrowIfCancellationRequested();
         if (profile == null) return await TestAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false);
         var key = Tuple.Create(SubscriptionManager.ConfigKey(profile), ProfileHealthEvidence.NetworkKey(),
-            ProfileHealthEvidence.CoreKey(corePath));
+            ProfileHealthEvidence.CoreKey(corePath), useSystemRoute);
         if (string.IsNullOrEmpty(key.Item2) || string.IsNullOrEmpty(key.Item3))
-            return await TestAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false);
+            return await TestStampedAsync(profile, corePath, runtimeDirectory, token, null, useSystemRoute).ConfigureAwait(false);
 
         CatalogProbe entry;
         lock (CatalogLock)
         {
             if (CatalogProbes.TryGetValue(key, out entry) && entry.Work.IsCompleted &&
-                (entry.Work.Status != TaskStatus.RanToCompletion || !entry.Work.Result.Success || !entry.Work.Result.IsFresh ||
+                (refresh || entry.Work.Status != TaskStatus.RanToCompletion || !entry.Work.Result.Success || !entry.Work.Result.IsFresh ||
                  DateTime.UtcNow - entry.Work.Result.CheckedUtc >= TimeSpan.FromSeconds(150)))
             {
                 CatalogProbes.Remove(key);
@@ -254,7 +259,7 @@ public static class ServerMapHealthService
                 if (result.ProfileKey != key.Item1 || result.NetworkKey != key.Item2 || result.CoreKey != key.Item3 ||
                     !MatchesCurrentProfile(profile, corePath, key))
                     return new ServerMapHealth { Message = "Параметры проверки изменились. Повторите проверку.", CheckedUtc = DateTime.UtcNow };
-                if (profile.LastCheckedUtc < result.CheckedUtc) ProfileHealthEvidence.Record(profile, result);
+                if ((!useSystemRoute || result.Success) && profile.LastCheckedUtc < result.CheckedUtc) ProfileHealthEvidence.Record(profile, result);
                 // Callers can annotate their display result without changing the shared sample.
                 return result.Copy();
             }
@@ -280,32 +285,45 @@ public static class ServerMapHealthService
 	}
 
 	private static async Task<ServerMapHealth> TestStampedAsync(VpnProfile profile, string corePath, string runtimeDirectory,
-		CancellationToken token, Tuple<string, string, string> catalogKey)
+		CancellationToken token, Tuple<string, string, string, bool> catalogKey, bool useSystemRoute = false)
 	{
 		await ProbeSlots.WaitAsync(token).ConfigureAwait(false);
 		try
 		{
+			useSystemRoute = catalogKey?.Item4 ?? useSystemRoute;
 			var key = catalogKey ?? Tuple.Create(profile == null ? "" : SubscriptionManager.ConfigKey(profile),
-				ProfileHealthEvidence.NetworkKey(), ProfileHealthEvidence.CoreKey(corePath));
-			var result = await TestCoreAsync(profile, corePath, runtimeDirectory, token).ConfigureAwait(false);
+				ProfileHealthEvidence.NetworkKey(), ProfileHealthEvidence.CoreKey(corePath), useSystemRoute);
+			var result = await TestCoreAsync(profile, corePath, runtimeDirectory, token, useSystemRoute).ConfigureAwait(false);
 			token.ThrowIfCancellationRequested();
 			if (profile != null && !MatchesCurrentProfile(profile, corePath, key))
 				return new ServerMapHealth { Message = "Профиль, ядро или сеть изменились во время проверки. Повторите проверку.", CheckedUtc = DateTime.UtcNow };
 			result.ProfileKey = key.Item1; result.NetworkKey = key.Item2; result.CoreKey = key.Item3;
 			result.CheckedUtc = DateTime.UtcNow;
-			if (catalogKey == null) ProfileHealthEvidence.Record(profile, result);
+			ApplyRouteContext(result, useSystemRoute);
+			if (catalogKey == null && (!useSystemRoute || result.Success)) ProfileHealthEvidence.Record(profile, result);
 			return result;
 		}
 		finally { ProbeSlots.Release(); }
 	}
 
-	private static bool MatchesCurrentProfile(VpnProfile profile, string corePath, Tuple<string, string, string> key)
+	internal static ServerMapHealth ApplyRouteContext(ServerMapHealth result, bool useSystemRoute)
+	{
+		result.UsesSystemRoute = useSystemRoute;
+		if (useSystemRoute && result.Supported && !result.Success) {
+			// A failure over the current VPN does not establish that the candidate is offline.
+			result.Supported = false;
+			result.Message = "Через текущее подключение HTTPS не подтверждён";
+		}
+		return result;
+	}
+
+	private static bool MatchesCurrentProfile(VpnProfile profile, string corePath, Tuple<string, string, string, bool> key)
 	{
 		return SubscriptionManager.ConfigKey(profile) == key.Item1 &&
 			ProfileHealthEvidence.NetworkKey() == key.Item2 && ProfileHealthEvidence.CoreKey(corePath) == key.Item3;
 	}
 
-	private static async Task<ServerMapHealth> TestCoreAsync(VpnProfile profile, string corePath, string runtimeDirectory, CancellationToken token)
+	private static async Task<ServerMapHealth> TestCoreAsync(VpnProfile profile, string corePath, string runtimeDirectory, CancellationToken token, bool useSystemRoute)
 	{
 		var result = new ServerMapHealth();
 		if (profile == null || profile.Protocol == "sing-box")
@@ -322,7 +340,7 @@ public static class ServerMapHealthService
 			listener.Start();
 			try { port = ((IPEndPoint)listener.LocalEndpoint).Port; } finally { listener.Stop(); }
 			string user = Guid.NewGuid().ToString("N"), password = Guid.NewGuid().ToString("N");
-            string prepared = ConfigBuilder.BuildProbe(profile, port, user, password);
+            string prepared = ConfigBuilder.BuildProbeWithRouting(profile, port, user, password, useSystemRoute);
             var pacPlan = CorporatePacPlan.Freeze(profile, prepared);
 			file = PrivateRuntimeFiles.WriteCoreConfig(runtimeDirectory, prepared);
             pacDescriptor = pacPlan?.Prepare(file);

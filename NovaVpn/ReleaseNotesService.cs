@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 22),
+            "На карте есть кнопка проверки всех серверов с прогрессом и обновлением точек.",
+            "При активном VPN результат без подтверждения HTTPS остаётся серым."),
         new ReleaseNoteEntry(new Version(2, 6, 21),
             "Каталог создаёт карточки по мере прокрутки, карта проверяет серверы только когда открыта.",
             "Совпадающая действующая маршрутизация сохраняется без переподключения VPN."),

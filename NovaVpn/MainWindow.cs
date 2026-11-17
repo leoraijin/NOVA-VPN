@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
@@ -136,7 +137,7 @@ public sealed partial class MainWindow : Window
 	private readonly Dictionary<string, ServerMapHealth> mapHealth = new Dictionary<string, ServerMapHealth>();
 	private InteractiveServerMap liveServerMap, expandedServerMap;
 	private Window serverMapWindow;
-	private bool mapHealthBusy;
+	private readonly SemaphoreSlim mapHealthGate = new SemaphoreSlim(1);
 	private int mapHealthCursor;
 
 	private readonly List<double> downloadSamples = new List<double>();
@@ -225,7 +226,8 @@ public sealed partial class MainWindow : Window
 					state.LastWorkingProfileId = verification.ProfileId; StateStore.Save(state);
 				}
 				if (verification.Completed && verification.ProfileProbe?.Supported == true && !string.IsNullOrEmpty(verification.ProfileId)) {
-					var health = verification.ProfileProbe;
+					var health = verification.ProfileProbe.Copy();
+					health.UsesSystemRoute = true;
                     if (currentProfile != null && health.IsFreshFor(currentProfile))
                     {
 					    if (!verification.InternetOk) { health.Success = false; health.Message = "Туннель включён, но контрольный HTTPS-запрос не прошёл"; }
@@ -240,7 +242,7 @@ public sealed partial class MainWindow : Window
                             var current=state.Profiles.FirstOrDefault(p=>p.Id==exit.Exit.ProfileId);
                             if(current==null||current.RetiredFromSubscription||ExitProbeTarget.Fingerprint(current)!=exit.Exit.ProfileFingerprint||
                                 DateTime.UtcNow<exit.CheckedUtc||DateTime.UtcNow-exit.CheckedUtc>=TimeSpan.FromMinutes(3))continue;
-                            mapHealth[current.Id]=new ServerMapHealth{Success=exit.Phase==ExitProbePhase.Verified,
+                            mapHealth[current.Id]=new ServerMapHealth{UsesSystemRoute=true,Success=exit.Phase==ExitProbePhase.Verified,
                                 Supported=exit.Phase==ExitProbePhase.Verified||exit.Phase==ExitProbePhase.Failed,LatencyMs=exit.LatencyMs,CheckedUtc=exit.CheckedUtc,
                                 ProfileKey=SubscriptionManager.ConfigKey(current),NetworkKey=group.NetworkKey,CoreKey=group.CoreKey,Target=exit.Target??"",
                                 Message=exit.Phase==ExitProbePhase.Verified?"HTTPS через назначенный выход подтверждён":"HTTPS через назначенный выход не подтверждён"};
@@ -1462,13 +1464,25 @@ public sealed partial class MainWindow : Window
 			async target => { if (!DualVpnEnabled) dialog.Close(); await ChooseProfileRoleAsync(target); }, true);
 		var viewport = new ServerMapViewport(expandedServerMap);
 		var view = new Viewbox { Child = viewport, Stretch = Stretch.Uniform, Margin = new Thickness(0, 12, 0, 12) };
-		var controls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+		var controls = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
 		Button zoomIn = SmallButton("+"), zoomOut = SmallButton("−"), resetMap = SmallButton("Вся карта");
 		zoomIn.ToolTip = "Приблизить · Ctrl + колесо вверх"; zoomOut.ToolTip = "Отдалить · Ctrl + колесо вниз";
 		zoomIn.Click += (s, e) => viewport.ZoomAt(new Point(viewport.Width / 2, viewport.Height / 2), 1.2);
 		zoomOut.Click += (s, e) => viewport.ZoomAt(new Point(viewport.Width / 2, viewport.Height / 2), 1 / 1.2);
 		resetMap.Click += (s, e) => viewport.ResetView();
-		controls.Children.Add(zoomIn); controls.Children.Add(zoomOut); controls.Children.Add(resetMap); header.Children.Add(controls);
+		var checkServers = SmallButton("Проверить серверы");
+		checkServers.IsEnabled = !snapshotMode && state.Profiles.Count > 0;
+		checkServers.ToolTip = "Проверить HTTPS через каждый сервер";
+		var checkStatus = T("", 11, Muted);
+		checkStatus.TextWrapping = TextWrapping.Wrap;
+		AutomationProperties.SetLiveSetting(checkStatus, AutomationLiveSetting.Polite);
+		checkServers.Click += async (s, e) => await CheckServerMapAsync(dialog, checkServers, checkStatus);
+		foreach (var button in new[] { zoomIn, zoomOut, resetMap, checkServers }) {
+			button.Margin = new Thickness(0, 0, 8, 6);
+			controls.Children.Add(button);
+		}
+		header.Children.Add(controls);
+		header.Children.Add(checkStatus);
 		var unknown = state.Profiles.Where(p => !ServerRegionMapService.Resolve(p).HasCountry).ToArray();
 		if (unknown.Length > 0) {
 			var withoutRegion = SmallButton("Без указанной страны: " + unknown.Length + " · выбрать из списка");
@@ -1509,48 +1523,109 @@ public sealed partial class MainWindow : Window
 	private async Task RefreshMapHealthAsync()
 	{
 		var batch = visibleMapChecks;
-		if (batch == null || mapHealthBusy || state.Profiles.Count == 0) return;
-		mapHealthBusy = true;
+		if (batch == null || core.Status == CoreStatus.Connecting || state.Profiles.Count == 0 || !mapHealthGate.Wait(0)) return;
 		try
 		{
 			var profiles = state.Profiles.ToArray();
 			var candidates = new List<VpnProfile>();
 			var selected = SelectedProfile();
-			if (selected != null && (!mapHealth.TryGetValue(selected.Id, out var selectedHealth) ||
-				(selectedHealth.ProfileKey != SubscriptionManager.ConfigKey(selected) || selectedHealth.Supported && DateTime.UtcNow - selectedHealth.CheckedUtc > TimeSpan.FromSeconds(150)))) candidates.Add(selected);
+			bool useSystemRoute = core.Status == CoreStatus.Connected;
+			bool NeedsProbe(VpnProfile profile)
+			{
+				return !mapHealth.TryGetValue(profile.Id, out var health) ||
+					health.UsesSystemRoute != useSystemRoute ||
+					health.ProfileKey != SubscriptionManager.ConfigKey(profile) ||
+					(health.Supported || health.UsesSystemRoute) && DateTime.UtcNow - health.CheckedUtc > TimeSpan.FromSeconds(150);
+			}
+			if (selected != null && NeedsProbe(selected)) candidates.Add(selected);
 			for (int i = 0; i < profiles.Length && candidates.Count < 8; i++)
 			{
 				var profile = profiles[mapHealthCursor++ % profiles.Length];
-				if (candidates.Contains(profile)) continue;
-				if (!mapHealth.TryGetValue(profile.Id, out var checkedResult) ||
-					(checkedResult.ProfileKey != SubscriptionManager.ConfigKey(profile) || checkedResult.Supported && DateTime.UtcNow - checkedResult.CheckedUtc > TimeSpan.FromSeconds(150))) candidates.Add(profile);
+				if (!candidates.Contains(profile) && NeedsProbe(profile)) candidates.Add(profile);
 			}
-			using (var gate = new System.Threading.SemaphoreSlim(2))
-			{
-				var token = batch.Token;
-				string corePath = core.ProbeCorePath, directory = System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "map-probes");
-				var tasks = candidates.Select(async profile => {
-					await gate.WaitAsync(token);
-					try {
-						var value = await Task.Run(() => ServerMapHealthService.TestCatalogAsync(profile, corePath, directory, token), token);
-						if (!token.IsCancellationRequested && !closing && state.Profiles.Any(p => ReferenceEquals(p, profile))) {
-							if (core.Status == CoreStatus.Connected && core.Verification.Completed && core.Verification.MultiExits == null && core.Verification.ProfileId == profile.Id && !core.Verification.InternetOk) {
-								value.Success = false; value.Message = "Контрольный HTTPS-запрос активного соединения не прошёл";
-							}
-							if (!mapHealth.TryGetValue(profile.Id, out var newer) || newer.CheckedUtc <= value.CheckedUtc) mapHealth[profile.Id] = value;
-						}
-					} finally { gate.Release(); }
-				}).ToArray();
-				await Task.WhenAll(tasks);
-				if (!token.IsCancellationRequested) {
-					if (currentPage == "home") liveServerMap?.RefreshStatus();
-					expandedServerMap?.RefreshStatus();
-				}
-			}
+			await ProbeMapProfilesAsync(candidates, false, batch.Token);
 		}
 		catch (OperationCanceledException) { }
 		catch (Exception ex) { Debug.WriteLine("Map checks: " + LogSanitizer.Sanitize(ex.Message)); }
-		finally { mapHealthBusy = false; }
+		finally { mapHealthGate.Release(); }
+	}
+
+	private async Task CheckServerMapAsync(Window dialog, Button button, TextBlock status)
+	{
+		if (snapshotMode || closing || !button.IsEnabled) return;
+		var profiles = state.Profiles.ToArray();
+		if (profiles.Length == 0) return;
+		if (core.Status == CoreStatus.Connecting) {
+			status.Text = "Дождитесь подключения VPN и повторите проверку.";
+			return;
+		}
+		button.IsEnabled = false;
+		status.Text = "Подготовка HTTPS-проверки…";
+		using (var stop = CancellationTokenSource.CreateLinkedTokenSource(mapHealthCancellation.Token))
+		{
+			EventHandler onClosed = (s, e) => stop.Cancel();
+			dialog.Closed += onClosed;
+			try {
+				await mapHealthGate.WaitAsync(stop.Token);
+				try {
+					await ProbeMapProfilesAsync(profiles, true, stop.Token,
+						(done, successful) => status.Text = $"Проверено {done} из {profiles.Length} · HTTPS работает: {successful}");
+				}
+				finally { mapHealthGate.Release(); }
+			}
+			catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+			catch (Exception ex) {
+				Debug.WriteLine("Map checks: " + LogSanitizer.Sanitize(ex.Message));
+				status.Text = "Не удалось завершить проверку. Повторите попытку.";
+			}
+			finally {
+				dialog.Closed -= onClosed;
+				if (!stop.IsCancellationRequested) button.IsEnabled = state.Profiles.Count > 0;
+			}
+		}
+	}
+
+	private async Task ProbeMapProfilesAsync(IReadOnlyList<VpnProfile> profiles, bool refresh, CancellationToken token,
+		Action<int, int> progress = null)
+	{
+		string corePath = core.ProbeCorePath, directory = System.IO.Path.Combine(StateStore.DirectoryPath, "runtime", "map-probes");
+		int checkedCount = 0, successful = 0;
+		bool useSystemRoute = core.Status == CoreStatus.Connected;
+		int generation = core.RuntimeGeneration;
+		bool ConnectionUnchanged() => generation == core.RuntimeGeneration &&
+			core.Status != CoreStatus.Connecting && useSystemRoute == (core.Status == CoreStatus.Connected);
+		int batchSize = refresh ? 8 : 2;
+		for (int offset = 0; offset < profiles.Count; offset += batchSize)
+		{
+			token.ThrowIfCancellationRequested();
+			if (!ConnectionUnchanged()) throw new InvalidOperationException("Подключение VPN изменилось во время проверки.");
+			var tasks = profiles.Skip(offset).Take(batchSize).Select(async profile => {
+				var value = await Task.Run(() => ServerMapHealthService.CheckCatalogAsync(profile, corePath, directory, token, refresh, useSystemRoute), token);
+				if (token.IsCancellationRequested || closing || !ConnectionUnchanged() || !state.Profiles.Any(p => ReferenceEquals(p, profile))) return;
+				if (core.Status == CoreStatus.Connected && core.Verification.Completed && core.Verification.MultiExits == null &&
+					core.Verification.ProfileId == profile.Id && !core.Verification.InternetOk) {
+					value.Success = false;
+					value.Message = "Контрольный HTTPS-запрос активного соединения не прошёл";
+				}
+				if (mapHealth.TryGetValue(profile.Id, out var previous) && previous.IsFreshFor(profile) &&
+					previous.UsesSystemRoute && previous.Success && !value.Supported &&
+					(core.ActiveProfileId == profile.Id || core.Verification.MultiExits?.Results.Any(exit =>
+						exit.Exit.ProfileId == profile.Id && exit.Phase == ExitProbePhase.Verified) == true)) {
+					// The running exit has its own HTTPS evidence, independent of a second probe.
+					successful++;
+					return;
+				}
+				if (previous == null || previous.CheckedUtc <= value.CheckedUtc) mapHealth[profile.Id] = value;
+				if (value.Success) successful++;
+			}).ToArray();
+			await Task.WhenAll(tasks);
+			token.ThrowIfCancellationRequested();
+			if (!ConnectionUnchanged()) throw new InvalidOperationException("Подключение VPN изменилось во время проверки.");
+			checkedCount += tasks.Length;
+			if (currentPage == "home") liveServerMap?.RefreshStatus();
+			expandedServerMap?.RefreshStatus();
+			progress?.Invoke(checkedCount, successful);
+		}
 	}
 
 	private static string TrafficModeLabel(string mode)

@@ -60,6 +60,10 @@ foreach($theme in $themes){
     $file=[IO.File]::Create((Join-Path $WorkPath (($theme-replace '[^a-zA-Z0-9]','-')+'.png')))
     try{$encoder.Save($file)}finally{$file.Dispose()}
 }
+$systemProbe=$builder.GetMethod('BuildProbeWithRouting',[Reflection.BindingFlags]'NonPublic,Static')
+$systemConfig=$systemProbe.Invoke($null,@($profile,19876,'fixture','fixture-password',$true))|ConvertFrom-Json
+Assert ($config.route.auto_detect_interface -and -not $systemConfig.route.auto_detect_interface) 'VPN-active probe must use Windows routing without NIC rebinding'
+Assert ($systemConfig.outbounds.Count -eq 1 -and $systemConfig.route.final -eq 'proxy') 'VPN-active probe must still verify the candidate outbound'
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start()
 $port=$listener.LocalEndpoint.Port;$listener.Stop();$profile.Port=$port
 $serverConfig=@{log=@{level='error'};inbounds=@(@{type='shadowsocks';listen='127.0.0.1';listen_port=$port;method=$profile.Method;password=$profile.Password});outbounds=@(@{type='direct';tag='direct'});route=@{final='direct'}}|ConvertTo-Json -Depth 10
@@ -103,6 +107,14 @@ try{
     $batchFailure=$catalogTest.Invoke($null,@($invalid,$CorePath,$runtime,[Threading.CancellationToken]::None))
     Assert $batchSuccess.GetAwaiter().GetResult().Success 'valid batch exit must pass HTTPS'
     Assert (-not $batchFailure.GetAwaiter().GetResult().Success) 'dead batch exit must not fall through to the valid exit'
+    $checkCatalog=$assembly.GetType('NovaVpn.ServerMapHealthService').GetMethod('CheckCatalogAsync',[Reflection.BindingFlags]'NonPublic,Static')
+    $routeSuccess=$checkCatalog.Invoke($null,@($valid,$CorePath,$runtime,[Threading.CancellationToken]::None,$true,$true))
+    $routeFailure=$checkCatalog.Invoke($null,@($invalid,$CorePath,$runtime,[Threading.CancellationToken]::None,$true,$true))
+    $viaSystem=$routeSuccess.GetAwaiter().GetResult()
+    $inconclusive=$routeFailure.GetAwaiter().GetResult()
+    Assert ($viaSystem.Success -and $viaSystem.UsesSystemRoute) 'system routing must preserve positive HTTPS evidence for the candidate'
+    Assert (-not $inconclusive.Success -and -not $inconclusive.Supported -and $inconclusive.UsesSystemRoute) 'failed HTTPS in VPN context must remain inconclusive'
+    Assert ($inconclusive.CheckedUtc -gt $batchFailure.GetAwaiter().GetResult().CheckedUtc) 'an explicit check must perform a new probe'
     $cancelled=Profile 'DE Germany - Hamburg'
     $cancelled.Protocol=$profile.Protocol
     $cancelled.Server=$profile.Server
