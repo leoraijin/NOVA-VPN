@@ -864,6 +864,17 @@ public sealed partial class MainWindow : Window
 		};
 		WrapPanel headerActions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
 		if (pauseButton != null) { pauseButton.Margin = new Thickness(0, 0, 8, 0); headerActions.Children.Add(pauseButton); }
+        var importConfigs = SmallButton("Импорт VPN-конфигов");
+        importConfigs.Margin = new Thickness(0, 0, 8, 8);
+        importConfigs.ToolTip = "Добавить серверы из файла с предварительным просмотром";
+        importConfigs.Click += async delegate { if (!snapshotMode) await ImportFileAsync(); };
+        headerActions.Children.Add(importConfigs);
+        var exportConfigs = SmallButton("Экспорт VPN-конфигов");
+        exportConfigs.Margin = new Thickness(0, 0, 0, 8);
+        exportConfigs.ToolTip = "Сохранить все серверы и ключи в один файл";
+        exportConfigs.IsEnabled = state.Profiles.Count > 0;
+        exportConfigs.Click += delegate { ExportServerConfigs(); };
+        headerActions.Children.Add(exportConfigs);
         homeBestButton = null;
         Grid element = PageHeader("Главная", "Подключение и состояние сети", headerActions, null);
 		grid.Children.Add(element);
@@ -1561,6 +1572,9 @@ public sealed partial class MainWindow : Window
 		}
 		button.IsEnabled = false;
 		status.Text = "Подготовка HTTPS-проверки…";
+        visibleMapChecks?.Cancel();
+        visibleMapChecks?.Dispose();
+        visibleMapChecks = mapHealthTimer.IsEnabled ? new CancellationTokenSource() : null;
 		using (var stop = CancellationTokenSource.CreateLinkedTokenSource(mapHealthCancellation.Token))
 		{
 			EventHandler onClosed = (s, e) => stop.Cancel();
@@ -1594,7 +1608,7 @@ public sealed partial class MainWindow : Window
 		int generation = core.RuntimeGeneration;
 		bool ConnectionUnchanged() => generation == core.RuntimeGeneration &&
 			core.Status != CoreStatus.Connecting && useSystemRoute == (core.Status == CoreStatus.Connected);
-		int batchSize = refresh ? 8 : 2;
+		int batchSize = refresh ? 16 : 8;
 		for (int offset = 0; offset < profiles.Count; offset += batchSize)
 		{
 			token.ThrowIfCancellationRequested();
@@ -1613,20 +1627,24 @@ public sealed partial class MainWindow : Window
 						exit.Exit.ProfileId == profile.Id && exit.Phase == ExitProbePhase.Verified) == true)) {
 					// The running exit has its own HTTPS evidence, independent of a second probe.
 					successful++;
-					return;
-				}
-				if (previous == null || previous.CheckedUtc <= value.CheckedUtc) mapHealth[profile.Id] = value;
+                    ReportResult();
+                    return;
+                }
+                if (previous == null || previous.CheckedUtc <= value.CheckedUtc) mapHealth[profile.Id] = value;
 				if (value.Success) successful++;
+                ReportResult();
 			}).ToArray();
 			await Task.WhenAll(tasks);
 			token.ThrowIfCancellationRequested();
 			if (!ConnectionUnchanged()) throw new InvalidOperationException("Подключение VPN изменилось во время проверки.");
-			checkedCount += tasks.Length;
-			if (currentPage == "home") liveServerMap?.RefreshStatus();
-			expandedServerMap?.RefreshStatus();
-			progress?.Invoke(checkedCount, successful);
-		}
-	}
+        }
+        void ReportResult() {
+            checkedCount++;
+            if (currentPage == "home") liveServerMap?.RefreshStatus();
+            expandedServerMap?.RefreshStatus();
+            progress?.Invoke(checkedCount, successful);
+        }
+    }
 
 	private static string TrafficModeLabel(string mode)
 	{
@@ -4674,6 +4692,8 @@ public sealed partial class MainWindow : Window
 		{
 			if (profile == null) continue;
 			VpnProfile existing = state.Profiles.FirstOrDefault(x => x != null && !string.IsNullOrWhiteSpace(x.Source) && string.Equals(x.Source, profile.Source, StringComparison.Ordinal));
+            if (existing == null && profile.Source?.StartsWith("nova-server:", StringComparison.Ordinal) == true)
+                existing = state.Profiles.FirstOrDefault(x => x != null && SubscriptionManager.ConfigKey(x) == SubscriptionManager.ConfigKey(profile));
 			if (existing == null)
 			{
 				state.Profiles.Add(profile);

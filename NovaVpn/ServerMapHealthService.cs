@@ -180,7 +180,11 @@ public static class ServerMapHealthService
                     }
                     result.ProfileKey = probe.Key.Item1; result.NetworkKey = probe.Key.Item2; result.CoreKey = probe.Key.Item3;
                     result.CheckedUtc = DateTime.UtcNow;
-                    return ApplyRouteContext(result, useSystemRoute);
+                    ApplyRouteContext(result, useSystemRoute);
+                    // Publish independently of slower neighbours in the shared process.
+                    if (probe.Token.IsCancellationRequested) probe.Completion.TrySetCanceled();
+                    else probe.Completion.TrySetResult(result);
+                    return result;
                 })).ConfigureAwait(false);
             }
         }
@@ -309,11 +313,8 @@ public static class ServerMapHealthService
 	internal static ServerMapHealth ApplyRouteContext(ServerMapHealth result, bool useSystemRoute)
 	{
 		result.UsesSystemRoute = useSystemRoute;
-		if (useSystemRoute && result.Supported && !result.Success) {
-			// A failure over the current VPN does not establish that the candidate is offline.
-			result.Supported = false;
-			result.Message = "Через текущее подключение HTTPS не подтверждён";
-		}
+        // Independent endpoint DNS and uplink binding make this a completed check.
+        // A failure must no longer be hidden as an unsupported grey marker.
 		return result;
 	}
 

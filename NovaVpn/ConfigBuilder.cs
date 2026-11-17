@@ -16,11 +16,11 @@ public static class ConfigBuilder
 		if (profile == null || profile.Protocol == "sing-box")
 			throw new NotSupportedException("Полная конфигурация проверяется при подключении.");
 		var config = Obj("log", Obj("level", "error"),
-			"dns", Obj("servers", new object[] { Obj("type", "local", "tag", "local-dns") }),
+			"dns", ProbeDns(useSystemRoute),
 			"inbounds", new object[] { Obj("type", "mixed", "tag", "map-probe", "listen", "127.0.0.1", "listen_port", port,
 				"users", new object[] { Obj("username", user, "password", password) }) },
-			"outbounds", new object[] { BuildProxy(profile) },
-			"route", Obj("final", "proxy", "auto_detect_interface", !useSystemRoute, "default_domain_resolver", "local-dns"));
+			"outbounds", new object[] { BuildProbeProxy(profile, useSystemRoute) },
+			"route", Obj("final", "proxy", "auto_detect_interface", true, "default_domain_resolver", "local-dns"));
 		CorporateProxy.Apply(config, profile, "proxy");
 		return new JavaScriptSerializer().Serialize(config);
 	}
@@ -47,7 +47,7 @@ public static class ConfigBuilder
 			string outbound = "map-exit-" + index;
 			inbounds.Add(Obj("type", "mixed", "tag", inbound, "listen", "127.0.0.1", "listen_port", probe.Port,
 				"users", new object[] { Obj("username", probe.User, "password", probe.Password) }));
-			var proxy = BuildProxy(probe.Profile);
+			var proxy = BuildProbeProxy(probe.Profile, useSystemRoute);
 			proxy["tag"] = outbound;
 			outbounds.Add(proxy);
 			rules.Add(Obj("inbound", new[] { inbound }, "action", "route", "outbound", outbound));
@@ -55,11 +55,33 @@ public static class ConfigBuilder
 		// Every authenticated listener has exactly one exit. Unmatched traffic must fail closed.
 		rules.Add(Obj("action", "reject"));
 		var config = Obj("log", Obj("level", "error"),
-			"dns", Obj("servers", new object[] { Obj("type", "local", "tag", "local-dns") }),
+			"dns", ProbeDns(useSystemRoute),
 			"inbounds", inbounds, "outbounds", outbounds,
-			"route", Obj("rules", rules, "auto_detect_interface", !useSystemRoute, "default_domain_resolver", "local-dns"));
+			"route", Obj("rules", rules, "auto_detect_interface", true, "default_domain_resolver", "local-dns"));
 		return new JavaScriptSerializer().Serialize(config);
 	}
+
+    // The active TUN may supply FakeIP answers. A separate core cannot resolve
+    // those mappings, so bootstrap candidate endpoints over authenticated DoH.
+    private static Dictionary<string, object> BuildProbeProxy(VpnProfile profile, bool vpnActive)
+    {
+        var outbound = BuildProxy(profile);
+        string host = outbound.TryGetValue("server", out var server) ? Convert.ToString(server).TrimEnd('.') : "";
+        if (vpnActive && (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) || host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)))
+            outbound["domain_resolver"] = "probe-lan-dns";
+        return outbound;
+    }
+    private static Dictionary<string, object> ProbeDns(bool vpnActive)
+    {
+        if (!vpnActive) return Obj("servers", new object[] { Obj("type", "local", "tag", "local-dns") });
+        return Obj("servers", new object[] {
+            Obj("type", "https", "tag", "local-dns", "server", "1.1.1.1", "path", "/dns-query",
+                "tls", Obj("enabled", true, "server_name", "cloudflare-dns.com")),
+            Obj("type", "local", "tag", "probe-lan-dns") },
+            "rules", new object[] { Obj("domain", new[] { "localhost" }, "domain_suffix", new[] { ".localhost", ".local" },
+                "action", "route", "server", "probe-lan-dns") }, "final", "local-dns");
+    }
 
 	public static string Build(VpnProfile profile, RoutingSettings routing)
 	{

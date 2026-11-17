@@ -79,6 +79,19 @@ public sealed partial class MainWindow
 
     private bool CanChangeMigratedRouting() => !snapshotMode && !closing && core.Status == CoreStatus.Disconnected && !configuredFallbackBusy && !profileSwitchInProgress && gamingSession == null && state.Zapret?.RoutingChangesApplied != true;
 
+    private void ExportServerConfigs()
+    {
+        if (snapshotMode || closing) return;
+        var file = new SaveFileDialog { Title = "Экспорт VPN-конфигов — файл содержит ключи серверов",
+            Filter = "VPN-конфиги NOVA (*.json)|*.json", DefaultExt = ".json", AddExtension = true,
+            FileName = "NOVA-VPN-servers-" + DateTime.Now.ToString("yyyy-MM-dd") + ".json" };
+        if (file.ShowDialog(this) != true) return;
+        try {
+            PortableConfigService.ExportProfiles(state, file.FileName);
+            Toast("VPN-конфиги сохранены: " + state.Profiles.Count + ". Файл содержит ключи серверов.", Green);
+        } catch (Exception) { Toast("Не удалось сохранить VPN-конфиги. Проверьте доступ к выбранной папке и размер файла.", Warning); }
+    }
+
     private async Task ImportFileAsync()
     {
         var file = new OpenFileDialog { Filter = "Экспорт VPN|*.json;*.yaml;*.yml;*.txt|Все файлы|*.*" };

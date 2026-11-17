@@ -62,7 +62,8 @@ foreach($theme in $themes){
 }
 $systemProbe=$builder.GetMethod('BuildProbeWithRouting',[Reflection.BindingFlags]'NonPublic,Static')
 $systemConfig=$systemProbe.Invoke($null,@($profile,19876,'fixture','fixture-password',$true))|ConvertFrom-Json
-Assert ($config.route.auto_detect_interface -and -not $systemConfig.route.auto_detect_interface) 'VPN-active probe must use Windows routing without NIC rebinding'
+Assert ($config.route.auto_detect_interface -and $systemConfig.route.auto_detect_interface) 'probe must bind its uplink independently of the TUN'
+Assert ($systemConfig.dns.servers[0].type -eq 'https' -and $systemConfig.dns.servers[0].server -eq '1.1.1.1' -and $systemConfig.dns.servers[0].tls.enabled) 'active probe must not use system FakeIP DNS'
 Assert ($systemConfig.outbounds.Count -eq 1 -and $systemConfig.route.final -eq 'proxy') 'VPN-active probe must still verify the candidate outbound'
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start()
 $port=$listener.LocalEndpoint.Port;$listener.Stop();$profile.Port=$port
@@ -95,6 +96,8 @@ try{
     $invalid.Port=$profile.Port
     $invalid.Method=$profile.Method
     $invalid.Password='incorrect-batch-password'
+    $silentPeer=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
+    $silentPeer.Start();$invalid.Port=$silentPeer.LocalEndpoint.Port
     $valid=Profile 'PL Poland - Warsaw'
     $valid.Protocol=$profile.Protocol
     $valid.Server=$profile.Server
@@ -106,6 +109,7 @@ try{
     $batchSuccess=$catalogTest.Invoke($null,@($valid,$CorePath,$runtime,[Threading.CancellationToken]::None))
     $batchFailure=$catalogTest.Invoke($null,@($invalid,$CorePath,$runtime,[Threading.CancellationToken]::None))
     Assert $batchSuccess.GetAwaiter().GetResult().Success 'valid batch exit must pass HTTPS'
+    Assert (-not $batchFailure.IsCompleted) 'healthy exit must publish before its timing-out batch neighbour'
     Assert (-not $batchFailure.GetAwaiter().GetResult().Success) 'dead batch exit must not fall through to the valid exit'
     $checkCatalog=$assembly.GetType('NovaVpn.ServerMapHealthService').GetMethod('CheckCatalogAsync',[Reflection.BindingFlags]'NonPublic,Static')
     $routeSuccess=$checkCatalog.Invoke($null,@($valid,$CorePath,$runtime,[Threading.CancellationToken]::None,$true,$true))
@@ -113,7 +117,7 @@ try{
     $viaSystem=$routeSuccess.GetAwaiter().GetResult()
     $inconclusive=$routeFailure.GetAwaiter().GetResult()
     Assert ($viaSystem.Success -and $viaSystem.UsesSystemRoute) 'system routing must preserve positive HTTPS evidence for the candidate'
-    Assert (-not $inconclusive.Success -and -not $inconclusive.Supported -and $inconclusive.UsesSystemRoute) 'failed HTTPS in VPN context must remain inconclusive'
+    Assert (-not $inconclusive.Success -and $inconclusive.Supported -and $inconclusive.UsesSystemRoute) 'independent failed HTTPS must be displayed as a completed check'
     Assert ($inconclusive.CheckedUtc -gt $batchFailure.GetAwaiter().GetResult().CheckedUtc) 'an explicit check must perform a new probe'
     $cancelled=Profile 'DE Germany - Hamburg'
     $cancelled.Protocol=$profile.Protocol
@@ -153,5 +157,5 @@ try{
     $task=$test.Invoke($null,@($profile,$CorePath,$runtime,$cancel.Token))
     try{$task.GetAwaiter().GetResult();throw 'cancellation was ignored'}catch{Assert $task.IsCanceled 'canceled probe task must be canceled'}finally{$cancel.Dispose()}
     Assert (@(Get-ChildItem $runtime -Recurse -File -Filter '*.json').Count -eq 0) 'temporary profile configs must be removed'
-}finally{if(-not $process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose();Remove-Item -LiteralPath $serverFile -ErrorAction SilentlyContinue}
+}finally{if($silentPeer){$silentPeer.Stop()};if(-not $process.HasExited){$process.Kill();$process.WaitForExit()};$process.Dispose();Remove-Item -LiteralPath $serverFile -ErrorAction SilentlyContinue}
 Write-Output 'PASS: map styling; hover/click; clustered markers; stale-state expiry; geometry reuse; encrypted HTTPS success; wrong-password failure; cancellation and config cleanup.'

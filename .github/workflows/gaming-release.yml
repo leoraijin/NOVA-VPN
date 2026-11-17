@@ -149,6 +149,10 @@ jobs:
         run: |
           powershell -NoProfile -STA -File tests/AppUpdateAndPerformanceTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
           if ($LASTEXITCODE -ne 0) { throw 'Map background activity regression failed' }
+          powershell -NoProfile -STA -File tests/ServerConfigTransferTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -WorkPath 'work/server-config-transfer-tests'
+          if ($LASTEXITCODE -ne 0) { throw 'Server config transfer tests failed' }
+          powershell -NoProfile -STA -File tests/HomeConfigTransferLayoutTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Home config transfer layout tests failed' }
           powershell -NoProfile -STA -File tests/InteractiveMapTests.ps1 -AssemblyPath 'bin/Release/NOVA VPN.exe' -CorePath 'work/payload/core/sing-box.exe' -WorkPath 'work/interactive-map-tests'
           if ($LASTEXITCODE -ne 0) { throw 'Interactive map and HTTPS probe regression failed' }
       - name: Package and verify
@@ -204,9 +208,9 @@ jobs:
       - name: Verify installed files and upgrade from the stable Windows release
         shell: pwsh
         run: |
-          $baseline = 'work/NOVA.VPN.Setup.2.6.21.exe'
-          Invoke-WebRequest 'https://github.com/leoraijin/NOVA-VPN/releases/download/v2.6.21/NOVA.VPN.Setup.2.6.21.exe' -OutFile $baseline
-          if ((Get-FileHash -LiteralPath $baseline).Hash -ne '6CFAFAAB7D52F9DE8B1D3443A538BD57E6F73CC16FB49B70D35C865BEE127BF4') { throw 'Baseline installer SHA-256 mismatch' }
+          $baseline = 'work/NOVA.VPN.Setup.2.6.22.exe'
+          Invoke-WebRequest 'https://github.com/leoraijin/NOVA-VPN/releases/download/v2.6.22/NOVA.VPN.Setup.2.6.22.exe' -OutFile $baseline
+          if ((Get-FileHash -LiteralPath $baseline).Hash -ne '13C11C974235417E574D8021A65C6BA22F7B4A403AE672881C895203D703632A') { throw 'Baseline installer SHA-256 mismatch' }
           $version = ([Version](Get-Item -LiteralPath 'bin/Release/NOVA VPN.exe').VersionInfo.FileVersion).ToString(3)
           powershell -NoProfile -STA -File tests/InstallerUpgradeIntegration.ps1 -BaselineInstaller $baseline -CandidateInstaller "work/complete/NOVA.VPN.Setup.$version.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Installer upgrade integration failed' }

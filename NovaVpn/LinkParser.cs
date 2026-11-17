@@ -72,6 +72,7 @@ public static class LinkParser
 			input = await ReadLimitedAsync(response.Content, MaxImportBytes, requestDeadline.Token).ConfigureAwait(false);
 		}
 		input = TryDecodeSubscription(input);
+        if (string.IsNullOrEmpty(subscriptionUrl) && PortableConfigService.TryImportProfiles(input, out var sharedProfiles)) return sharedProfiles;
         if (ExternalProfileImport.TryRead(input, subscriptionUrl, out var external))
         {
             external.Quota = quota;

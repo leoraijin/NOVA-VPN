@@ -13,11 +13,76 @@ public sealed class PortableConfigPackage
     [DataMember(Order = 3)] public AppState State;
 }
 
+[DataContract]
+public sealed class VpnProfilesPackage
+{
+    [DataMember(Name = "format")] public string Format = "nova-server-configs-v1";
+    [DataMember(Name = "profiles")] public System.Collections.Generic.List<VpnProfile> Profiles;
+}
+
 public static class PortableConfigService
 {
     private const int MaxBytes = 8 * 1024 * 1024;
     private const string FullConfigFormat = "nova-portable-config-v1";
     private const string SettingsOnlyFormat = "nova-settings-no-secrets-v1";
+
+    private static DataContractJsonSerializer ProfilesSerializer() => new DataContractJsonSerializer(typeof(VpnProfilesPackage),
+        new DataContractJsonSerializerSettings { DateTimeFormat = new DateTimeFormat("o", System.Globalization.CultureInfo.InvariantCulture)
+            { DateTimeStyles = System.Globalization.DateTimeStyles.RoundtripKind } });
+
+    public static void ExportProfiles(AppState state, string path)
+    {
+        if (state == null || state.Profiles == null || state.Profiles.Count == 0)
+            throw new InvalidOperationException("Нет VPN-конфигов для экспорта.");
+        if (state.Profiles.Count > 2000) throw new InvalidDataException("В одном файле можно передать до 2000 конфигов.");
+        var serializer = ProfilesSerializer();
+        using (var stream = new MemoryStream()) {
+            serializer.WriteObject(stream, new VpnProfilesPackage { Profiles = state.Profiles });
+            stream.Position = 0;
+            var copy = (VpnProfilesPackage)serializer.ReadObject(stream);
+            foreach (var profile in copy.Profiles) PrepareSharedProfile(profile);
+            stream.SetLength(0); serializer.WriteObject(stream, copy);
+            if (stream.Length > 4 * 1024 * 1024) throw new InvalidDataException("Файл конфигов больше 4 МБ.");
+            string temporary = path + ".tmp";
+            File.WriteAllBytes(temporary, stream.ToArray());
+            if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path);
+        }
+    }
+    private static void PrepareSharedProfile(VpnProfile p)
+    {
+        if (p == null || string.IsNullOrWhiteSpace(p.Protocol)) throw new InvalidDataException("Некорректный VPN-конфиг.");
+        if (p.Protocol == "sing-box" ? string.IsNullOrWhiteSpace(p.RawJson) : string.IsNullOrWhiteSpace(p.Server) || p.Port < 1 || p.Port > 65535)
+            throw new InvalidDataException("В конфиге отсутствуют параметры сервера.");
+        p.Id = Guid.NewGuid().ToString("N");
+        p.SubscriptionId = ""; p.SubscriptionUrl = ""; p.SubscriptionUpdatedUtc = default(DateTime);
+        p.RetiredFromSubscription = false; p.FallbackProfileIds = new System.Collections.Generic.List<string>();
+        p.HealthMeasurement = p.HealthProfileKey = p.HealthNetworkKey = p.HealthCoreKey = p.HealthTarget = "";
+        p.LastCheckedUtc = default(DateTime); p.LastLatency = 0; p.ConsecutiveFailures = 0;
+        p.HealthStatus = "Не проверен"; p.LastTestMessage = "";
+        p.Source = "nova-server:" + SubscriptionManager.ConfigKey(p);
+    }
+    public static bool TryImportProfiles(string text, out ImportResult result)
+    {
+        result = null;
+        if (string.IsNullOrWhiteSpace(text) || !text.TrimStart().StartsWith("{")) return false;
+        var json = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024 };
+        var root = json.DeserializeObject(text) as System.Collections.Generic.Dictionary<string, object>;
+        if (root == null || !root.TryGetValue("format", out var format) || !Equals(format, "nova-server-configs-v1")) return false;
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(text);
+        if (bytes.Length > 4 * 1024 * 1024) throw new InvalidDataException("Файл конфигов больше 4 МБ.");
+        using (var stream = new MemoryStream(bytes)) {
+            var package = (VpnProfilesPackage)ProfilesSerializer().ReadObject(stream);
+            if (package.Profiles == null || package.Profiles.Count == 0 || package.Profiles.Count > 2000)
+                throw new InvalidDataException("Файл должен содержать от 1 до 2000 конфигов.");
+            var unique = new System.Collections.Generic.List<VpnProfile>();
+            var keys = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+            foreach (var profile in package.Profiles) {
+                PrepareSharedProfile(profile);
+                if (keys.Add(SubscriptionManager.ConfigKey(profile))) unique.Add(profile);
+            }
+            result = new ImportResult(unique, ""); return true;
+        }
+    }
 
     public static void Export(AppState state, string path)
     {
