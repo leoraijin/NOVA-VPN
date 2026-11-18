@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 24),
+            "Оба ядра быстрее открывают соединение, если IP-адрес уже получен, а второй DNS-ответ задерживается.",
+            "Reality Core сразу передаёт первый пакет QUIC через назначенный VPN, когда домен уже известен."),
         new ReleaseNoteEntry(new Version(2, 6, 23),
             "Исправлена проверка карты при включённом VPN: адреса серверов разрешаются независимо от DNS туннеля.",
             "Точки и прогресс обновляются сразу после ответа каждого сервера. Ручная проверка получает приоритет над фоновой.",

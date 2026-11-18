@@ -41,12 +41,27 @@ foreach ($name in $companionNames) {
 $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $csc -PathType Leaf)) { throw 'Не найден компилятор C# для сборки интерфейса установщика.' }
 
+$appVersion = [Version](Get-Item -LiteralPath $AppOutput).VersionInfo.FileVersion
+$version = $appVersion.ToString(3)
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $stageRoot = Join-Path $PSScriptRoot ("..\obj\installer\build-$stamp")
 $payload = Join-Path $stageRoot 'payload'
 $zapretExtract = Join-Path $stageRoot 'zapret-extracted'
 $setupFiles = Join-Path $stageRoot 'setup-files'
 New-Item -ItemType Directory -Path $payload,$zapretExtract,$setupFiles -Force | Out-Null
+
+$versionSource = Join-Path $setupFiles 'InstallerVersion.cs'
+@"
+using System.Reflection;
+
+[assembly: AssemblyVersion("$appVersion")]
+[assembly: AssemblyFileVersion("$appVersion")]
+
+internal static class NovaInstallerBuildInfo
+{
+    internal const string DisplayVersion = "$version";
+}
+"@ | Set-Content -LiteralPath $versionSource -Encoding ascii
 
 $uninstaller = Join-Path $setupFiles 'NOVA-VPN-Uninstaller.exe'
 $installerSource = Join-Path $PSScriptRoot 'InstallerUI.cs'
@@ -64,7 +79,7 @@ $compilerArgs = @('/nologo','/codepage:65001','/target:winexe','/platform:anycpu
     ('/win32manifest:' + $manifest),('/win32icon:' + $icon),
     '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:Microsoft.CSharp.dll','/reference:System.Xml.dll',
     '/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll','/reference:System.Web.Extensions.dll',
-    $installerSource,$installerSafetySource,$installerTransactionSource,$installerRegistrySource,$installerShortcutSource,$installerStartupSource,$startupPolicySource,$installerUninstallSource,$installationLeaseSource)
+    $versionSource,$installerSource,$installerSafetySource,$installerTransactionSource,$installerRegistrySource,$installerShortcutSource,$installerStartupSource,$startupPolicySource,$installerUninstallSource,$installationLeaseSource)
 & $csc @compilerArgs
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw 'Не удалось собрать компонент удаления.' }
 
@@ -316,7 +331,6 @@ NOVA VPN 2.1.4 — 24 сентября 2026
 • В комплект входят NOVA VPN, sing-box и Zapret 1.10.3; VPN-ключи не включены.
 
 '@
-$version = ([Version](Get-Item -LiteralPath $AppOutput).VersionInfo.FileVersion).ToString(3)
 $currentNotesPath = Join-Path (Split-Path $PSScriptRoot -Parent) "docs/WINDOWS-$version-RELEASE-NOTES.md"
 if (-not (Test-Path -LiteralPath $currentNotesPath -PathType Leaf)) { throw "Missing release notes for $version" }
 $releaseNotes = (Get-Content -LiteralPath $currentNotesPath -Raw) + [Environment]::NewLine + [Environment]::NewLine + $releaseNotes
@@ -364,8 +378,8 @@ NOVA VPN — установка
 подтверждение администратора: оно нужно приложению для управления VPN TUN и
 драйвером WinDivert.
 
-В одном установщике находятся NOVA VPN, sing-box 1.13.14 и официальный Zapret
-1.10.3. Обновления Zapret после установки проверяются из GitHub Releases.
+Установщик включает NOVA VPN, оба VPN-ядра и официальный Zapret 1.10.3.
+Обновления Zapret после установки проверяются из GitHub Releases.
 
 Установщик не содержит VPN-профилей, ключей, ссылок подписок или пользовательской
 папки %AppData%\NovaVPN. При обновлении он сохраняет уже существующие данные.
@@ -393,7 +407,7 @@ $packagerArgs = @('/nologo','/codepage:65001','/target:winexe','/platform:anycpu
     '/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll','/reference:System.Web.Extensions.dll',
     ('/resource:' + $payloadZip + ',NOVA.Payload.zip'),
     ('/resource:' + $uninstaller + ',NOVA.Uninstaller.exe'),
-    $installerSource,$installerSafetySource,$installerTransactionSource,$installerRegistrySource,$installerShortcutSource,$installerStartupSource,$startupPolicySource,$installerUninstallSource,$installationLeaseSource)
+    $versionSource,$installerSource,$installerSafetySource,$installerTransactionSource,$installerRegistrySource,$installerShortcutSource,$installerStartupSource,$startupPolicySource,$installerUninstallSource,$installationLeaseSource)
 & $csc @packagerArgs
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $stagedSetup -PathType Leaf)) { throw 'Не удалось собрать единый установщик с встроенными компонентами.' }
 if ((Get-Item -LiteralPath $stagedSetup).Length -le (Get-Item -LiteralPath $payloadZip).Length) { throw 'Установщик не содержит полный архив приложения.' }

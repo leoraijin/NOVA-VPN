@@ -86,6 +86,7 @@ jobs:
             go build -buildvcs=false -mod=readonly -trimpath -tags $tags -ldflags "$flags -s -w -X github.com/sagernet/sing-box/constant.Version=1.13.14-nova-dns.1" -o ../payload/core/sing-box.exe ./cmd/sing-box
             if ($LASTEXITCODE) { throw 'sing-box build failed' }
             Copy-Item -LiteralPath LICENSE -Destination ../payload/core/LICENSE-sing-box.txt -Force
+            Copy-Item -LiteralPath ../../packaging/NOVA-Core-NOTICES.txt -Destination ../payload/THIRD-PARTY-NOTICES.txt -Force
             $tree = git write-tree
             if ($LASTEXITCODE) { throw 'Cannot identify the patched sing-box source' }
             git archive --format=zip --output=../../outputs/sing-box-source.zip $tree

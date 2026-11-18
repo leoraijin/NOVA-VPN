@@ -1,0 +1,18 @@
+NOVA VPN distributes its VPN cores as separate programs.
+
+The default Windows core is built by NOVA Project from SagerNet/sing-box
+revision 25a600db24f7680ad9806ce5427bd0ab8afe1114 with NOVA's DNS patch.
+Build version 1.13.14-nova-dns.1.
+Upstream source https://github.com/SagerNet/sing-box
+License GNU General Public License version 3 or later.
+See core/LICENSE-sing-box.txt and the enclosed GPL version 3 text.
+The runtime keeps the existing core/sing-box.exe filename for compatibility.
+
+Reality Core is based on ERGFT/vpn-core. The Windows build uses revision
+5feb9360aada4f7818eb50ae14e5a8846a4c14bc with NOVA's DNS and QUIC patch.
+Upstream source https://github.com/ERGFT/vpn-core
+License GNU General Public License version 3 or later.
+See core/LICENSE-reality-core.txt and core/THIRD-PARTY-LICENSES.html.
+
+The corresponding source archives and versioned patches are available with
+each applicable NOVA VPN release at https://github.com/leoraijin/NOVA-VPN/releases.
