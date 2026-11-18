@@ -58,6 +58,45 @@ jobs:
           Expand-Archive work/runtime.zip work/payload
       - uses: actions/checkout@v4
         with:
+          repository: SagerNet/sing-box
+          ref: 25a600db24f7680ad9806ce5427bd0ab8afe1114
+          path: work/sing-box
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: work/sing-box/go.sum
+      - name: Build patched sing-box and archive its sources
+        shell: pwsh
+        env:
+          CGO_ENABLED: '0'
+          GOAMD64: v1
+          GOTOOLCHAIN: local
+          GOWORK: 'off'
+        run: |
+          $patch = (Resolve-Path -LiteralPath 'packaging/core-patches/sing-box-dns-latency.patch').Path
+          git -C work/sing-box apply --index $patch
+          if ($LASTEXITCODE) { throw 'sing-box DNS patch does not match the pinned source' }
+          Push-Location work/sing-box
+          try {
+            $tags = 'with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_ocm,with_naive_outbound,with_purego,badlinkname,tfogo_checklinkname0'
+            $flags = '-X internal/godebug.defaultGODEBUG=multipathtcp=0 -checklinkname=0'
+            go test -mod=readonly -tags $tags -ldflags $flags ./dns
+            if ($LASTEXITCODE) { throw 'sing-box DNS regression failed' }
+            go build -buildvcs=false -mod=readonly -trimpath -tags $tags -ldflags "$flags -s -w -X github.com/sagernet/sing-box/constant.Version=1.13.14-nova-dns.1" -o ../payload/core/sing-box.exe ./cmd/sing-box
+            if ($LASTEXITCODE) { throw 'sing-box build failed' }
+            Copy-Item -LiteralPath LICENSE -Destination ../payload/core/LICENSE-sing-box.txt -Force
+            $tree = git write-tree
+            if ($LASTEXITCODE) { throw 'Cannot identify the patched sing-box source' }
+            git archive --format=zip --output=../../outputs/sing-box-source.zip $tree
+            if ($LASTEXITCODE) { throw 'sing-box source archive failed' }
+            go mod vendor -o ../sing-box-dependencies
+            if ($LASTEXITCODE) { throw 'sing-box dependency source export failed' }
+            tar -czf ../../outputs/sing-box-dependencies.tar.gz -C .. sing-box-dependencies
+            if ($LASTEXITCODE) { throw 'sing-box dependency source archive failed' }
+          } finally { Pop-Location }
+      - uses: actions/checkout@v4
+        with:
           repository: leoraijin/vpn-core
           ref: 5feb9360aada4f7818eb50ae14e5a8846a4c14bc
           path: work/reality-core
@@ -71,8 +110,13 @@ jobs:
         run: |
           $revision = git -C work/reality-core rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or !(Select-String -LiteralPath NovaVpn/VpnEngine.cs -SimpleMatch ('"' + $revision + '"') -Quiet)) { throw 'Reality source revision mismatch' }
+          $patch = (Resolve-Path -LiteralPath 'packaging/core-patches/reality-media-latency.patch').Path
+          git -C work/reality-core apply --index $patch
+          if ($LASTEXITCODE) { throw 'Reality DNS and QUIC patch does not match the pinned source' }
           Push-Location work/reality-core
           try {
+            cargo test --locked -p reality-core --lib --test app_dns
+            if ($LASTEXITCODE) { throw 'Reality Core DNS and QUIC regressions failed' }
             cargo build --locked --release -p reality-client
             if ($LASTEXITCODE -ne 0) { throw 'Reality Core build failed' }
             Copy-Item target/release/reality-client.exe ../payload/core/reality-client.exe -Force
@@ -81,7 +125,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Reality Core license tool installation failed' }
             cargo about generate --locked --manifest-path bin/client/Cargo.toml --output-file ../payload/core/THIRD-PARTY-LICENSES.html scripts/about/third-party-licenses.hbs
             if ($LASTEXITCODE -ne 0) { throw 'Reality Core notices generation failed' }
-            git archive --format=zip --output=../../outputs/Reality-Core-source.zip HEAD
+            $tree = git write-tree
+            if ($LASTEXITCODE) { throw 'Cannot identify the patched Reality source' }
+            git archive --format=zip --output=../../outputs/Reality-Core-source.zip $tree
             if ($LASTEXITCODE -ne 0) { throw 'Reality Core source archive failed' }
             cargo vendor --locked ../reality-dependencies | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'Reality Core dependency source export failed' }
@@ -192,7 +238,7 @@ jobs:
           Build commit: $env:GITHUB_SHA
           Routing entry UI: eight lists, independent edits, add/delete, multiline paste, Zapret locks, light/dark and narrow layout checks: PASS.
           Desktop UI, legacy recovery, scroll and installer regressions above: PASS.
-          Reality Core compiled from the revision pinned in VpnEngine.cs. Remaining runtime payload restored from checksum-pinned 2.6.15.
+          Built patched Reality Core and sing-box from pinned revisions. DNS latency tests passed for both cores, plus the Reality Core first-datagram regression. The remaining runtime payload was restored from checksum-pinned 2.6.15.
           Windows Wintun on a disposable runner: TCP, UDP and DNS packets through 1, 2 and 10 exits on both cores: PASS.
           Windows map background activity and cancellation regression: PASS.
           Network scenarios used isolated test servers.

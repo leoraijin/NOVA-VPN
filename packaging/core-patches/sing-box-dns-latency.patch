@@ -1,0 +1,152 @@
+diff --git a/dns/client.go b/dns/client.go
+--- a/dns/client.go
++++ b/dns/client.go
+@@ -15,7 +15,6 @@
+ 	E "github.com/sagernet/sing/common/exceptions"
+ 	"github.com/sagernet/sing/common/logger"
+ 	M "github.com/sagernet/sing/common/metadata"
+-	"github.com/sagernet/sing/common/task"
+ 	"github.com/sagernet/sing/contrab/freelru"
+ 	"github.com/sagernet/sing/contrab/maphash"
+ 
+@@ -338,30 +337,63 @@
+ 	case C.DomainStrategyIPv6Only:
+ 		return c.lookupToExchange(ctx, transport, dnsName, dns.TypeAAAA, lookupOptions, responseChecker)
+ 	}
+-	var response4 []netip.Addr
+-	var response6 []netip.Addr
+-	var group task.Group
+-	group.Append("exchange4", func(ctx context.Context) error {
+-		response, err := c.lookupToExchange(ctx, transport, dnsName, dns.TypeA, lookupOptions, responseChecker)
+-		if err != nil {
+-			return err
+-		}
+-		response4 = response
+-		return nil
++	return lookupAddressFamilies(ctx, strategy, func(ctx context.Context, qtype uint16) ([]netip.Addr, error) {
++		return c.lookupToExchange(ctx, transport, dnsName, qtype, lookupOptions, responseChecker)
+ 	})
+-	group.Append("exchange6", func(ctx context.Context) error {
+-		response, err := c.lookupToExchange(ctx, transport, dnsName, dns.TypeAAAA, lookupOptions, responseChecker)
+-		if err != nil {
+-			return err
+-		}
+-		response6 = response
+-		return nil
+-	})
+-	err := group.Run(ctx)
+-	if len(response4) == 0 && len(response6) == 0 {
++}
++
++// Allow both families to contribute while bounding the extra wait once an address
++// is ready. Keep IPv4/IPv6 preference and the caller's selected DNS transport.
++const addressFamilyGrace = 150 * time.Millisecond
++
++func lookupAddressFamilies(ctx context.Context, strategy C.DomainStrategy, lookup func(context.Context, uint16) ([]netip.Addr, error)) ([]netip.Addr, error) {
++	queryCtx, cancel := context.WithCancel(ctx)
++	defer cancel()
++	type result struct {
++		addresses []netip.Addr
++		err       error
++		qtype     uint16
++	}
++	results := make(chan result, 2)
++	query := func(ctx context.Context, qtype uint16) {
++		addresses, err := lookup(ctx, qtype)
++		results <- result{addresses, err, qtype}
++	}
++	// A cancelled lookup can finish asynchronously. Give each query its own
++	// inbound metadata before it starts, separate from the caller's route state.
++	go query(adapter.OverrideContext(queryCtx), dns.TypeA)
++	go query(adapter.OverrideContext(queryCtx), dns.TypeAAAA)
++
++	var first result
++	select {
++	case first = <-results:
++	case <-ctx.Done():
++		return nil, ctx.Err()
++	}
++	var grace <-chan time.Time
++	if len(first.addresses) > 0 {
++		timer := time.NewTimer(addressFamilyGrace)
++		defer timer.Stop()
++		grace = timer.C
++	}
++
++	var second result
++	select {
++	case second = <-results:
++	case <-grace:
++	case <-ctx.Done():
++		return nil, ctx.Err()
++	}
++	if err := ctx.Err(); err != nil {
+ 		return nil, err
+ 	}
+-	return sortAddresses(response4, response6, strategy), nil
++	if len(first.addresses) == 0 && len(second.addresses) == 0 {
++		return nil, errors.Join(first.err, second.err)
++	}
++	if first.qtype == dns.TypeAAAA {
++		return sortAddresses(second.addresses, first.addresses, strategy), nil
++	}
++	return sortAddresses(first.addresses, second.addresses, strategy), nil
+ }
+ 
+ func (c *Client) ClearCache() {
+diff --git a/dns/nova_address_families_test.go b/dns/nova_address_families_test.go
+new file mode 100644
+--- /dev/null
++++ b/dns/nova_address_families_test.go
+@@ -0,0 +1,51 @@
++package dns
++
++import (
++	"context"
++	"errors"
++	"net/netip"
++	"slices"
++	"testing"
++	"time"
++
++	"github.com/miekg/dns"
++	C "github.com/sagernet/sing-box/constant"
++)
++
++func TestNovaAddressFamilies(t *testing.T) {
++	ipv4 := netip.MustParseAddr("192.0.2.15")
++	ipv6 := netip.MustParseAddr("2001:db8::15")
++	badReply := errors.New("unusable response")
++
++	for _, tc := range []struct {
++		name     string
++		strategy C.DomainStrategy
++		results  map[uint16][]netip.Addr
++		errors   map[uint16]error
++		expected []netip.Addr
++	}{
++		{"stalled IPv6", C.DomainStrategyPreferIPv6, map[uint16][]netip.Addr{dns.TypeA: {ipv4}}, nil, []netip.Addr{ipv4}},
++		{"stalled IPv4", C.DomainStrategyPreferIPv4, map[uint16][]netip.Addr{dns.TypeAAAA: {ipv6}}, nil, []netip.Addr{ipv6}},
++		{"invalid IPv6", C.DomainStrategyPreferIPv6, map[uint16][]netip.Addr{dns.TypeA: {ipv4}}, map[uint16]error{dns.TypeAAAA: badReply}, []netip.Addr{ipv4}},
++		{"IP family order", C.DomainStrategyPreferIPv6, map[uint16][]netip.Addr{dns.TypeA: {ipv4}, dns.TypeAAAA: {ipv6}}, nil, []netip.Addr{ipv6, ipv4}},
++		{"IPv6 only answer", C.DomainStrategyPreferIPv4, map[uint16][]netip.Addr{dns.TypeA: nil, dns.TypeAAAA: {ipv6}}, nil, []netip.Addr{ipv6}},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++			defer cancel()
++			addresses, err := lookupAddressFamilies(ctx, tc.strategy, func(ctx context.Context, qtype uint16) ([]netip.Addr, error) {
++				if addrs, ok := tc.results[qtype]; ok {
++					return addrs, nil
++				}
++				if err, ok := tc.errors[qtype]; ok {
++					return nil, err
++				}
++				<-ctx.Done()
++				return nil, ctx.Err()
++			})
++			if err != nil || !slices.Equal(addresses, tc.expected) {
++				t.Fatalf("addresses = %v, error = %v, want %v", addresses, err, tc.expected)
++			}
++		})
++	}
++}
