@@ -21,6 +21,9 @@ public static class ReleaseNotesService
 {
 	private static readonly List<ReleaseNoteEntry> Notes = new List<ReleaseNoteEntry>
 	{
+        new ReleaseNoteEntry(new Version(2, 6, 25),
+            "Домены и поддомены .ru по умолчанию идут напрямую, в том числе когда приложению назначен VPN.",
+            "Добавьте нужный сайт .ru в список сайтов VPN, чтобы направить его через выбранный сервер."),
         new ReleaseNoteEntry(new Version(2, 6, 24),
             "Оба ядра быстрее открывают соединение, если IP-адрес уже получен, а второй DNS-ответ задерживается.",
             "Reality Core сразу передаёт первый пакет QUIC через назначенный VPN, когда домен уже известен."),

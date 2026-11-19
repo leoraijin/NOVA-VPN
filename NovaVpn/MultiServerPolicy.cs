@@ -106,6 +106,11 @@ public sealed class MultiServerPolicy
         var matched = rules.Where(r => r.Matches(applicationPath, host))
             .OrderBy(r => r.Target.Kind == ServerRouteKind.Block ? 0 : r.Domain != null ? 1 : r.ApplicationPath != null ? 2 : 3)
             .ThenByDescending(r => r.Domain?.Length ?? 0).ThenBy(r => r.IncludeSubdomains).FirstOrDefault();
+        if (StrictDirectRouting.IsRussianDomain(host) && (matched == null || matched.Domain == null && matched.Target.Kind != ServerRouteKind.Block))
+        {
+            var direct = new ServerRouteTarget(ServerRouteKind.Direct);
+            return new MultiServerDecision(direct, direct, "ru-default");
+        }
         var requested = matched?.Target ?? new ServerRouteTarget(ServerRouteKind.Default);
         if (matched == null && !ownerKnown && rules.Any(r => r.ApplicationPath != null || r.ApplicationName != null))
             return new MultiServerDecision(requested, new ServerRouteTarget(ServerRouteKind.Block), "unknown-owner");

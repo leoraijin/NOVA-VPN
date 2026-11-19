@@ -2972,7 +2972,7 @@ public sealed partial class MainWindow : Window
 		grid4.Children.Add(stackPanel2);
 		StackPanel stackPanel3 = new StackPanel();
 		stackPanel3.Children.Add(RouteEditorCard("Напрямую", "Строго без VPN: сайт, поддомены и DNS. Отключите защищённый DNS браузера; сторонние CDN добавляйте отдельно.", state.Routing.DirectDomains, Teal, "direct-domains"));
-		stackPanel3.Children.Add(RouteEditorCard("Через VPN", "Домены, которые всегда идут через VPN", state.Routing.ProxyDomains, Accent, "proxy-domains"));
+		stackPanel3.Children.Add(RouteEditorCard("Через VPN", "Домены, которые всегда идут через VPN. Добавьте сюда сайт .ru, если ему нужен VPN.", state.Routing.ProxyDomains, Accent, "proxy-domains"));
         stackPanel3.Children.Add(UnassignedSecondaryCard(false));
 		stackPanel3.Children.Add(RouteEditorCard("Блокировать", "Домены без доступа к сети", state.Routing.BlockDomains, Danger, "block-domains"));
 		Grid.SetColumn(stackPanel3, 2);
@@ -3349,7 +3349,7 @@ public sealed partial class MainWindow : Window
         if (routingCardsDraft == null || (!routingCardsDraft.Dirty && routingCardsDraft.Baseline != RoutingMigrationService.Fingerprint(routing)))
             routingCardsDraft = new RoutingCardsDraft(routing);
         var draft = routingCardsDraft;
-        var pending = T("Изменения в этих окнах применяются кнопкой «Применить правила». При совпадении одного правила: блокировка → напрямую → дополнительные VPN → основной VPN. Более точные правила сайтов и пути приложений сохраняют приоритет.", 11, Muted);
+        var pending = T("Изменения в этих окнах применяются кнопкой «Применить правила». При совпадении одного правила: блокировка → напрямую → дополнительные VPN → основной VPN. Более точные правила сайтов и пути приложений сохраняют приоритет. Сайты .ru идут напрямую по умолчанию. Для совпадающих правил .ru назначение VPN важнее прямого.", 11, Muted);
         pending.TextWrapping = TextWrapping.Wrap;
         pending.Margin = new Thickness(0, 0, 0, 12);
         content.Children.Add(pending);

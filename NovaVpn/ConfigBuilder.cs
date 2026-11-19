@@ -85,6 +85,12 @@ public static class ConfigBuilder
 
 	public static string Build(VpnProfile profile, RoutingSettings routing)
 	{
+		string config = BuildBeforeRussianDomains(profile, routing);
+		return profile.Protocol == "sing-box" ? config : PrettyJson(StrictDirectRouting.ApplyRussianDomains(config, routing));
+	}
+
+	internal static string BuildBeforeRussianDomains(VpnProfile profile, RoutingSettings routing)
+	{
 		if (routing?.MultiServer != null) throw new NotSupportedException("Назначения серверов требуют многосерверной сборки конфигурации.");
 		if (profile == null)
 		{
@@ -167,7 +173,7 @@ public static class ConfigBuilder
 		CorporateProxy.Apply(dictionary, profile, "proxy");
 		string prepared = StrictDirectRouting.Apply(javaScriptSerializer.Serialize(dictionary), routing);
         if (routing.MigratedPolicy != null) prepared = routing.MigratedPolicy.Apply(prepared);
-        return PrettyJson(GamingRouting.Apply(prepared, routing.Gaming));
+        return GamingRouting.Apply(prepared, routing.Gaming);
 	}
 
 	private static Dictionary<string, object> BuildDnsServer(RoutingSettings routing)
@@ -383,7 +389,7 @@ public static class ConfigBuilder
 		}
 	}
 
-	private static void AddDomainRule(List<object> rules, IEnumerable<string> values, string action)
+	internal static void AddDomainRule(List<object> rules, IEnumerable<string> values, string action)
 	{
 		string[] array = Clean(values);
 		if (array.Length == 0)

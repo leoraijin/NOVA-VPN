@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections;
+using System.Linq;
 using System.Web.Script.Serialization;
 
 namespace NovaVpn;
@@ -20,7 +21,11 @@ public static class RealityConfigBuilder
         if (routing.BypassPrivateDns || string.Equals(routing.DnsMode,"System",StringComparison.OrdinalIgnoreCase))
             throw new NotSupportedException("Reality Core не поддерживает системный DNS внутри TUN. Выберите защищённый DNS и отключите обход DNS локальных имён либо используйте sing-box.");
         var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
-        var root = serializer.Deserialize<Dictionary<string, object>>(ConfigBuilder.Build(profile,routing));
+        var legacy = RoutingOverlayService.Clone(routing);
+        legacy.DirectDomains.RemoveAll(StrictDirectRouting.IsRussianSelector);
+        legacy.ProxyDomains.RemoveAll(StrictDirectRouting.IsRussianSelector);
+        legacy.BlockDomains.RemoveAll(StrictDirectRouting.IsRussianSelector);
+        var root = serializer.Deserialize<Dictionary<string, object>>(ConfigBuilder.BuildBeforeRussianDomains(profile, legacy));
         var route = (Dictionary<string, object>)root["route"];
         // This core ignores sing-box reverse_mapping. Until Windows fake-IP
         // adaptation is validated, domain policies must not silently degrade.
@@ -57,6 +62,7 @@ public static class RealityConfigBuilder
         });
         dns["servers"] = servers.ToArray();
         dns["bootstrap"] = "nova-bootstrap";
+        StrictDirectRouting.ApplyRussianDomainsToReality(root, routing);
         return serializer.Serialize(root);
     }
 
@@ -97,6 +103,16 @@ public static class RealityConfigBuilder
                 server.Remove(key);
         }
         dns["bootstrap"] = bootstrap;
+        // Preserve domain identity in Reality Core, which does not read reverse_mapping.
+        foreach (Dictionary<string, object> rule in (IEnumerable)dns["rules"])
+        {
+            if (!rule.TryGetValue("server", out object server) || !Equals(server, bootstrap) ||
+                !rule.TryGetValue("query_type", out object types) || !(types is IEnumerable queries) ||
+                !queries.Cast<object>().SequenceEqual(new object[] { "A", "AAAA" })) continue;
+            var domains = new[] { "domain", "domain_suffix" }.Where(rule.ContainsKey)
+                .SelectMany(key => ((IEnumerable)rule[key]).Cast<string>()).ToArray();
+            if (domains.Length > 0 && domains.All(StrictDirectRouting.IsRussianSelector)) rule["server"] = "nova-fakeip";
+        }
         return serializer.Serialize(root);
     }
 

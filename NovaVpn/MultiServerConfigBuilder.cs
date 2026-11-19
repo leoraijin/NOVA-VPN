@@ -115,7 +115,7 @@ public static class MultiServerConfigBuilder
         var basis=selected.FirstOrDefault(p=>p.Id==settings.DefaultProfileId)??selected.FirstOrDefault()
             ??new VpnProfile {Protocol="vless",Server="routing-template.invalid",Port=443,
                 UserId="00000000-0000-4000-8000-000000000001",Transport="tcp",Security="none"};
-        var config=codec.Deserialize<Dictionary<string,object>>(ConfigBuilder.Build(basis,clean));
+        var config=codec.Deserialize<Dictionary<string,object>>(ConfigBuilder.BuildBeforeRussianDomains(basis,clean));
         var tags=selected.Select((p,i)=>new {p.Id,Tag="nova-exit-"+i}).ToDictionary(p=>p.Id,p=>p.Tag,StringComparer.Ordinal);
         var outbounds=new List<object>{Obj("type","direct","tag","nova-direct","domain_resolver","nova-bootstrap-dns")};
         foreach(var profile in selected) {
@@ -200,6 +200,7 @@ public static class MultiServerConfigBuilder
             match["server"] = direct ? "nova-bootstrap-dns" : "nova-fakeip";
             dnsRules.Add(match);
         }
+        AddAddressLookup(StrictDirectRouting.RussianDomainMatch(), true);
         foreach (var rule in ordered.Where(rule => rule.ApplicationPath != null && rule.Target.Kind != ServerRouteKind.Block))
             AddAddressLookup(Selector(rule), rule.Target.Kind == ServerRouteKind.Direct);
         AddAddressLookup(ConfigBuilder.ProcessNameSelector(routing.DirectProcesses), true);
@@ -226,7 +227,8 @@ public static class MultiServerConfigBuilder
         void AppendAssignment(MultiServerRule rule)
         {
             var match = Selector(rule);
-            string resolver = UsesLocalDns(rule) && rule.Target.Kind == ServerRouteKind.Direct ? "nova-bootstrap-dns" : null;
+            string resolver = rule.Target.Kind == ServerRouteKind.Direct && (UsesLocalDns(rule) || StrictDirectRouting.IsRussianSelector(rule.Domain))
+                ? "nova-bootstrap-dns" : null;
             Append(match, rule.Target, resolver);
             AppendForwardedDns(match, rule.Target, resolver);
         }
@@ -238,6 +240,10 @@ public static class MultiServerConfigBuilder
         foreach (string site in zapretSites)
             AppendAssignment(new MultiServerRule(null, site, false, new ServerRouteTarget(ServerRouteKind.Direct)));
 
+        var russianDomains = StrictDirectRouting.RussianDomainMatch();
+        var directTarget = new ServerRouteTarget(ServerRouteKind.Direct);
+        Append(russianDomains, directTarget, "nova-bootstrap-dns");
+        AppendForwardedDns(russianDomains, directTarget, "nova-bootstrap-dns");
         foreach (var rule in ordered.Where(rule => rule.ApplicationPath != null && rule.Target.Kind != ServerRouteKind.Block))
             AppendAssignment(rule);
 

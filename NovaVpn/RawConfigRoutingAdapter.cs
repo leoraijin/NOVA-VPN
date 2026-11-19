@@ -10,13 +10,15 @@ public static class RawConfigRoutingAdapter
 {
 	public static string Apply(string rawJson, RoutingSettings routing)
 	{
-		if (routing == null || !HasRules(routing)) return rawJson;
+		if (routing == null) return rawJson;
+		bool hasRules = HasRules(routing);
 		JavaScriptSerializer serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 		Dictionary<string, object> config;
 		try { config = serializer.DeserializeObject(rawJson) as Dictionary<string, object>; }
 		catch (Exception ex) { throw new InvalidOperationException("Не удалось прочитать импортированный sing-box JSON: " + ex.Message, ex); }
 		if (config == null) throw new InvalidOperationException("Импортированный sing-box JSON должен содержать объект конфигурации.");
-		if (!Objects(config, "inbounds").Any(item => Value(item, "type") == "tun"))
+		if (new[] { routing.DirectProcessPaths, routing.ProxyProcessPaths, routing.DirectProcesses, routing.ProxyProcesses }.Any(list => Count(list) > 0)
+			&& !Objects(config, "inbounds").Any(item => Value(item, "type") == "tun"))
 			throw new InvalidOperationException("Маршрутизация приложений в импортированном JSON требует входящего интерфейса TUN.");
 		List<Dictionary<string, object>> outbounds = Objects(config, "outbounds").ToList();
 		string directTag = outbounds.Where(item => Value(item, "type") == "direct").Select(item => Value(item, "tag")).FirstOrDefault(tag => tag.Length > 0);
@@ -24,7 +26,7 @@ public static class RawConfigRoutingAdapter
 		if (route == null) { route = new Dictionary<string, object>(); config["route"] = route; }
 		string final = Value(route, "final");
 		bool explicitEndpoint = final.Length > 0 && Objects(config, "endpoints").Any(item => Value(item, "tag") == final && Value(item, "type") == "tailscale");
-		if (outbounds.Count == 0 && !explicitEndpoint) throw new InvalidOperationException("В импортированном JSON не найдены исходящие соединения.");
+		if (hasRules && outbounds.Count == 0 && !explicitEndpoint) throw new InvalidOperationException("В импортированном JSON не найдены исходящие соединения.");
 		string proxyTag = explicitEndpoint || outbounds.Any(item => Value(item, "tag") == final && IsProxyType(Value(item, "type"))) ? final
 			: outbounds.Where(item => IsProxyType(Value(item, "type"))).Select(item => Value(item, "tag")).FirstOrDefault(tag => tag.Length > 0);
 		if (proxyTag == null && HasProxyRules(routing)) throw new InvalidOperationException("В импортированном JSON не найден VPN-выход для выбранных приложений.");
@@ -54,7 +56,7 @@ public static class RawConfigRoutingAdapter
 			&& (Value(rule, "action") == "sniff" || Value(rule, "action") == "hijack-dns" || Value(rule, "action") == "reject")) prefix++;
 		existing.InsertRange(prefix, inserted);
 		route["rules"] = existing.ToArray();
-		return StrictDirectRouting.Apply(serializer.Serialize(config), routing);
+		return StrictDirectRouting.ApplyRussianDomains(StrictDirectRouting.Apply(serializer.Serialize(config), routing), routing, proxyTag);
 	}
 
 	private static bool HasRules(RoutingSettings routing)

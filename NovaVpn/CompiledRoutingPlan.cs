@@ -91,9 +91,10 @@ public sealed class CompiledRoutingPlan
         if (string.IsNullOrWhiteSpace(host)) return Unknown("Введите адрес назначения.");
         if (Uri.TryCreate(destination, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
         {
-            host = uri.Host.Trim('[', ']');
+            host = uri.Host.Trim('[', ']').TrimEnd('.');
             if (!port.HasValue && uri.Port > 0) port = uri.Port;
         }
+        if (StrictDirectRouting.IsRussianDomain(host)) host = StrictDirectRouting.NormalizeRussianDomain(host);
         if (port.HasValue && (port < 1 || port > 65535)) return Unknown("Порт должен быть от 1 до 65535.");
         if (IPAddress.TryParse(host, out var destinationIp) && fakeIpRanges.Any(range => InSubnet(destinationIp, range)))
             return Unknown("Это адрес FakeIP. Для проверки маршрута введите исходный домен назначения.");

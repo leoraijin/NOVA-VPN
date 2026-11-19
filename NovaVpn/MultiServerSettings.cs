@@ -75,12 +75,12 @@ public sealed class MultiServerSettings
     internal void SetSecondaryProfile(string profileId) => SetSlot(2, profileId);
 
     // Keep all user entries in the document; resolve identical selectors only for the core.
-    // Blocks win, then direct, VPN-2, other assigned servers, and the default VPN.
+    // Blocks win. Explicit VPN assignments for .ru win over identical direct entries.
     internal IEnumerable<MultiServerRule> EffectiveRules()
     {
         return Rules.Select(record => record.ToRule())
             .OrderBy(rule => rule.Target.Kind == ServerRouteKind.Block ? 0 :
-                rule.Target.Kind == ServerRouteKind.Direct ? 1 :
+                rule.Target.Kind == ServerRouteKind.Direct ? (StrictDirectRouting.IsRussianSelector(rule.Domain) ? 5 : 1) :
                 rule.Target.Kind == ServerRouteKind.Profile && rule.Target.ProfileId == SecondaryProfileId ? 2 :
                 rule.Target.Kind == ServerRouteKind.Profile && rule.Target.ProfileId != DefaultProfileId ? 3 : 4)
             .GroupBy(rule => rule.Domain != null ? "d:" + rule.Domain + ":" + rule.IncludeSubdomains :

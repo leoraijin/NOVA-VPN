@@ -14,7 +14,7 @@ public sealed class ForeignRoutingWindow : Window
     {
         if (source == null || profile == null) throw new ArgumentNullException();
         var frozen = RoutingOverlayService.Clone(baseline); frozen.MigratedPolicy = null;
-        string prepared = ConfigBuilder.Build(profile, frozen);
+        string prepared = ConfigBuilder.BuildBeforeRussianDomains(profile, frozen);
         var palette = ThemePalette.Create(visual ?? new VisualPreferences());
         Title = "Перенос правил маршрутизации"; Width = Math.Min(780, SystemParameters.WorkArea.Width); Height = Math.Min(720, SystemParameters.WorkArea.Height);
         MinWidth = Math.Min(540, Width); MinHeight = Math.Min(460, Height); WindowStartupLocation = WindowStartupLocation.CenterOwner;
